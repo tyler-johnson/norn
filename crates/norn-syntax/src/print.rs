@@ -230,15 +230,20 @@ fn print_expr_bare(expr: &Expr, indent: usize) -> String {
                 .collect();
             format!("{}{type_args}({})", print_expr(callee, indent, ATOM), args.join(", "))
         }
-        ExprKind::Record { path, fields } => {
-            if fields.is_empty() {
-                return format!("{} {{}}", path.text());
+        ExprKind::Construct { path, args } => {
+            if args.is_empty() {
+                return format!("#{}", path.text());
             }
-            let fields: Vec<_> = fields
+            let args: Vec<_> = args
                 .iter()
-                .map(|f| format!("{}: {}", f.name.name, print_expr(&f.value, indent, LAMBDA)))
+                .map(|arg| match &arg.name {
+                    Some(name) => {
+                        format!("{}: {}", name.name, print_expr(&arg.value, indent, LAMBDA))
+                    }
+                    None => print_expr(&arg.value, indent, LAMBDA),
+                })
                 .collect();
-            format!("{} {{ {} }}", path.text(), fields.join(", "))
+            format!("#{}({})", path.text(), args.join(", "))
         }
         ExprKind::Await(inner) => format!("await {}", print_expr(inner, indent, UNARY)),
         // `await f()?` already parses as `(await f())?`, so the parentheses would be noise.
@@ -248,11 +253,8 @@ fn print_expr_bare(expr: &Expr, indent: usize) -> String {
         ExprKind::Try(inner) => format!("{}?", print_expr(inner, indent, ATOM)),
         ExprKind::Block(block) => print_block(block, indent),
         ExprKind::If { cond, then, els } => {
-            let mut out = format!(
-                "if {} {}",
-                print_scrutinee(cond, indent),
-                print_block(then, indent)
-            );
+            let mut out =
+                format!("if {} {}", print_expr(cond, indent, LAMBDA), print_block(then, indent));
             if let Some(els) = els {
                 match &els.kind {
                     ExprKind::Block(block) => {
@@ -266,12 +268,12 @@ fn print_expr_bare(expr: &Expr, indent: usize) -> String {
         ExprKind::Match { scrutinee, arms } => {
             let pad = INDENT.repeat(indent);
             let inner = INDENT.repeat(indent + 1);
-            let mut out = format!("match {} {{\n", print_scrutinee(scrutinee, indent));
+            let mut out = format!("match {} {{\n", print_expr(scrutinee, indent, LAMBDA));
             for arm in arms {
                 out.push_str(&inner);
                 out.push_str(&print_pat(&arm.pat));
                 if let Some(guard) = &arm.guard {
-                    out.push_str(&format!(" if {}", print_scrutinee(guard, indent + 1)));
+                    out.push_str(&format!(" if {}", print_expr(guard, indent + 1, LAMBDA)));
                 }
                 out.push_str(&format!(" => {}\n", print_expr(&arm.body, indent + 1, LAMBDA)));
             }
@@ -292,26 +294,6 @@ fn print_expr_bare(expr: &Expr, indent: usize) -> String {
     }
 }
 
-/// An `if` condition or `match` scrutinee is parsed with record literals disabled, so one appearing
-/// there must be parenthesised to survive a reparse.
-fn print_scrutinee(expr: &Expr, indent: usize) -> String {
-    let text = print_expr(expr, indent, LAMBDA);
-    if contains_bare_record(expr) { format!("({text})") } else { text }
-}
-
-fn contains_bare_record(expr: &Expr) -> bool {
-    match &expr.kind {
-        ExprKind::Record { .. } => true,
-        ExprKind::Binary { lhs, rhs, .. } => contains_bare_record(lhs) || contains_bare_record(rhs),
-        ExprKind::Unary { expr, .. } | ExprKind::Await(expr) | ExprKind::Try(expr) => {
-            contains_bare_record(expr)
-        }
-        ExprKind::Field { base, .. } | ExprKind::Index { base, .. } => contains_bare_record(base),
-        ExprKind::Call { callee, .. } => contains_bare_record(callee),
-        _ => false,
-    }
-}
-
 fn print_pat(pat: &Pat) -> String {
     match &pat.kind {
         PatKind::Wild => "_".into(),
@@ -319,23 +301,21 @@ fn print_pat(pat: &Pat) -> String {
         PatKind::Int(v) => v.to_string(),
         PatKind::Str(v) => print_string(v),
         PatKind::Bool(v) => v.to_string(),
-        PatKind::Path(path) => path.text(),
-        PatKind::Tuple { path, elems } => {
-            let elems: Vec<_> = elems.iter().map(print_pat).collect();
-            format!("{}({})", path.text(), elems.join(", "))
-        }
-        PatKind::Record { path, fields, rest } => {
-            let mut parts: Vec<String> = fields
+        PatKind::Construct { path, args, rest } => {
+            let mut parts: Vec<String> = args
                 .iter()
-                .map(|f| match &f.pat {
-                    Some(inner) => format!("{}: {}", f.name.name, print_pat(inner)),
-                    None => f.name.name.clone(),
+                .map(|arg| match &arg.name {
+                    Some(name) => format!("{}: {}", name.name, print_pat(&arg.pat)),
+                    None => print_pat(&arg.pat),
                 })
                 .collect();
             if *rest {
                 parts.push("..".into());
             }
-            format!("{} {{ {} }}", path.text(), parts.join(", "))
+            if parts.is_empty() {
+                return format!("#{}", path.text());
+            }
+            format!("#{}({})", path.text(), parts.join(", "))
         }
         PatKind::Or(alts) => alts.iter().map(print_pat).collect::<Vec<_>>().join(" | "),
     }

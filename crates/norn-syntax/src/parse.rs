@@ -6,6 +6,11 @@
 //! 2. A postfix chain continues across a line break only for `.`; a `(`, `[`, or `?` on a fresh
 //!    line starts something new rather than silently extending the previous expression.
 //!
+//! Two more rules keep spelling out of the grammar. A `#` marks a data constructor — `#User(id: 7)`
+//! builds a value, `user(id: 7)` calls a function — so a brace is always a block and never a
+//! literal. In a pattern, a bare name always binds and only a marked path matches. Nothing anywhere
+//! depends on whether a name is capitalised.
+//!
 //! Errors are recorded per item and the parser resynchronises at the next top-level declaration,
 //! so one malformed function does not hide the rest of the file.
 
@@ -27,7 +32,7 @@ impl Parsed {
 
 pub fn parse(text: &str) -> Parsed {
     let Lexed { tokens, errors } = lex(text);
-    let mut parser = Parser { tokens, pos: 0, errors, no_struct: false };
+    let mut parser = Parser { tokens, pos: 0, errors };
     let module = parser.module();
     let mut errors = parser.errors;
     // Lexer diagnostics are produced up front, so report in source order rather than stage order.
@@ -44,8 +49,6 @@ struct Parser {
     tokens: Vec<Token>,
     pos: usize,
     errors: Vec<Diagnostic>,
-    /// Inside an `if` condition or `match` scrutinee, a `{` opens a block, never a record literal.
-    no_struct: bool,
 }
 
 impl Parser {
@@ -397,28 +400,27 @@ impl Parser {
     // ---------------------------------------------------------------- statements
 
     fn block(&mut self) -> PResult<Block> {
-        let outer_no_struct = std::mem::replace(&mut self.no_struct, false);
         let start = self.expect(TokenKind::LBrace)?.span;
         let mut stmts = Vec::new();
         while !self.at(&TokenKind::RBrace) && !self.at_eof() {
-            let stmt = match self.stmt() {
-                Ok(stmt) => stmt,
-                Err(bail) => {
-                    self.no_struct = outer_no_struct;
-                    return Err(bail);
-                }
-            };
-            stmts.push(stmt);
+            stmts.push(self.stmt()?);
             if !self.at(&TokenKind::RBrace) && !self.at_eof() && !self.peek().nl_before {
                 let found = self.peek_kind().describe();
-                self.no_struct = outer_no_struct;
-                return Err(self.error(format!(
-                    "expected a line break between statements, found {found}"
-                )));
+                let span = self.peek().span;
+                let mut diagnostic = Diagnostic::new(
+                    span,
+                    format!("expected a line break between statements, found {found}"),
+                );
+                if self.at(&TokenKind::LBrace) {
+                    // The mistake a Rust or Go reader makes first.
+                    diagnostic = diagnostic
+                        .label("this brace opens a block")
+                        .note("a brace always opens a block; a record is built with `#Name(field: value)`");
+                }
+                return Err(self.push(diagnostic));
             }
         }
         let end = self.expect(TokenKind::RBrace)?.span;
-        self.no_struct = outer_no_struct;
         Ok(Block { stmts, span: start.to(end) })
     }
 
@@ -604,7 +606,6 @@ impl Parser {
 
     fn call(&mut self, callee: Expr, type_args: Vec<Type>) -> PResult<Expr> {
         self.expect(TokenKind::LParen)?;
-        let outer_no_struct = std::mem::replace(&mut self.no_struct, false);
         let mut args = Vec::new();
         while !self.at(&TokenKind::RParen) && !self.at_eof() {
             let arg_start = self.peek().span;
@@ -617,20 +618,13 @@ impl Parser {
                 }
                 _ => None,
             };
-            let value = match self.expr() {
-                Ok(value) => value,
-                Err(bail) => {
-                    self.no_struct = outer_no_struct;
-                    return Err(bail);
-                }
-            };
+            let value = self.expr()?;
             let span = arg_start.to(value.span);
             args.push(Arg { name, value, span });
             if !self.eat(&TokenKind::Comma) {
                 break;
             }
         }
-        self.no_struct = outer_no_struct;
         let end = self.expect(TokenKind::RParen)?.span;
         let span = callee.span.to(end);
         Ok(Expr { kind: ExprKind::Call { callee: Box::new(callee), type_args, args }, span })
@@ -701,38 +695,48 @@ impl Parser {
                     });
                 }
                 let path = self.path()?;
-                // `Metrics { requests: n }` is a record literal; `config { ... }` is not, because
-                // a value name is lowercase and a type name is not.
-                let is_type_name = starts_uppercase(&path.last().name);
-                if self.at(&TokenKind::LBrace)
-                    && !self.no_struct
-                    && !self.peek().nl_before
-                    && is_type_name
-                {
-                    return self.record_literal(path);
-                }
                 let span = path.span;
                 Ok(Expr { kind: ExprKind::Path(path), span })
+            }
+            TokenKind::Hash => {
+                self.advance();
+                let path = self.path()?;
+                let (args, end) = self.construct_args()?;
+                let span = start.to(end.unwrap_or(path.span));
+                Ok(Expr { kind: ExprKind::Construct { path, args }, span })
             }
             TokenKind::Reserved(word) => Err(self.push(reserved_diagnostic(start, &word))),
             other => Err(self.error(format!("expected an expression, found {}", other.describe()))),
         }
     }
 
-    fn record_literal(&mut self, path: Path) -> PResult<Expr> {
-        self.expect(TokenKind::LBrace)?;
-        let mut fields = Vec::new();
-        while !self.at(&TokenKind::RBrace) && !self.at_eof() {
-            let name = self.ident()?;
-            self.expect(TokenKind::Colon)?;
-            let value = self.expr()?;
-            let span = name.span.to(value.span);
-            fields.push(FieldInit { name, value, span });
-            self.separator(&TokenKind::RBrace, "field")?;
+    /// The argument list of a data constructor, which a unit variant omits entirely: `#NotFound`
+    /// and `#NotFound()` mean the same thing.
+    fn construct_args(&mut self) -> PResult<(Vec<Arg>, Option<Span>)> {
+        if !self.at(&TokenKind::LParen) || self.peek().nl_before {
+            return Ok((Vec::new(), None));
         }
-        let end = self.expect(TokenKind::RBrace)?.span;
-        let span = path.span.to(end);
-        Ok(Expr { kind: ExprKind::Record { path, fields }, span })
+        self.advance();
+        let mut args = Vec::new();
+        while !self.at(&TokenKind::RParen) && !self.at_eof() {
+            let start = self.peek().span;
+            let name = match (self.peek_kind().clone(), &self.peek_at(1).kind) {
+                (TokenKind::Ident(name), TokenKind::Colon) => {
+                    let span = self.advance().span;
+                    self.advance();
+                    Some(Ident { name, span })
+                }
+                _ => None,
+            };
+            let value = self.expr()?;
+            let span = start.to(value.span);
+            args.push(Arg { name, value, span });
+            if !self.eat(&TokenKind::Comma) {
+                break;
+            }
+        }
+        let end = self.expect(TokenKind::RParen)?.span;
+        Ok((args, Some(end)))
     }
 
     /// `()`, `(expr)`, `() => e`, or `(a, b) => e`. The lambda readings are tried first and the
@@ -761,10 +765,7 @@ impl Parser {
             let end = self.advance().span;
             return Ok(Expr { kind: ExprKind::Unit, span: start.to(end) });
         }
-        let outer_no_struct = std::mem::replace(&mut self.no_struct, false);
-        let inner = self.expr();
-        self.no_struct = outer_no_struct;
-        let mut inner = inner?;
+        let mut inner = self.expr()?;
         let end = self.expect(TokenKind::RParen)?.span;
         inner.span = start.to(end);
         Ok(inner)
@@ -789,10 +790,7 @@ impl Parser {
 
     fn if_expr(&mut self) -> PResult<Expr> {
         let start = self.advance().span;
-        let outer_no_struct = std::mem::replace(&mut self.no_struct, true);
-        let cond = self.expr();
-        self.no_struct = outer_no_struct;
-        let cond = cond?;
+        let cond = self.expr()?;
         let then = self.block()?;
         let mut span = start.to(then.span);
         let els = if self.at(&TokenKind::Kw(Kw::Else)) {
@@ -814,23 +812,14 @@ impl Parser {
 
     fn match_expr(&mut self) -> PResult<Expr> {
         let start = self.advance().span;
-        let outer_no_struct = std::mem::replace(&mut self.no_struct, true);
-        let scrutinee = self.expr();
-        self.no_struct = outer_no_struct;
-        let scrutinee = scrutinee?;
+        let scrutinee = self.expr()?;
         self.expect(TokenKind::LBrace)?;
         let mut arms = Vec::new();
         while !self.at(&TokenKind::RBrace) && !self.at_eof() {
             let arm_start = self.peek().span;
             let pat = self.pat()?;
-            let guard = if self.eat(&TokenKind::Kw(Kw::If)) {
-                let outer = std::mem::replace(&mut self.no_struct, true);
-                let expr = self.expr();
-                self.no_struct = outer;
-                Some(expr?)
-            } else {
-                None
-            };
+            let guard =
+                if self.eat(&TokenKind::Kw(Kw::If)) { Some(self.expr()?) } else { None };
             self.expect(TokenKind::FatArrow)?;
             let body = self.expr()?;
             let span = arm_start.to(body.span);
@@ -888,52 +877,54 @@ impl Parser {
                 self.advance();
                 Ok(Pat { kind: PatKind::Bool(false), span: start })
             }
-            TokenKind::Ident(_) => {
+            // A bare name always binds. Nothing about how it is spelled changes that.
+            TokenKind::Ident(name) => {
+                let span = self.advance().span;
+                if self.at(&TokenKind::Dot) {
+                    return Err(self.push(
+                        Diagnostic::new(span.to(self.peek().span), "a bare name in a pattern binds")
+                            .label("this is a binding, not a constructor")
+                            .note("to match a constructor, mark it: `#LoadError.NotFound`"),
+                    ));
+                }
+                Ok(Pat { kind: PatKind::Binding(Ident { name, span }), span })
+            }
+            TokenKind::Hash => {
+                self.advance();
                 let path = self.path()?;
-                let mut span = path.span;
+                let mut span = start.to(path.span);
+                let mut args = Vec::new();
+                let mut rest = false;
                 if self.at(&TokenKind::LParen) && !self.peek().nl_before {
                     self.advance();
-                    let mut elems = Vec::new();
                     while !self.at(&TokenKind::RParen) && !self.at_eof() {
-                        elems.push(self.pat()?);
+                        if self.at(&TokenKind::DotDot) {
+                            self.advance();
+                            rest = true;
+                            if !self.eat(&TokenKind::Comma) {
+                                break;
+                            }
+                            continue;
+                        }
+                        let arg_start = self.peek().span;
+                        let name = match (self.peek_kind().clone(), &self.peek_at(1).kind) {
+                            (TokenKind::Ident(name), TokenKind::Colon) => {
+                                let span = self.advance().span;
+                                self.advance();
+                                Some(Ident { name, span })
+                            }
+                            _ => None,
+                        };
+                        let pat = self.pat()?;
+                        let arg_span = arg_start.to(pat.span);
+                        args.push(PatArg { name, pat, span: arg_span });
                         if !self.eat(&TokenKind::Comma) {
                             break;
                         }
                     }
                     span = span.to(self.expect(TokenKind::RParen)?.span);
-                    return Ok(Pat { kind: PatKind::Tuple { path, elems }, span });
                 }
-                if self.at(&TokenKind::LBrace)
-                    && !self.no_struct
-                    && !self.peek().nl_before
-                    && starts_uppercase(&path.last().name)
-                {
-                    self.advance();
-                    let mut fields = Vec::new();
-                    let mut rest = false;
-                    while !self.at(&TokenKind::RBrace) && !self.at_eof() {
-                        if self.at(&TokenKind::DotDot) {
-                            self.advance();
-                            rest = true;
-                            self.separator(&TokenKind::RBrace, "field pattern")?;
-                            continue;
-                        }
-                        let name = self.ident()?;
-                        let inner =
-                            if self.eat(&TokenKind::Colon) { Some(self.pat()?) } else { None };
-                        let fspan = inner.as_ref().map_or(name.span, |p| name.span.to(p.span));
-                        fields.push(FieldPat { name, pat: inner, span: fspan });
-                        self.separator(&TokenKind::RBrace, "field pattern")?;
-                    }
-                    span = span.to(self.expect(TokenKind::RBrace)?.span);
-                    return Ok(Pat { kind: PatKind::Record { path, fields, rest }, span });
-                }
-                // A bare lowercase name binds; `None`, `Read`, or `LoadError.NotFound` matches.
-                if path.segments.len() == 1 && !starts_uppercase(&path.segments[0].name) {
-                    let ident = path.segments.into_iter().next().unwrap();
-                    return Ok(Pat { kind: PatKind::Binding(ident), span });
-                }
-                Ok(Pat { kind: PatKind::Path(path), span })
+                Ok(Pat { kind: PatKind::Construct { path, args, rest }, span })
             }
             TokenKind::Reserved(word) => Err(self.push(reserved_diagnostic(start, &word))),
             other => {
@@ -947,10 +938,6 @@ fn reserved_diagnostic(span: Span, word: &str) -> Diagnostic {
     Diagnostic::new(span, format!("`{word}` is reserved for a later milestone"))
         .label("reserved word")
         .note("it cannot be used as a name yet; see BOOTSTRAP.md §5 for when it becomes available")
-}
-
-fn starts_uppercase(name: &str) -> bool {
-    name.chars().next().is_some_and(|c| c.is_ascii_uppercase())
 }
 
 fn bin_op(kind: &TokenKind) -> Option<BinOp> {

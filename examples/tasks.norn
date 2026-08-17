@@ -32,7 +32,7 @@ task fn load_config(path: Path) -> Result<Config, LoadError>
     uses { fs.read }
 {
     let config = await fs.read_json<Config>(path)?
-    return Ok(config)
+    return #Ok(config)
 }
 
 task fn greet(path: Path, id: UserId) -> Result<String>
@@ -40,7 +40,7 @@ task fn greet(path: Path, id: UserId) -> Result<String>
 {
     let config = await load_config(path)?
     let profile = await fetch_profile(config.upstream, id)?
-    return Ok(config.greeting + ", " + profile.display_name)
+    return #Ok(config.greeting + ", " + profile.display_name)
 }
 
 fn pipeline(samples: Event<Float>, count: USize) -> Signal<Float> {

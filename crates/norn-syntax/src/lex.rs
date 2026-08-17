@@ -109,6 +109,8 @@ pub enum TokenKind {
     ThinArrow,
     Underscore,
     At,
+    /// Marks a data constructor: `#User(id: 7)`, `#LoadError.NotFound`.
+    Hash,
 
     Eq,
     EqEq,
@@ -163,6 +165,7 @@ impl TokenKind {
             TokenKind::ThinArrow => "->",
             TokenKind::Underscore => "_",
             TokenKind::At => "@",
+            TokenKind::Hash => "#",
             TokenKind::Eq => "=",
             TokenKind::EqEq => "==",
             TokenKind::Ne => "!=",
@@ -481,6 +484,7 @@ impl<'a> Lexer<'a> {
             (b':', _) => one(self, TokenKind::Colon),
             (b'?', _) => one(self, TokenKind::Question),
             (b'@', _) => one(self, TokenKind::At),
+            (b'#', _) => one(self, TokenKind::Hash),
             (b'=', _) => one(self, TokenKind::Eq),
             (b'<', _) => one(self, TokenKind::Lt),
             (b'>', _) => one(self, TokenKind::Gt),

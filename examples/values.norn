@@ -24,9 +24,17 @@ fn display_name(profile: &Profile) -> String {
 
 fn describe(error: LoadError) -> String {
     match error {
-        LoadError.NotFound => "not found"
-        LoadError.Invalid(reason) => reason
-        LoadError.Io { code, message } => message
+        #LoadError.NotFound => "not found"
+        #LoadError.Invalid(reason) => reason
+        #LoadError.Io(code: 404, message: message) => message
+        #LoadError.Io(..) => "io error"
+    }
+}
+
+fn severity(error: LoadError) -> I64 {
+    match error {
+        #LoadError.NotFound | #LoadError.Invalid(_) => 1
+        other => 2
     }
 }
 
@@ -48,6 +56,6 @@ fn arithmetic(a: I64, b: I64) -> I64 {
 }
 
 fn build(name: String) -> Profile {
-    let user = User { id: 7, name: name, email: "nobody@example.com" }
-    return Profile { user: user, display_name: "seven", verified: false }
+    let user = #User(id: 7, name: name, email: "nobody@example.com")
+    return #Profile(user: user, display_name: "seven", verified: false)
 }

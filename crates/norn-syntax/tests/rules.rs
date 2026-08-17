@@ -1,8 +1,8 @@
 //! Targeted tests for the grammar's ambiguous corners.
 //!
 //! The snapshot corpus proves whole files parse; these pin down the specific decisions — layout
-//! sensitivity, `await`/`?` associativity, speculative type arguments, and record-literal
-//! disambiguation — that a future change could silently reverse.
+//! sensitivity, `await`/`?` associativity, speculative type arguments, and the `#` that separates
+//! a data constructor from a call — that a future change could silently reverse.
 
 use norn_syntax::ast::{Item, StmtKind};
 use norn_syntax::{SourceFile, dump, parse, print, render_all};
@@ -101,30 +101,72 @@ fn a_semicolon_is_reported_as_a_separator_mistake() {
 }
 
 #[test]
-fn an_uppercase_name_before_a_brace_is_a_record_literal() {
-    assert!(expr("Point { x: 1, y: 2 }").starts_with("(record Point"));
+fn a_constructor_is_marked_and_a_call_is_not() {
+    assert_eq!(
+        expr("#User(id: 7)"),
+        "(construct User (arg id (int 7)))"
+    );
+    assert_eq!(expr("user(id: 7)"), "(call (path user) (arg id (int 7)))");
 }
 
 #[test]
-fn a_scrutinee_never_starts_a_record_literal() {
-    // `match config { ... }` must read as a match over `config`, not a literal of type `config`.
+fn capitalization_carries_no_meaning() {
+    // The same spelling parses the same way in either case; only the `#` decides.
+    assert_eq!(expr("#point(x: 1)"), "(construct point (arg x (int 1)))");
+    assert_eq!(expr("Point(x: 1)"), "(call (path Point) (arg x (int 1)))");
+}
+
+#[test]
+fn a_unit_constructor_needs_no_parentheses() {
+    assert_eq!(expr("#LoadError.NotFound"), "(construct LoadError.NotFound)");
+    // `#Foo()` means the same thing, and the printer settles on the shorter form.
+    let parsed = parse("fn main() {\n    let x = #Foo()\n}\n");
+    assert!(parsed.ok());
+    assert!(print::module(&parsed.module).contains("let x = #Foo\n"));
+}
+
+#[test]
+fn a_brace_always_opens_a_block() {
+    // No scrutinee restriction is needed, because nothing else claims a brace.
     let dumped = ast("fn main() {\n    match config {\n        _ => 1\n    }\n}\n");
     assert!(dumped.contains("(match (path config)"), "{dumped}");
+
+    // A constructor in scrutinee position needs no parentheses to survive.
+    let source = "fn main() {\n    match #Point(x: 1) {\n        _ => 1\n    }\n}\n";
+    let parsed = parse(source);
+    assert!(parsed.ok());
+    let printed = print::module(&parsed.module);
+    assert!(printed.contains("match #Point(x: 1) {"), "{printed}");
+    assert_eq!(printed, print::module(&parse(&printed).module));
 }
 
 #[test]
-fn a_record_literal_scrutinee_survives_a_round_trip() {
-    let source = "fn main() {\n    match Point { x: 1 } {\n        _ => 1\n    }\n}\n";
-    let parsed = parse(source);
-    // Parsed as `match Point` with a block body — which is a syntax error, not a record literal.
-    assert!(!parsed.ok());
+fn a_brace_after_an_expression_explains_itself() {
+    // What a Rust or Go reader writes first.
+    let rendered = errors("fn main() {\n    let user = User { id: 7 }\n}\n");
+    assert!(rendered.contains("a brace always opens a block"), "{rendered}");
+    assert!(rendered.contains("#Name(field: value)"), "{rendered}");
+}
 
-    let parenthesised = "fn main() {\n    match (Point { x: 1 }) {\n        _ => 1\n    }\n}\n";
-    let parsed = parse(parenthesised);
-    assert!(parsed.ok());
-    let printed = print::module(&parsed.module);
-    assert!(printed.contains("match (Point { x: 1 })"), "{printed}");
-    assert!(parse(&printed).ok(), "the printer dropped the required parentheses");
+#[test]
+fn a_bare_name_in_a_pattern_binds_whatever_its_case() {
+    let dumped = ast("fn main() {\n    match x {\n        NotFound => 1\n        other => 2\n    }\n}\n");
+    assert!(dumped.contains("(bind NotFound)"), "{dumped}");
+    assert!(dumped.contains("(bind other)"), "{dumped}");
+}
+
+#[test]
+fn a_dotted_pattern_must_be_marked() {
+    let rendered = errors("fn main() {\n    match x {\n        LoadError.NotFound => 1\n    }\n}\n");
+    assert!(rendered.contains("a bare name in a pattern binds"), "{rendered}");
+    assert!(rendered.contains("#LoadError.NotFound"), "{rendered}");
+}
+
+#[test]
+fn patterns_mirror_construction() {
+    let dumped = ast("fn main() {\n    match e {\n        #E.Io(code: 404, msg) => msg\n        #E.Io(..) => \"x\"\n    }\n}\n");
+    assert!(dumped.contains("(construct E.Io (arg code (int 404)) (arg (bind msg)))"), "{dumped}");
+    assert!(dumped.contains("(construct E.Io ..)"), "{dumped}");
 }
 
 #[test]

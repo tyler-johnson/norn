@@ -160,7 +160,10 @@ pub enum ExprKind {
     Field { base: Box<Expr>, name: Ident },
     Index { base: Box<Expr>, index: Box<Expr> },
     Call { callee: Box<Expr>, type_args: Vec<Type>, args: Vec<Arg> },
-    Record { path: Path, fields: Vec<FieldInit> },
+    /// A data constructor: `#User(id: 7)`, `#LoadError.Invalid("bad")`, `#LoadError.NotFound`.
+    /// The `#` is what separates building a value from calling a function; without it the two
+    /// forms would be spelled identically and told apart only by the case of a name.
+    Construct { path: Path, args: Vec<Arg> },
     Await(Box<Expr>),
     /// Postfix `?`: propagate the error case outward.
     Try(Box<Expr>),
@@ -235,13 +238,6 @@ pub struct Arg {
 }
 
 #[derive(Debug)]
-pub struct FieldInit {
-    pub name: Ident,
-    pub value: Expr,
-    pub span: Span,
-}
-
-#[derive(Debug)]
 pub struct Arm {
     pub pat: Pat,
     pub guard: Option<Expr>,
@@ -258,21 +254,22 @@ pub struct Pat {
 #[derive(Debug)]
 pub enum PatKind {
     Wild,
-    /// A lowercase single-segment name binds; anything else is a path pattern.
+    /// Any bare name binds. What a name looks like never decides this — only its shape does, and
+    /// a bare name has no `#` and no dots.
     Binding(Ident),
     Int(i64),
     Str(String),
     Bool(bool),
-    Path(Path),
-    Tuple { path: Path, elems: Vec<Pat> },
-    Record { path: Path, fields: Vec<FieldPat>, rest: bool },
+    /// The mirror of `ExprKind::Construct`: `#LoadError.Io(code, message)`, `#LoadError.NotFound`.
+    /// Arguments may be positional or named, and `..` ignores the rest.
+    Construct { path: Path, args: Vec<PatArg>, rest: bool },
     Or(Vec<Pat>),
 }
 
+/// A constructor argument in a pattern, optionally named: `#LoadError.Io(code: 404, message: m)`.
 #[derive(Debug)]
-pub struct FieldPat {
-    pub name: Ident,
-    /// `None` is shorthand: `Io { code }` binds `code` to the field of the same name.
-    pub pat: Option<Pat>,
+pub struct PatArg {
+    pub name: Option<Ident>,
+    pub pat: Pat,
     pub span: Span,
 }

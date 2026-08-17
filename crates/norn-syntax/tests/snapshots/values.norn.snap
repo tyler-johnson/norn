@@ -20,11 +20,22 @@
     (block
       (match
         (path error)
-        (arm (variant LoadError.NotFound) (str "not found"))
-        (arm (variant LoadError.Invalid (bind reason)) (path reason))
+        (arm (construct LoadError.NotFound) (str "not found"))
+        (arm (construct LoadError.Invalid (arg (bind reason))) (path reason))
         (arm
-          (variant-record LoadError.Io (field code) (field message))
-          (path message)))))
+          (construct LoadError.Io (arg code (int 404)) (arg message (bind message)))
+          (path message))
+        (arm (construct LoadError.Io ..) (str "io error")))))
+  (fn severity
+    (params (param error LoadError))
+    (ret I64)
+    (block
+      (match
+        (path error)
+        (arm
+          (or (construct LoadError.NotFound) (construct LoadError.Invalid (arg _)))
+          (int 1))
+        (arm (bind other) (int 2)))))
   (fn classify
     (params (param user User))
     (ret String)
@@ -55,15 +66,15 @@
     (ret Profile)
     (block
       (let user
-        (record User
-          (field id (int 7))
-          (field name (path name))
-          (field email (str "nobody@example.com"))))
+        (construct User
+          (arg id (int 7))
+          (arg name (path name))
+          (arg email (str "nobody@example.com"))))
       (return
-        (record Profile
-          (field user (path user))
-          (field display_name (str "seven"))
-          (field verified (bool false)))))))
+        (construct Profile
+          (arg user (path user))
+          (arg display_name (str "seven"))
+          (arg verified (bool false)))))))
 
 === canonical ===
 module values
@@ -92,9 +103,17 @@ fn display_name(profile: &Profile) -> String {
 
 fn describe(error: LoadError) -> String {
     match error {
-        LoadError.NotFound => "not found"
-        LoadError.Invalid(reason) => reason
-        LoadError.Io { code, message } => message
+        #LoadError.NotFound => "not found"
+        #LoadError.Invalid(reason) => reason
+        #LoadError.Io(code: 404, message: message) => message
+        #LoadError.Io(..) => "io error"
+    }
+}
+
+fn severity(error: LoadError) -> I64 {
+    match error {
+        #LoadError.NotFound | #LoadError.Invalid(_) => 1
+        other => 2
     }
 }
 
@@ -116,6 +135,6 @@ fn arithmetic(a: I64, b: I64) -> I64 {
 }
 
 fn build(name: String) -> Profile {
-    let user = User { id: 7, name: name, email: "nobody@example.com" }
-    return Profile { user: user, display_name: "seven", verified: false }
+    let user = #User(id: 7, name: name, email: "nobody@example.com")
+    return #Profile(user: user, display_name: "seven", verified: false)
 }

@@ -140,6 +140,31 @@ Two layout rules keep the grammar free of semicolons: statements within a block 
 line breaks, and a postfix chain continues across a line break only for `.` — a `(`, `[`, or `?`
 opening a fresh line starts something new.
 
+Two further rules keep spelling out of the grammar entirely. A `#` marks a **data constructor**,
+covering records and enum variants alike in both expressions and patterns:
+
+```
+let user  = #User(id: 7, name: name)      // builds a value
+let error = #LoadError.Invalid("bad")     // so does this
+let body  = http.text(status: 200)        // this calls a function
+
+match error {
+    #LoadError.NotFound       => "not found"
+    #LoadError.Io(code, msg)  => msg
+    other                     => describe(other)
+}
+```
+
+Two consequences follow, and both remove a rule rather than adding one. A brace is *always* a
+block — there is no record-literal syntax to disambiguate it from, so no construct needs to disable
+literals in its condition or scrutinee position. And in a pattern, a bare name *always* binds while
+only a marked path matches, so `NotFound` is a binding and `#LoadError.NotFound` is a match.
+
+**Nothing in the grammar depends on whether a name is capitalised.** That is a deliberate
+constraint: capitalisation is a convention a formatter or linter may enforce, never something the
+parser consults. Both mistakes this invites — writing `User { id: 7 }`, or writing an unmarked
+`LoadError.NotFound` in a pattern — produce a diagnostic naming the correct form.
+
 *Done when:* `norn parse examples/*.norn` succeeds, every example is print-idempotent, and the
 snapshot corpus — ASTs, canonical renderings, and rendered diagnostics for the deliberately broken
 examples — is committed.

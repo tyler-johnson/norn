@@ -227,15 +227,15 @@ fn dump_expr(expr: &Expr) -> Node {
             }
             list("call", children)
         }
-        ExprKind::Record { path, fields } => {
+        ExprKind::Construct { path, args } => {
             let mut children = vec![atom(path.text())];
-            for field in fields {
-                children.push(list(
-                    "field",
-                    vec![atom(&field.name.name), dump_expr(&field.value)],
-                ));
+            for arg in args {
+                children.push(match &arg.name {
+                    Some(name) => list("arg", vec![atom(&name.name), dump_expr(&arg.value)]),
+                    None => list("arg", vec![dump_expr(&arg.value)]),
+                });
             }
-            list("record", children)
+            list("construct", children)
         }
         ExprKind::Await(inner) => list("await", vec![dump_expr(inner)]),
         ExprKind::Try(inner) => list("try", vec![dump_expr(inner)]),
@@ -278,24 +278,18 @@ fn dump_pat(pat: &Pat) -> Node {
         PatKind::Int(v) => list("int", vec![atom(v.to_string())]),
         PatKind::Str(v) => list("str", vec![atom(format!("{v:?}"))]),
         PatKind::Bool(v) => list("bool", vec![atom(v.to_string())]),
-        PatKind::Path(path) => list("variant", vec![atom(path.text())]),
-        PatKind::Tuple { path, elems } => {
+        PatKind::Construct { path, args, rest } => {
             let mut children = vec![atom(path.text())];
-            children.extend(elems.iter().map(dump_pat));
-            list("variant", children)
-        }
-        PatKind::Record { path, fields, rest } => {
-            let mut children = vec![atom(path.text())];
-            for field in fields {
-                children.push(match &field.pat {
-                    Some(inner) => list("field", vec![atom(&field.name.name), dump_pat(inner)]),
-                    None => list("field", vec![atom(&field.name.name)]),
+            for arg in args {
+                children.push(match &arg.name {
+                    Some(name) => list("arg", vec![atom(&name.name), dump_pat(&arg.pat)]),
+                    None => list("arg", vec![dump_pat(&arg.pat)]),
                 });
             }
             if *rest {
                 children.push(atom(".."));
             }
-            list("variant-record", children)
+            list("construct", children)
         }
         PatKind::Or(alts) => list("or", alts.iter().map(dump_pat).collect()),
     }
