@@ -16,6 +16,7 @@ usage:
     norn parse [options] <file>...    check syntax
     norn check <file>...              resolve names and check types
     norn nir <file>                   print the lowered IR
+    norn graph <file> [Name]          print a reactor's dependency graph
     norn run [options] <file>         check, lower, and execute `main`
     norn fmt [--check] <file>...      rewrite files in canonical form
     norn --version
@@ -62,6 +63,7 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
         "parse" => cmd_parse(&args[1..]),
         "check" => cmd_check(&args[1..]),
         "nir" => cmd_nir(&args[1..]),
+        "graph" => cmd_graph(&args[1..]),
         "run" => cmd_run(&args[1..]),
         "fmt" => cmd_fmt(&args[1..]),
         other => Err(format!("unknown command `{other}`\n\n{USAGE}")),
@@ -138,6 +140,40 @@ fn cmd_nir(args: &[String]) -> Result<ExitCode, String> {
         return Ok(ExitCode::FAILURE);
     };
     print!("{}", norn_nir::print(&norn_nir::lower(&program)));
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Print the propagation plan the runtime will consume.
+///
+/// From NIR rather than from HIR, deliberately: printing the same table the turn loop walks is what
+/// makes "the plan is the artifact" a claim anyone can check, rather than two renderings of one idea
+/// that might drift.
+fn cmd_graph(args: &[String]) -> Result<ExitCode, String> {
+    let paths = plain_paths(args)?;
+    let (path, wanted) = match &paths[..] {
+        [path] => (path, None),
+        [path, name] => (path, Some(name.display().to_string())),
+        _ => return Err("expected a file and an optional reactor name".into()),
+    };
+    let file = read(path)?;
+    let Some(hir) = front_end(&file) else {
+        return Ok(ExitCode::FAILURE);
+    };
+    let program = norn_nir::lower(&hir);
+    if program.reactors.is_empty() {
+        return Err(format!("{}: no reactors", file.name));
+    }
+    if let Some(wanted) = &wanted
+        && !program.reactors.iter().any(|r| r.name == *wanted)
+    {
+        let known: Vec<&str> = program.reactors.iter().map(|r| r.name.as_str()).collect();
+        return Err(format!(
+            "{}: no reactor `{wanted}`; this file has {}",
+            file.name,
+            known.join(", ")
+        ));
+    }
+    print!("{}", norn_nir::print_graph(&program, wanted.as_deref()));
     Ok(ExitCode::SUCCESS)
 }
 

@@ -1,0 +1,130 @@
+=== nir ===
+record Pair #0 (started, finished)
+enum Option #0 (None/0, Some/1)
+enum Result #1 (Ok/1, Err/1)
+enum IoError #2 (NotFound/0, Denied/0, InUse/0, Refused/0, Closed/0, Other/1)
+
+reactor Slow #0
+    node 0 started state slot 0 init Slow.started.init#4 <- []
+    node 1 finished state slot 1 init Slow.finished.init#5 <- []
+    node 2 counts signal Slow.counts#6 export <- [started, finished]
+    order [started, finished, counts]
+    input 0 start capacity 4 overflow reject handler Slow.on.start#2
+        plan [started, counts]
+    input 1 settled capacity 4 overflow reject handler Slow.on.settled#3
+        plan [finished, counts]
+    exports [counts]
+
+task fn slow #0(_0/id)
+    local _1
+    local _2
+  b0:
+    _1 = task builtin sleep(1000)
+    await _1 -> _2, resume b1
+  b1:
+    return _0/id
+
+task fn main #1()
+    local _0/slow
+    local _1
+    local _2
+    local _3
+    local _4
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+    local _10
+    local _11
+  b0:
+    scope enter
+    _2 = spawn reactor Slow#0()
+    _0/slow = _2
+    _3 = input 0 of _0/slow
+    _4 = task builtin send(_3, 1)
+    await _4 -> _5, resume b1
+  b1:
+    _6 = task builtin sleep(10)
+    await _6 -> _7, resume b2
+  b2:
+    _8 = export 0 of _0/slow
+    _9 = builtin latest(_8)
+    _10 = builtin print(_9)
+    _1 = _10
+    scope exit, resume b3
+  b3:
+    _11 = builtin print("scope closed")
+    return _11
+
+fn Slow.on.start #2(_0/id, _1/started, _2/finished)
+    local _3
+    local _4
+  b0:
+    _3 = _1/started add.i 1
+    _1/started = _3
+    set slot 0 = _1/started
+    _4 = task slow#0(_0/id)
+    emit _4 -> input 1
+    return ()
+
+fn Slow.on.settled #3(_0/id, _1/started, _2/finished)
+    local _3
+  b0:
+    _3 = _2/finished add.i 1
+    _2/finished = _3
+    set slot 1 = _2/finished
+    return ()
+
+fn Slow.started.init #4()
+  b0:
+    return 0
+
+fn Slow.finished.init #5()
+  b0:
+    return 0
+
+fn Slow.counts #6(_0/started, _1/finished)
+    local _2
+  b0:
+    _2 = #Pair(_0/started, _1/finished)
+    return _2
+
+=== graph ===
+reactor Slow #0
+    node 0 started state slot 0 init Slow.started.init#4 <- []
+    node 1 finished state slot 1 init Slow.finished.init#5 <- []
+    node 2 counts signal Slow.counts#6 export <- [started, finished]
+    order [started, finished, counts]
+    input 0 start capacity 4 overflow reject handler Slow.on.start#2
+        plan [started, counts]
+    input 1 settled capacity 4 overflow reject handler Slow.on.settled#3
+        plan [finished, counts]
+    exports [counts]
+
+=== output ===
+#Pair(started: 1, finished: 0)
+scope closed
+=== result ===
+()
+=== trace ===
+0ms t0 spawn main root
+0ms t0 resume
+0ms t0 scope enter 1
+0ms R0 create Slow in t0
+0ms R0 publish 0
+0ms t0 park timer 10ms
+0ms R0 turn 0 start
+0ms R0 commit started
+0ms R0 recompute counts
+0ms R0 publish 1
+0ms t1 spawn slow in t0
+0ms R0 effect slow t1 -> settled
+0ms t1 resume
+0ms t1 park timer 1000ms
+10ms -- clock
+10ms t0 resume
+10ms t1 cancel
+10ms R0 stop
+10ms t0 scope exit 1
+10ms t0 done

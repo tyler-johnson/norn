@@ -1,0 +1,319 @@
+=== nir ===
+record Counts #0 (rejected, oldest, newest, waited)
+enum Option #0 (None/0, Some/1)
+enum Result #1 (Ok/1, Err/1)
+enum IoError #2 (NotFound/0, Denied/0, InUse/0, Refused/0, Closed/0, Other/1)
+
+reactor Sink #0
+    node 0 a state slot 0 init Sink.a.init#6 <- []
+    node 1 b state slot 1 init Sink.b.init#7 <- []
+    node 2 c state slot 2 init Sink.c.init#8 <- []
+    node 3 d state slot 3 init Sink.d.init#9 <- []
+    node 4 counts signal Sink.counts#10 export <- [a, b, c, d]
+    order [a, b, c, d, counts]
+    input 0 rejects capacity 2 overflow reject handler Sink.on.rejects#2
+        plan [a, counts]
+    input 1 oldest capacity 2 overflow drop_oldest handler Sink.on.oldest#3
+        plan [b, counts]
+    input 2 newest capacity 2 overflow drop_newest handler Sink.on.newest#4
+        plan [c, counts]
+    input 3 waits capacity 2 overflow wait handler Sink.on.waits#5
+        plan [d, counts]
+    exports [counts]
+
+task fn flood #0(_0/sink)
+    local _1
+    local _2
+    local _3
+    local _4
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+    local _10
+    local _11
+    local _12
+    local _13
+    local _14
+    local _15
+    local _16
+    local _17
+    local _18
+    local _19
+    local _20
+    local _21
+    local _22
+    local _23
+    local _24
+    local _25
+    local _26
+    local _27
+    local _28
+    local _29
+    local _30
+    local _31
+    local _32
+    local _33
+    local _34
+    local _35
+    local _36
+    local _37
+    local _38
+    local _39
+    local _40
+    local _41
+    local _42
+    local _43
+    local _44
+    local _45
+    local _46
+    local _47
+    local _48
+  b0:
+    _1 = input 0 of _0/sink
+    _2 = task builtin send(_1, 1)
+    await _2 -> _3, resume b1
+  b1:
+    _4 = input 0 of _0/sink
+    _5 = task builtin send(_4, 2)
+    await _5 -> _6, resume b2
+  b2:
+    _7 = input 0 of _0/sink
+    _8 = task builtin send(_7, 3)
+    await _8 -> _9, resume b3
+  b3:
+    _10 = input 0 of _0/sink
+    _11 = task builtin send(_10, 4)
+    await _11 -> _12, resume b4
+  b4:
+    _13 = input 1 of _0/sink
+    _14 = task builtin send(_13, 1)
+    await _14 -> _15, resume b5
+  b5:
+    _16 = input 1 of _0/sink
+    _17 = task builtin send(_16, 2)
+    await _17 -> _18, resume b6
+  b6:
+    _19 = input 1 of _0/sink
+    _20 = task builtin send(_19, 3)
+    await _20 -> _21, resume b7
+  b7:
+    _22 = input 1 of _0/sink
+    _23 = task builtin send(_22, 4)
+    await _23 -> _24, resume b8
+  b8:
+    _25 = input 2 of _0/sink
+    _26 = task builtin send(_25, 1)
+    await _26 -> _27, resume b9
+  b9:
+    _28 = input 2 of _0/sink
+    _29 = task builtin send(_28, 2)
+    await _29 -> _30, resume b10
+  b10:
+    _31 = input 2 of _0/sink
+    _32 = task builtin send(_31, 3)
+    await _32 -> _33, resume b11
+  b11:
+    _34 = input 2 of _0/sink
+    _35 = task builtin send(_34, 4)
+    await _35 -> _36, resume b12
+  b12:
+    _37 = input 3 of _0/sink
+    _38 = task builtin send(_37, 1)
+    await _38 -> _39, resume b13
+  b13:
+    _40 = input 3 of _0/sink
+    _41 = task builtin send(_40, 2)
+    await _41 -> _42, resume b14
+  b14:
+    _43 = input 3 of _0/sink
+    _44 = task builtin send(_43, 3)
+    await _44 -> _45, resume b15
+  b15:
+    _46 = input 3 of _0/sink
+    _47 = task builtin send(_46, 4)
+    await _47 -> _48, resume b16
+  b16:
+    return _48
+
+task fn main #1()
+    local _0/sink
+    local _1
+    local _2
+    local _3
+    local _4
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+  b0:
+    scope enter
+    _2 = spawn reactor Sink#0()
+    _0/sink = _2
+    _3 = task flood#0(_0/sink)
+    await _3 -> _4, resume b1
+  b1:
+    _5 = task builtin sleep(10)
+    await _5 -> _6, resume b2
+  b2:
+    _7 = export 0 of _0/sink
+    _8 = builtin latest(_7)
+    _9 = builtin print(_8)
+    _1 = _9
+    scope exit, resume b3
+  b3:
+    return _1
+
+fn Sink.on.rejects #2(_0/value, _1/a, _2/b, _3/c, _4/d)
+    local _5
+    local _6
+  b0:
+    _5 = _1/a mul.i 10
+    _6 = _5 add.i _0/value
+    _1/a = _6
+    set slot 0 = _1/a
+    return ()
+
+fn Sink.on.oldest #3(_0/value, _1/a, _2/b, _3/c, _4/d)
+    local _5
+    local _6
+  b0:
+    _5 = _2/b mul.i 10
+    _6 = _5 add.i _0/value
+    _2/b = _6
+    set slot 1 = _2/b
+    return ()
+
+fn Sink.on.newest #4(_0/value, _1/a, _2/b, _3/c, _4/d)
+    local _5
+    local _6
+  b0:
+    _5 = _3/c mul.i 10
+    _6 = _5 add.i _0/value
+    _3/c = _6
+    set slot 2 = _3/c
+    return ()
+
+fn Sink.on.waits #5(_0/value, _1/a, _2/b, _3/c, _4/d)
+    local _5
+    local _6
+  b0:
+    _5 = _4/d mul.i 10
+    _6 = _5 add.i _0/value
+    _4/d = _6
+    set slot 3 = _4/d
+    return ()
+
+fn Sink.a.init #6()
+  b0:
+    return 0
+
+fn Sink.b.init #7()
+  b0:
+    return 0
+
+fn Sink.c.init #8()
+  b0:
+    return 0
+
+fn Sink.d.init #9()
+  b0:
+    return 0
+
+fn Sink.counts #10(_0/a, _1/b, _2/c, _3/d)
+    local _4
+  b0:
+    _4 = #Counts(_0/a, _1/b, _2/c, _3/d)
+    return _4
+
+=== graph ===
+reactor Sink #0
+    node 0 a state slot 0 init Sink.a.init#6 <- []
+    node 1 b state slot 1 init Sink.b.init#7 <- []
+    node 2 c state slot 2 init Sink.c.init#8 <- []
+    node 3 d state slot 3 init Sink.d.init#9 <- []
+    node 4 counts signal Sink.counts#10 export <- [a, b, c, d]
+    order [a, b, c, d, counts]
+    input 0 rejects capacity 2 overflow reject handler Sink.on.rejects#2
+        plan [a, counts]
+    input 1 oldest capacity 2 overflow drop_oldest handler Sink.on.oldest#3
+        plan [b, counts]
+    input 2 newest capacity 2 overflow drop_newest handler Sink.on.newest#4
+        plan [c, counts]
+    input 3 waits capacity 2 overflow wait handler Sink.on.waits#5
+        plan [d, counts]
+    exports [counts]
+
+=== output ===
+#Counts(rejected: 12, oldest: 34, newest: 14, waited: 1234)
+=== result ===
+()
+=== trace ===
+0ms t0 spawn main root
+0ms t0 resume
+0ms t0 scope enter 1
+0ms R0 create Sink in t0
+0ms R0 publish 0
+0ms R0 overflow rejects reject
+0ms R0 overflow rejects reject
+0ms R0 overflow oldest drop_oldest
+0ms R0 overflow oldest drop_oldest
+0ms R0 overflow newest drop_newest
+0ms R0 overflow newest drop_newest
+0ms R0 overflow waits wait
+0ms t0 park mailbox R0
+0ms R0 turn 0 rejects
+0ms R0 commit a
+0ms R0 recompute counts
+0ms R0 publish 1
+0ms R0 turn 1 rejects
+0ms R0 commit a
+0ms R0 recompute counts
+0ms R0 publish 2
+0ms t0 resume
+0ms t0 park mailbox R0
+0ms R0 turn 2 oldest
+0ms R0 commit b
+0ms R0 recompute counts
+0ms R0 publish 3
+0ms R0 turn 3 oldest
+0ms R0 commit b
+0ms R0 recompute counts
+0ms R0 publish 4
+0ms t0 resume
+0ms t0 park mailbox R0
+0ms R0 turn 4 newest
+0ms R0 commit c
+0ms R0 recompute counts
+0ms R0 publish 5
+0ms R0 turn 5 newest
+0ms R0 commit c
+0ms R0 recompute counts
+0ms R0 publish 6
+0ms t0 resume
+0ms t0 park mailbox R0
+0ms R0 turn 6 waits
+0ms R0 commit d
+0ms R0 recompute counts
+0ms R0 publish 7
+0ms R0 turn 7 waits
+0ms R0 commit d
+0ms R0 recompute counts
+0ms R0 publish 8
+0ms t0 resume
+0ms t0 park timer 10ms
+0ms R0 turn 8 waits
+0ms R0 commit d
+0ms R0 recompute counts
+0ms R0 publish 9
+0ms R0 turn 9 waits
+0ms R0 commit d
+0ms R0 recompute counts
+0ms R0 publish 10
+10ms -- clock
+10ms t0 resume
+10ms R0 stop
+10ms t0 scope exit 1
+10ms t0 done

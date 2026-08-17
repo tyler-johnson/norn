@@ -1,0 +1,77 @@
+// The echo server of `examples/tcp/echo.norn`, with a reactor counting what it is holding open.
+//
+// This is the composition claim: turns and tasks are different things that live together. The
+// accept loop, the per-connection tasks, and the sockets are all exactly as M2 left them; the
+// reactor sits beside them and is told about openings and closings by ordinary `send`s from
+// ordinary task code. Nothing about the reactor is aware of a socket, and nothing about the socket
+// code is aware of a graph.
+//
+// Driven by a real client rather than by the virtual clock, so it lives in a live test
+// (`crates/norn-nir/tests/server.rs`) rather than in the golden corpus.
+
+record Snapshot {
+    accepted: I64
+    open: I64
+    healthy: Bool
+}
+
+reactor Gate(limit: I64) {
+    input opened: () [capacity: 64, overflow: reject]
+    input closed: () [capacity: 64, overflow: reject]
+
+    state accepted: I64 = 0
+    state released: I64 = 0
+
+    on opened() {
+        accepted = accepted + 1
+    }
+
+    on closed() {
+        released = released + 1
+    }
+
+    signal open = accepted - released
+
+    export signal snapshot = #Snapshot(accepted: accepted, open: open, healthy: open <= limit)
+}
+
+task fn echo(conn: Connection, gate: Gate) -> ()
+    uses { net.io }
+{
+    await send(gate.opened, ())
+    match await tcp_read(conn) {
+        #Ok(text) => match await tcp_write(conn, text) {
+            #Ok(_) => ()
+            #Err(_) => ()
+        }
+        #Err(_) => ()
+    }
+    await tcp_close(conn)
+    await send(gate.closed, ())
+}
+
+task fn accept_loop(listener: Listener, gate: Gate) -> ()
+    uses { net.io }
+{
+    match await tcp_accept(listener) {
+        #Ok(conn) => scope {
+            spawn echo(conn, gate)
+            await accept_loop(listener, gate)
+        }
+        #Err(_) => ()
+    }
+}
+
+task fn main() -> Result<(), IoError>
+    uses { clock, net.listen, net.io }
+{
+    let listener = await tcp_listen(0)?
+    print(listener_port(listener))
+    scope {
+        let gate = spawn reactor Gate(limit: 4)
+        spawn accept_loop(listener, gate)
+        await sleep(500)
+        print(latest(gate.snapshot))
+    }
+    #Ok(())
+}

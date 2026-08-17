@@ -44,11 +44,106 @@ pub fn lower(program: &hir::Program) -> Program {
         .iter()
         .map(|def| lower_fn(program, def))
         .collect();
-    Program {
+    let reactors = program.reactors.iter().map(lower_reactor).collect();
+    let lowered = Program {
         records,
         enums,
         fns,
+        reactors,
         main: program.main.map(|id| id.index()),
+    };
+    verify_turns(&lowered);
+    lowered
+}
+
+fn lower_reactor(def: &hir::ReactorDef) -> Reactor {
+    Reactor {
+        name: def.name.clone(),
+        nodes: def
+            .nodes
+            .iter()
+            .map(|node| Node {
+                name: node.name.clone(),
+                deps: node.deps.iter().map(|dep| dep.index()).collect(),
+                kind: match node.kind {
+                    hir::NodeKind::Param { slot, index } => NodeKind::Param { slot, index },
+                    hir::NodeKind::State { slot, init } => NodeKind::State {
+                        slot,
+                        init: init.index(),
+                    },
+                    hir::NodeKind::Signal { body } => NodeKind::Signal { body: body.index() },
+                },
+            })
+            .collect(),
+        slots: def.slots.iter().map(|node| node.index()).collect(),
+        inputs: def
+            .inputs
+            .iter()
+            .map(|input| Input {
+                name: input.name.clone(),
+                capacity: input.capacity,
+                overflow: input.overflow,
+                handler: input.handler.index(),
+                plan: input.plan.iter().map(|node| node.index()).collect(),
+            })
+            .collect(),
+        order: def.order.iter().map(|node| node.index()).collect(),
+        exports: def.exports.iter().map(|node| node.index()).collect(),
+    }
+}
+
+/// Reject anything a turn may not do, in the lowered form rather than the source.
+///
+/// Purity is therefore checked twice: in HIR against what was written, with spans, and here against
+/// what lowering produced. The second check is cheap and catches a different class of mistake — a
+/// lowering that introduced a suspension point or a spawn that no source expression asked for. The
+/// interpreter's `Option<&mut Cx>` is the third line, and traps if both of these are wrong.
+fn verify_turns(program: &Program) {
+    for reactor in &program.reactors {
+        for node in &reactor.nodes {
+            match node.kind {
+                NodeKind::Param { .. } => {}
+                NodeKind::State { init, .. } => verify_pure(program, init, false),
+                NodeKind::Signal { body } => verify_pure(program, body, false),
+            }
+        }
+        for input in &reactor.inputs {
+            verify_pure(program, input.handler, true);
+        }
+    }
+}
+
+fn verify_pure(program: &Program, id: FnId, handler: bool) {
+    let function = &program.fns[id];
+    let bad = |what: &str| -> ! {
+        panic!(
+            "lowered `{}` contains {what}, which a turn cannot do",
+            function.name
+        )
+    };
+    for block in &function.blocks {
+        for instr in &block.instrs {
+            match instr {
+                Instr::Spawn(_) => bad("a spawn"),
+                Instr::ScopeEnter => bad("a scope"),
+                Instr::SpawnReactor { .. } => bad("a reactor creation"),
+                // `SetSlot` and `Emit` are what a handler is *for*, and meaningless anywhere else.
+                Instr::SetSlot(..) | Instr::Emit { .. } if !handler => {
+                    bad("a slot write or an effect request outside a handler")
+                }
+                Instr::SetSlot(..) | Instr::Emit { .. } => {}
+                Instr::Assign(_, rvalue) => match rvalue {
+                    Rvalue::Task(..) | Rvalue::BuiltinTask(..) if !handler => bad("a task"),
+                    Rvalue::Builtin(builtin, _) if !builtin.is_pure() => bad("an impure builtin"),
+                    _ => {}
+                },
+            }
+        }
+        match block.term {
+            Term::Await { .. } => bad("an await"),
+            Term::ScopeExit { .. } => bad("a scope exit"),
+            _ => {}
+        }
     }
 }
 
@@ -56,6 +151,7 @@ fn lower_fn(program: &hir::Program, def: &hir::FnDef) -> Function {
     let mut lowerer = Lowerer {
         program,
         locals: def.locals.iter().map(|l| l.name.clone()).collect(),
+        roles: def.locals.iter().map(|l| l.role).collect(),
         blocks: vec![Block::default()],
         current: 0,
         open_scopes: 0,
@@ -115,6 +211,9 @@ fn prune(blocks: Vec<Block>) -> Vec<Block> {
 struct Lowerer<'p> {
     program: &'p hir::Program,
     locals: Vec<String>,
+    /// What each local is. Only a handler has any that are not `Ordinary`, and the one that matters
+    /// here is `State`: assigning to such a local is a commit, and is where `SetSlot` comes from.
+    roles: Vec<hir::LocalRole>,
     blocks: Vec<Block>,
     current: BlockId,
     /// Scopes open around the expression being lowered. A `return` or a `?` that crosses one has to
@@ -299,9 +398,28 @@ impl Lowerer<'_> {
                 self.switch_to(unreachable);
                 Operand::Const(Const::Unit)
             }
-            hir::ExprKind::SpawnReactor { .. }
-            | hir::ExprKind::ReactorInput { .. }
-            | hir::ExprKind::ReactorExport { .. } => unimplemented!("reactor lowering"),
+            hir::ExprKind::SpawnReactor { reactor, args } => {
+                let args = args.iter().map(|arg| self.expr(arg)).collect();
+                let dest = Place::local(self.temp());
+                self.push_instr(Instr::SpawnReactor {
+                    dest: dest.clone(),
+                    reactor: reactor.index(),
+                    args,
+                });
+                Operand::Copy(dest)
+            }
+            hir::ExprKind::ReactorInput { reactor, index } => {
+                let handle = self.expr(reactor);
+                let temp = Place::local(self.temp());
+                self.emit(temp.clone(), Rvalue::ReactorInput(handle, *index));
+                Operand::Copy(temp)
+            }
+            hir::ExprKind::ReactorExport { reactor, index } => {
+                let handle = self.expr(reactor);
+                let temp = Place::local(self.temp());
+                self.emit(temp.clone(), Rvalue::ReactorExport(handle, *index));
+                Operand::Copy(temp)
+            }
             hir::ExprKind::Error => Operand::Const(Const::Unit),
         }
     }
@@ -313,10 +431,29 @@ impl Lowerer<'_> {
                 self.assign_to(&place, value);
             }
             hir::StmtKind::Assign { place, value } => {
-                let place = self.place(place);
-                self.assign_to(&place, value);
+                let target = self.place(place);
+                self.assign_to(&target, value);
+                // A commit is emitted in place, right after the local it mirrors is written, so
+                // the order the turn commits in is the order the handler wrote in.
+                if let hir::ExprKind::Local(id) = place.kind
+                    && let hir::LocalRole::State(slot) = self.roles[id.index()]
+                {
+                    self.push_instr(Instr::SetSlot(
+                        slot,
+                        Operand::Copy(Place::local(id.index())),
+                    ));
+                }
             }
-            hir::StmtKind::AfterCommit { .. } => unimplemented!("reactor lowering"),
+            // Emitted in place too, and for a sharper reason: an `after_commit` inside a branch
+            // that was not taken must not fire, and the only way to be sure of that is for the
+            // request to be an instruction on the path rather than a list built beside it.
+            hir::StmtKind::AfterCommit { task, returns } => {
+                let task = self.expr(task);
+                self.push_instr(Instr::Emit {
+                    task,
+                    returns: *returns,
+                });
+            }
             hir::StmtKind::Expr(expr) => {
                 self.expr(expr);
             }

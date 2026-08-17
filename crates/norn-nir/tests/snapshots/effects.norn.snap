@@ -1,0 +1,229 @@
+=== nir ===
+record Report #0 (pending, delivered, failed)
+enum Option #0 (None/0, Some/1)
+enum Result #1 (Ok/1, Err/1)
+enum IoError #2 (NotFound/0, Denied/0, InUse/0, Refused/0, Closed/0, Other/1)
+enum Outcome #3 (Delivered/1, Failed/0)
+
+reactor Mailbox #0
+    node 0 pending state slot 0 init Mailbox.pending.init#4 <- []
+    node 1 delivered state slot 1 init Mailbox.delivered.init#5 <- []
+    node 2 failed state slot 2 init Mailbox.failed.init#6 <- []
+    node 3 report signal Mailbox.report#7 export <- [pending, delivered, failed]
+    order [pending, delivered, failed, report]
+    input 0 queued capacity 8 overflow reject handler Mailbox.on.queued#2
+        plan [pending, report]
+    input 1 settled capacity 8 overflow reject handler Mailbox.on.settled#3
+        plan [pending, delivered, failed, report]
+    exports [report]
+
+task fn deliver #0(_0/id)
+    local _1
+    local _2
+    local _3
+    local _4
+    local _5
+    local _6
+  b0:
+    _1 = task builtin sleep(_0/id)
+    await _1 -> _2, resume b1
+  b1:
+    _4 = _0/id eq 2
+    branch _4 ? b2 : b3
+  b2:
+    _5 = #Outcome.Failed()
+    _3 = _5
+    goto b4
+  b3:
+    _6 = #Outcome.Delivered(_0/id)
+    _3 = _6
+    goto b4
+  b4:
+    return _3
+
+task fn main #1()
+    local _0/mailbox
+    local _1
+    local _2
+    local _3
+    local _4
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+    local _10
+    local _11
+    local _12
+    local _13
+    local _14
+    local _15
+    local _16
+  b0:
+    scope enter
+    _2 = spawn reactor Mailbox#0()
+    _0/mailbox = _2
+    _3 = input 0 of _0/mailbox
+    _4 = task builtin send(_3, 1)
+    await _4 -> _5, resume b1
+  b1:
+    _6 = input 0 of _0/mailbox
+    _7 = task builtin send(_6, 2)
+    await _7 -> _8, resume b2
+  b2:
+    _9 = input 0 of _0/mailbox
+    _10 = task builtin send(_9, 3)
+    await _10 -> _11, resume b3
+  b3:
+    _12 = task builtin sleep(50)
+    await _12 -> _13, resume b4
+  b4:
+    _14 = export 0 of _0/mailbox
+    _15 = builtin latest(_14)
+    _16 = builtin print(_15)
+    _1 = _16
+    scope exit, resume b5
+  b5:
+    return _1
+
+fn Mailbox.on.queued #2(_0/id, _1/pending, _2/delivered, _3/failed)
+    local _4
+    local _5
+  b0:
+    _4 = _1/pending add.i 1
+    _1/pending = _4
+    set slot 0 = _1/pending
+    _5 = task deliver#0(_0/id)
+    emit _5 -> input 1
+    return ()
+
+fn Mailbox.on.settled #3(_0/outcome, _1/pending, _2/delivered, _3/failed)
+    local _4
+    local _5
+    local _6
+    local _7
+  b0:
+    _4 = _1/pending sub.i 1
+    _1/pending = _4
+    set slot 0 = _1/pending
+    goto b2
+  b1:
+    return _5
+  b2:
+    switch tag _0/outcome [0 => b6] else b3
+  b3:
+    switch tag _0/outcome [1 => b8] else b4
+  b4:
+    trap "no match arm applied"
+  b5:
+    _6 = _2/delivered add.i 1
+    _2/delivered = _6
+    set slot 1 = _2/delivered
+    _5 = ()
+    goto b1
+  b6:
+    goto b5
+  b7:
+    _7 = _3/failed add.i 1
+    _3/failed = _7
+    set slot 2 = _3/failed
+    _5 = ()
+    goto b1
+  b8:
+    goto b7
+
+fn Mailbox.pending.init #4()
+  b0:
+    return 0
+
+fn Mailbox.delivered.init #5()
+  b0:
+    return 0
+
+fn Mailbox.failed.init #6()
+  b0:
+    return 0
+
+fn Mailbox.report #7(_0/pending, _1/delivered, _2/failed)
+    local _3
+  b0:
+    _3 = #Report(_0/pending, _1/delivered, _2/failed)
+    return _3
+
+=== graph ===
+reactor Mailbox #0
+    node 0 pending state slot 0 init Mailbox.pending.init#4 <- []
+    node 1 delivered state slot 1 init Mailbox.delivered.init#5 <- []
+    node 2 failed state slot 2 init Mailbox.failed.init#6 <- []
+    node 3 report signal Mailbox.report#7 export <- [pending, delivered, failed]
+    order [pending, delivered, failed, report]
+    input 0 queued capacity 8 overflow reject handler Mailbox.on.queued#2
+        plan [pending, report]
+    input 1 settled capacity 8 overflow reject handler Mailbox.on.settled#3
+        plan [pending, delivered, failed, report]
+    exports [report]
+
+=== output ===
+#Report(pending: 0, delivered: 2, failed: 1)
+=== result ===
+()
+=== trace ===
+0ms t0 spawn main root
+0ms t0 resume
+0ms t0 scope enter 1
+0ms R0 create Mailbox in t0
+0ms R0 publish 0
+0ms t0 park timer 50ms
+0ms R0 turn 0 queued
+0ms R0 commit pending
+0ms R0 recompute report
+0ms R0 publish 1
+0ms t1 spawn deliver in t0
+0ms R0 effect deliver t1 -> settled
+0ms t1 resume
+0ms t1 park timer 1ms
+0ms R0 turn 1 queued
+0ms R0 commit pending
+0ms R0 recompute report
+0ms R0 publish 2
+0ms t2 spawn deliver in t0
+0ms R0 effect deliver t2 -> settled
+0ms t2 resume
+0ms t2 park timer 2ms
+0ms R0 turn 2 queued
+0ms R0 commit pending
+0ms R0 recompute report
+0ms R0 publish 3
+0ms t3 spawn deliver in t0
+0ms R0 effect deliver t3 -> settled
+0ms t3 resume
+0ms t3 park timer 3ms
+1ms -- clock
+1ms t1 resume
+1ms t1 done
+1ms R0 turn 3 settled
+1ms R0 commit pending
+1ms R0 commit delivered
+1ms R0 recompute report
+1ms R0 publish 4
+2ms -- clock
+2ms t2 resume
+2ms t2 done
+2ms R0 turn 4 settled
+2ms R0 commit pending
+2ms R0 commit failed
+2ms R0 recompute report
+2ms R0 publish 5
+3ms -- clock
+3ms t3 resume
+3ms t3 done
+3ms R0 turn 5 settled
+3ms R0 commit pending
+3ms R0 commit delivered
+3ms R0 recompute report
+3ms R0 publish 6
+50ms -- clock
+50ms t0 resume
+50ms R0 stop
+50ms t0 scope exit 1
+50ms t0 done

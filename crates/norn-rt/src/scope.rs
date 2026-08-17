@@ -9,14 +9,19 @@
 //! `spawn` transfers any handle passed to the child, which is the dynamic shadow of the move rule
 //! M4 will make static.
 
+use crate::graph::ReactorId;
 use crate::task::{Status, TaskId, TaskState};
 use crate::trace::Event;
 use crate::{Core, Cx, Poll, ResourceId, Runnable, Trap};
 
-/// One open scope and the children spawned into it.
+/// One open scope, and what was started inside it.
 #[derive(Default)]
 pub struct Scope {
     pub children: Vec<TaskId>,
+    /// Reactors created here. A reactor is passive — it runs only when sent to — but it is owned
+    /// all the same, and leaving the scope has to stop it, or a later `send` would queue a message
+    /// for a turn that can never happen.
+    pub reactors: Vec<ReactorId>,
 }
 
 /// Who a new task is spawned under, and into which of that task's open scopes.
@@ -33,14 +38,14 @@ pub struct Parent {
     pub scope: usize,
 }
 
-impl<'e, V> Core<'e, V> {
+impl<'e, V: Clone> Core<'e, V> {
     pub(crate) fn spawn(
         &mut self,
         value: V,
         parent: Option<Parent>,
         moved: &[ResourceId],
     ) -> Result<TaskId, Trap> {
-        let body = (self.make)(&value)?;
+        let body = (self.engine.make)(&value)?;
         let name = body.name().to_string();
         let task = TaskId(self.tasks.len() as u32);
         self.tasks.push(TaskState {
@@ -52,6 +57,7 @@ impl<'e, V> Core<'e, V> {
             scopes: vec![Scope::default()],
             wait: None,
             resources: Vec::new(),
+            completion: None,
             status: Status::Ready,
         });
         self.emit(Event::Spawn {
@@ -102,6 +108,13 @@ impl<'e, V> Core<'e, V> {
         self.detach(task);
         if self.root == Some(task) {
             self.result = Some(value);
+            return;
+        }
+        // An effect's result re-enters as a later input: `DESIGN.md` §2's `EffectResult →
+        // ReactorMailbox → a later turn`, as one field. Only *finishing* delivers — `cancel` does
+        // not — which is what makes a cancelled effect observable as a cancel with no matching turn.
+        if let Some(completion) = self.state(task).completion {
+            self.deliver(completion, value, task);
         }
     }
 
@@ -131,6 +144,22 @@ impl<'e, V> Core<'e, V> {
         for child in children {
             self.cancel(child);
         }
+        let reactors: Vec<ReactorId> = self
+            .state_mut(task)
+            .scopes
+            .iter_mut()
+            .flat_map(|scope| std::mem::take(&mut scope.reactors))
+            .collect();
+        for reactor in reactors {
+            self.kill_reactor(reactor);
+        }
+    }
+
+    /// Record a reactor as owned by the scope it was created in.
+    pub(crate) fn attach_reactor(&mut self, owner: Parent, reactor: ReactorId) {
+        let scopes = &mut self.state_mut(owner.task).scopes;
+        let index = owner.scope.min(scopes.len() - 1);
+        scopes[index].reactors.push(reactor);
     }
 
     /// Close everything the task still owns. This is what makes cancellation leak-free without a
@@ -166,7 +195,7 @@ impl<'e, V> Core<'e, V> {
     }
 }
 
-impl<'e, V> Cx<'_, 'e, V> {
+impl<'e, V: Clone> Cx<'_, 'e, V> {
     /// Start a task in the innermost open scope of the current task.
     pub fn spawn(&mut self, task: V, moved: &[ResourceId]) -> Result<TaskId, Trap> {
         let parent = self.innermost();
@@ -199,13 +228,20 @@ impl<'e, V> Cx<'_, 'e, V> {
         let scopes = &mut self.core.state_mut(task).scopes;
         let depth = scopes.len() - 1;
         // The outermost scope belongs to the task itself and is closed when the task ends.
-        let children = if scopes.len() > 1 {
-            scopes.pop().expect("just checked").children
+        let (children, reactors) = if scopes.len() > 1 {
+            let scope = scopes.pop().expect("just checked");
+            (scope.children, scope.reactors)
         } else {
-            std::mem::take(&mut scopes[0].children)
+            (
+                std::mem::take(&mut scopes[0].children),
+                std::mem::take(&mut scopes[0].reactors),
+            )
         };
         for child in children {
             self.core.cancel(child);
+        }
+        for reactor in reactors {
+            self.core.kill_reactor(reactor);
         }
         self.core.emit(Event::ScopeExit { task, depth });
         Poll::Ready(())

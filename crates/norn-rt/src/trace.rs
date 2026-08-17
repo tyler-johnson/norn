@@ -10,6 +10,7 @@
 //! makes it a golden artifact rather than a log.
 
 use crate::clock::Millis;
+use crate::graph::{Overflow, ReactorId};
 use crate::poll::{ResourceId, ResourceKind};
 use crate::task::TaskId;
 
@@ -58,12 +59,61 @@ pub enum Event {
     },
     /// A virtual clock arriving at the next deadline because nothing else could run.
     Clock,
+
+    // ------------------------------------------------------------------ reactors
+    //
+    // No event carries a `V`. `Trace` must not become generic — it is shared by both engines, and
+    // an engine's value type is the one thing it may not know — and the determinism claim is about
+    // *order* anyway. What a node computed is the program's output; that it computed when it did,
+    // once, before publication, is what these lines are for.
+    ReactorCreated {
+        reactor: ReactorId,
+        name: String,
+        owner: TaskId,
+    },
+    /// One message taken from the mailbox. The sequence number is reactor-local and the reason
+    /// "serial turns" is a thing a reader can check rather than a thing the runtime asserts.
+    Turn {
+        reactor: ReactorId,
+        seq: u64,
+        input: String,
+    },
+    /// One node updated, in propagation order: a state cell committed by the handler, or a signal
+    /// recomputed from its dependencies.
+    Node {
+        reactor: ReactorId,
+        node: String,
+        commit: bool,
+    },
+    /// The snapshot swap. Everything before it in this turn is invisible from outside; everything
+    /// after it is a consequence.
+    Publish {
+        reactor: ReactorId,
+        version: u64,
+    },
+    /// An effect request becoming a task — always after the publish of the turn that asked for it.
+    Effect {
+        reactor: ReactorId,
+        task: TaskId,
+        name: String,
+        returns: Option<String>,
+    },
+    /// A message meeting a full mailbox, and what the declared policy did about it.
+    Overflow {
+        reactor: ReactorId,
+        input: String,
+        policy: Overflow,
+    },
+    ReactorClosed {
+        reactor: ReactorId,
+    },
 }
 
 pub enum WaitReason {
     Timer(Millis),
     Read(ResourceId),
     Write(ResourceId),
+    Mailbox(ReactorId),
     /// A task that parked without registering anything to wake it. The scheduler reports this as a
     /// stuck program rather than waiting forever, but the trace records it where it happened.
     Nothing,
@@ -75,6 +125,7 @@ impl WaitReason {
             WaitReason::Timer(deadline) => format!("timer {deadline}ms"),
             WaitReason::Read(resource) => format!("read {resource}"),
             WaitReason::Write(resource) => format!("write {resource}"),
+            WaitReason::Mailbox(reactor) => format!("mailbox {reactor}"),
             WaitReason::Nothing => "nothing".into(),
         }
     }
@@ -84,6 +135,7 @@ impl WaitReason {
 /// in particular has to say so rather than borrow the last task's name.
 pub enum Subject {
     Task(TaskId),
+    Reactor(ReactorId),
     /// The runtime itself: the clock, and anything else with no owner.
     Runtime,
 }
@@ -92,6 +144,7 @@ impl Subject {
     fn text(&self) -> String {
         match self {
             Subject::Task(task) => task.to_string(),
+            Subject::Reactor(reactor) => reactor.to_string(),
             Subject::Runtime => "--".into(),
         }
     }
@@ -110,6 +163,13 @@ impl Event {
             | Event::Open { task, .. }
             | Event::Close { task, .. }
             | Event::Move { task, .. } => Subject::Task(*task),
+            Event::ReactorCreated { reactor, .. }
+            | Event::Turn { reactor, .. }
+            | Event::Node { reactor, .. }
+            | Event::Publish { reactor, .. }
+            | Event::Effect { reactor, .. }
+            | Event::Overflow { reactor, .. }
+            | Event::ReactorClosed { reactor } => Subject::Reactor(*reactor),
             Event::Clock => Subject::Runtime,
         }
     }
@@ -129,6 +189,26 @@ impl Event {
             Event::Open { resource, kind, .. } => format!("open {resource} {}", kind.name()),
             Event::Close { resource, .. } => format!("close {resource}"),
             Event::Move { resource, from, .. } => format!("move {resource} from {from}"),
+            Event::ReactorCreated { name, owner, .. } => format!("create {name} in {owner}"),
+            Event::Turn { seq, input, .. } => format!("turn {seq} {input}"),
+            Event::Node { node, commit, .. } => {
+                let what = if *commit { "commit" } else { "recompute" };
+                format!("{what} {node}")
+            }
+            Event::Publish { version, .. } => format!("publish {version}"),
+            Event::Effect {
+                task,
+                name,
+                returns,
+                ..
+            } => match returns {
+                Some(input) => format!("effect {name} {task} -> {input}"),
+                None => format!("effect {name} {task}"),
+            },
+            Event::Overflow { input, policy, .. } => {
+                format!("overflow {input} {}", policy.name())
+            }
+            Event::ReactorClosed { .. } => "stop".into(),
             Event::Clock => "clock".into(),
         }
     }

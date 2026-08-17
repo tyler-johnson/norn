@@ -1,0 +1,52 @@
+// Cancellation is "no further user code", and this is what that means for an effect.
+//
+// The scope closes while `slow` is still parked on its timer. The trace shows the effect cancelled
+// and the reactor closed, and then nothing: there is no `settled` turn, because only a task that
+// *finished* delivers. A cancelled effect is observable as a cancel with no matching turn — which
+// is the honest claim. v0 does not promise the effect had no outward consequence, only that no
+// further Norn code ran for it.
+
+record Pair {
+    started: I64
+    finished: I64
+}
+
+task fn slow(id: I64) -> I64
+    uses { clock }
+{
+    await sleep(1000)
+    id
+}
+
+reactor Slow()
+    uses { clock }
+{
+    input start: I64 [capacity: 4, overflow: reject]
+    input settled: I64 [capacity: 4, overflow: reject]
+
+    state started: I64 = 0
+    state finished: I64 = 0
+
+    on start(id) {
+        started = started + 1
+        after_commit slow(id) -> settled
+    }
+
+    on settled(id) {
+        finished = finished + 1
+    }
+
+    export signal counts = #Pair(started: started, finished: finished)
+}
+
+task fn main() -> ()
+    uses { clock }
+{
+    scope {
+        let slow = spawn reactor Slow()
+        await send(slow.start, 1)
+        await sleep(10)
+        print(latest(slow.counts))
+    }
+    print("scope closed")
+}

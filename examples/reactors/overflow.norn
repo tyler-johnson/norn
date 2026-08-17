@@ -1,0 +1,82 @@
+// Every overflow policy, in one reactor, under one flood.
+//
+// Nothing yields between the sends in `main`, so all sixteen messages meet the mailbox before the
+// reactor takes its first turn. What each input has left by then is exactly what its declared
+// policy says it should have, and the trace names the policy on every message it discarded.
+//
+// Capacity is per input even though the mailbox is one queue: the order a reactor sees messages in
+// has to be one order, but a noisy input must not be able to consume the room a quiet one was
+// promised.
+
+record Counts {
+    rejected: I64
+    oldest: I64
+    newest: I64
+    waited: I64
+}
+
+reactor Sink() {
+    // Capacity two, four messages each. `reject` and `drop_newest` keep the earliest; `drop_oldest`
+    // keeps the latest; `wait` keeps all four, because its sender is suspended rather than refused.
+    input rejects: I64 [capacity: 2, overflow: reject]
+    input oldest: I64 [capacity: 2, overflow: drop_oldest]
+    input newest: I64 [capacity: 2, overflow: drop_newest]
+    input waits: I64 [capacity: 2, overflow: wait]
+
+    state a: I64 = 0
+    state b: I64 = 0
+    state c: I64 = 0
+    state d: I64 = 0
+
+    on rejects(value) {
+        a = a * 10 + value
+    }
+
+    on oldest(value) {
+        b = b * 10 + value
+    }
+
+    on newest(value) {
+        c = c * 10 + value
+    }
+
+    on waits(value) {
+        d = d * 10 + value
+    }
+
+    export signal counts = #Counts(rejected: a, oldest: b, newest: c, waited: d)
+}
+
+task fn flood(sink: Sink) -> ()
+{
+    await send(sink.rejects, 1)
+    await send(sink.rejects, 2)
+    await send(sink.rejects, 3)
+    await send(sink.rejects, 4)
+
+    await send(sink.oldest, 1)
+    await send(sink.oldest, 2)
+    await send(sink.oldest, 3)
+    await send(sink.oldest, 4)
+
+    await send(sink.newest, 1)
+    await send(sink.newest, 2)
+    await send(sink.newest, 3)
+    await send(sink.newest, 4)
+
+    await send(sink.waits, 1)
+    await send(sink.waits, 2)
+    await send(sink.waits, 3)
+    await send(sink.waits, 4)
+}
+
+task fn main() -> ()
+    uses { clock }
+{
+    scope {
+        let sink = spawn reactor Sink()
+        await flood(sink)
+        await sleep(10)
+        print(latest(sink.counts))
+    }
+}

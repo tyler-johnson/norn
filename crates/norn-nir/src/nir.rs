@@ -10,7 +10,7 @@
 
 use std::rc::Rc;
 
-use norn_hir::hir::{BinOp, Builtin, UnOp};
+use norn_hir::hir::{BinOp, Builtin, Overflow, UnOp};
 
 pub type BlockId = usize;
 pub type LocalId = usize;
@@ -20,7 +20,56 @@ pub struct Program {
     pub records: Vec<RecordLayout>,
     pub enums: Vec<EnumLayout>,
     pub fns: Vec<Function>,
+    pub reactors: Vec<Reactor>,
     pub main: Option<FnId>,
+}
+
+/// A reactor as the runtime consumes it: a table, not an evaluator.
+///
+/// Every body has been lifted to an ordinary function in `fns`, so what remains is indices — which
+/// nodes feed which, where their values live, and what order to walk them in. That is the artifact
+/// the milestone exists to produce, and `norn graph` prints exactly this.
+pub struct Reactor {
+    pub name: String,
+    pub nodes: Vec<Node>,
+    /// The node holding each slot, in slot (source) order.
+    pub slots: Vec<usize>,
+    pub inputs: Vec<Input>,
+    pub order: Vec<usize>,
+    pub exports: Vec<usize>,
+}
+
+pub struct Node {
+    pub name: String,
+    pub deps: Vec<usize>,
+    pub kind: NodeKind,
+}
+
+pub enum NodeKind {
+    /// A constructor parameter: slot, and which argument fills it.
+    Param { slot: usize, index: usize },
+    /// A state cell: slot, and the function computing its initial value.
+    State { slot: usize, init: FnId },
+    /// A derived view: the function computing it from `deps`.
+    Signal { body: FnId },
+}
+
+impl NodeKind {
+    pub fn slot(&self) -> Option<usize> {
+        match self {
+            NodeKind::Param { slot, .. } | NodeKind::State { slot, .. } => Some(*slot),
+            NodeKind::Signal { .. } => None,
+        }
+    }
+}
+
+pub struct Input {
+    pub name: String,
+    pub capacity: usize,
+    pub overflow: Overflow,
+    /// `(message, every slot in slot order) -> ()`, writing slots and requesting effects as it goes.
+    pub handler: FnId,
+    pub plan: Vec<usize>,
 }
 
 /// Names are kept so that a value can be rendered in the surface syntax that built it.
@@ -70,6 +119,22 @@ pub enum Instr {
     ScopeEnter,
     /// Start a task in the innermost open scope. The operand is a `Task<()>`.
     Spawn(Operand),
+    /// Create a reactor and bind a handle to it.
+    SpawnReactor {
+        dest: Place,
+        reactor: usize,
+        args: Vec<Operand>,
+    },
+    /// Commit a state cell. Emitted only in a handler, and in place: the value the turn commits is
+    /// wherever the handler left it.
+    SetSlot(usize, Operand),
+    /// Request an effect. Emitted only in a handler, and in place, so that an `after_commit` in a
+    /// branch that was not taken does not fire. The operand is a task that has been built and not
+    /// started; the runtime starts it once the snapshot is published.
+    Emit {
+        task: Operand,
+        returns: Option<usize>,
+    },
 }
 
 /// A local, optionally projected into: `x`, `x.2`, `x.0.1`.
@@ -124,6 +189,10 @@ pub enum Rvalue {
     BuiltinTask(Builtin, Vec<Operand>),
     Record(usize, Vec<Operand>),
     Variant(usize, usize, Vec<Operand>),
+    /// `gate.opened` — one input of a running reactor, as a value `send` can be handed.
+    ReactorInput(Operand, usize),
+    /// `gate.snapshot` — one exported signal, as a value `latest` can read.
+    ReactorExport(Operand, usize),
 }
 
 pub enum Term {
@@ -228,6 +297,7 @@ pub fn print(program: &Program) -> String {
     if !program.records.is_empty() || !program.enums.is_empty() {
         out.push('\n');
     }
+    out.push_str(&print_reactors(program));
 
     for (id, function) in program.fns.iter().enumerate() {
         let params: Vec<String> = (0..function.params)
@@ -258,6 +328,29 @@ pub fn print(program: &Program) -> String {
                     Instr::Spawn(operand) => {
                         format!("spawn {}", print_operand(function, operand))
                     }
+                    Instr::SpawnReactor {
+                        dest,
+                        reactor,
+                        args,
+                    } => {
+                        let args: Vec<String> =
+                            args.iter().map(|a| print_operand(function, a)).collect();
+                        format!(
+                            "{} = spawn reactor {}#{reactor}({})",
+                            print_place(function, dest),
+                            program.reactors[*reactor].name,
+                            args.join(", ")
+                        )
+                    }
+                    Instr::SetSlot(slot, operand) => {
+                        format!("set slot {slot} = {}", print_operand(function, operand))
+                    }
+                    Instr::Emit { task, returns } => match returns {
+                        Some(input) => {
+                            format!("emit {} -> input {input}", print_operand(function, task))
+                        }
+                        None => format!("emit {}", print_operand(function, task)),
+                    },
                 };
                 out.push_str(&format!("    {text}\n"));
             }
@@ -343,7 +436,85 @@ fn print_rvalue(program: &Program, function: &Function, rvalue: &Rvalue) -> Stri
                 args(operands)
             )
         }
+        Rvalue::ReactorInput(operand, index) => {
+            format!("input {index} of {}", print_operand(function, operand))
+        }
+        Rvalue::ReactorExport(operand, index) => {
+            format!("export {index} of {}", print_operand(function, operand))
+        }
     }
+}
+
+/// The reactor stanza: the dependency graph, the slot map, the topological order, and each input's
+/// propagation plan.
+///
+/// These lines are the compile-time artifact the milestone exists to produce, so they are printed
+/// rather than left to be reconstructed from the function table. `norn graph` prints them alone.
+pub fn print_reactors(program: &Program) -> String {
+    print_graph(program, None)
+}
+
+/// The same stanza, optionally narrowed to one reactor. `norn graph <file> [Name]` prints this.
+pub fn print_graph(program: &Program, wanted: Option<&str>) -> String {
+    let mut out = String::new();
+    for (id, reactor) in program.reactors.iter().enumerate() {
+        if wanted.is_some_and(|wanted| wanted != reactor.name) {
+            continue;
+        }
+        out.push_str(&format!("reactor {} #{id}\n", reactor.name));
+        for (index, node) in reactor.nodes.iter().enumerate() {
+            let kind = match &node.kind {
+                NodeKind::Param { slot, index } => format!("param slot {slot} arg {index}"),
+                NodeKind::State { slot, init } => {
+                    format!("state slot {slot} init {}#{init}", program.fns[*init].name)
+                }
+                NodeKind::Signal { body } => {
+                    format!("signal {}#{body}", program.fns[*body].name)
+                }
+            };
+            let deps: Vec<String> = node
+                .deps
+                .iter()
+                .map(|dep| reactor.nodes[*dep].name.clone())
+                .collect();
+            let exported = if reactor.exports.contains(&index) {
+                " export"
+            } else {
+                ""
+            };
+            out.push_str(&format!(
+                "    node {index} {} {kind}{exported} <- [{}]\n",
+                node.name,
+                deps.join(", ")
+            ));
+        }
+        out.push_str(&format!("    order [{}]\n", names(reactor, &reactor.order)));
+        for (index, input) in reactor.inputs.iter().enumerate() {
+            out.push_str(&format!(
+                "    input {index} {} capacity {} overflow {} handler {}#{}\n",
+                input.name,
+                input.capacity,
+                input.overflow.name(),
+                program.fns[input.handler].name,
+                input.handler
+            ));
+            out.push_str(&format!("        plan [{}]\n", names(reactor, &input.plan)));
+        }
+        out.push_str(&format!(
+            "    exports [{}]\n",
+            names(reactor, &reactor.exports)
+        ));
+        out.push('\n');
+    }
+    out
+}
+
+fn names(reactor: &Reactor, nodes: &[usize]) -> String {
+    nodes
+        .iter()
+        .map(|node| reactor.nodes[*node].name.clone())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn print_term(function: &Function, term: &Term) -> String {

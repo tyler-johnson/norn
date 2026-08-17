@@ -14,18 +14,21 @@ use std::collections::VecDeque;
 use std::io;
 
 pub mod clock;
+pub mod graph;
 pub mod poll;
 pub mod scope;
 pub mod task;
 pub mod timer;
 pub mod trace;
 
+use crate::graph::{ReactorSpec, ReactorState};
 use crate::poll::Readiness;
 use crate::task::{TaskState, Wait};
 use crate::timer::Timers;
 use crate::trace::{Event, Trace, WaitReason};
 
 pub use crate::clock::{Clock, Millis};
+pub use crate::graph::{Effect, Graph, Handled, NodeSpec, Overflow, ReactorId, Update};
 pub use crate::poll::{ResourceId, ResourceKind};
 pub use crate::scope::Parent;
 pub use crate::task::{Status, TaskId};
@@ -83,11 +86,13 @@ impl std::fmt::Display for Trap {
 /// Something the scheduler can run a slice of.
 ///
 /// One queue rather than two, so that "a reactor takes one input at a time, and a flood of messages
-/// cannot starve a task" is a property of the ordering rather than a claim about it. The second
-/// variant arrives with turns; until then this is a `TaskId` with a name.
+/// cannot starve a task" is a property of the ordering rather than a claim about it. A reactor
+/// joins the queue when a message lands in an empty mailbox and rejoins it after its turn if more
+/// remain, so everything else runnable goes ahead of its next message.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Runnable {
     Task(TaskId),
+    Reactor(ReactorId),
 }
 
 /// What one resumption of a task body produced.
@@ -142,28 +147,34 @@ impl Config {
     }
 }
 
+/// Everything the runtime cannot know for itself, in one place.
+///
+/// `make` turns a task value into a runnable body and `graph` evaluates a node; both are the
+/// engine's business, because only the engine knows what a value is. `reactors` is the compile-time
+/// plan the graph is walked by — plain data, so that holding it costs `norn-rt` no knowledge of NIR.
+pub struct Engine<'e, V> {
+    pub make: Box<dyn Fn(&V) -> Result<Box<dyn Body<V> + 'e>, Trap> + 'e>,
+    pub graph: Box<dyn Graph<V> + 'e>,
+    pub reactors: Vec<ReactorSpec>,
+}
+
 pub struct Runtime<'e, V> {
     core: Core<'e, V>,
 }
 
-impl<'e, V> Runtime<'e, V> {
-    /// `make` turns a task value into a runnable body. The runtime cannot do it itself — a task
-    /// value is the engine's business — and needs it for every `spawn` and for the root.
-    pub fn new(
-        config: Config,
-        out: &'e mut dyn Output,
-        make: impl Fn(&V) -> Result<Box<dyn Body<V> + 'e>, Trap> + 'e,
-    ) -> Runtime<'e, V> {
+impl<'e, V: Clone> Runtime<'e, V> {
+    pub fn new(config: Config, out: &'e mut dyn Output, engine: Engine<'e, V>) -> Runtime<'e, V> {
         Runtime {
             core: Core {
                 tasks: Vec::new(),
+                reactors: Vec::new(),
                 ready: VecDeque::new(),
                 timers: Timers::default(),
                 readiness: Readiness::default(),
                 clock: config.clock,
                 trace: Trace::new(config.trace),
                 out,
-                make: Box::new(make),
+                engine,
                 root: None,
                 result: None,
             },
@@ -190,18 +201,19 @@ impl<'e, V> Runtime<'e, V> {
 /// so that a `Cx` may borrow the rest.
 pub(crate) struct Core<'e, V> {
     tasks: Vec<TaskState<'e, V>>,
-    ready: VecDeque<Runnable>,
+    pub(crate) reactors: Vec<ReactorState<V>>,
+    pub(crate) ready: VecDeque<Runnable>,
     timers: Timers,
     readiness: Readiness,
     clock: Clock,
     trace: Trace,
     out: &'e mut dyn Output,
-    make: Box<dyn Fn(&V) -> Result<Box<dyn Body<V> + 'e>, Trap> + 'e>,
+    pub(crate) engine: Engine<'e, V>,
     root: Option<TaskId>,
     result: Option<V>,
 }
 
-impl<'e, V> Core<'e, V> {
+impl<'e, V: Clone> Core<'e, V> {
     pub(crate) fn state(&self, task: TaskId) -> &TaskState<'e, V> {
         &self.tasks[task.index()]
     }
@@ -232,6 +244,7 @@ impl<'e, V> Core<'e, V> {
                         }
                         self.step(task)?;
                     }
+                    Runnable::Reactor(reactor) => self.turn(reactor)?,
                 }
                 if let Some(value) = self.result.take() {
                     return Ok(value);
@@ -266,6 +279,7 @@ impl<'e, V> Core<'e, V> {
                     Some(Wait::Timer(deadline)) => WaitReason::Timer(*deadline),
                     Some(Wait::Io { resource, write }) if *write => WaitReason::Write(*resource),
                     Some(Wait::Io { resource, .. }) => WaitReason::Read(*resource),
+                    Some(Wait::Mailbox(reactor)) => WaitReason::Mailbox(*reactor),
                     None => WaitReason::Nothing,
                 };
                 self.state_mut(task).status = Status::Parked;
@@ -337,7 +351,7 @@ pub struct Cx<'c, 'e, V> {
     task: TaskId,
 }
 
-impl<'e, V> Cx<'_, 'e, V> {
+impl<'e, V: Clone> Cx<'_, 'e, V> {
     pub fn task(&self) -> TaskId {
         self.task
     }

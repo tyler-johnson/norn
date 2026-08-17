@@ -1,0 +1,217 @@
+=== nir ===
+record Snapshot #0 (accepted, rejected, open, healthy)
+enum Option #0 (None/0, Some/1)
+enum Result #1 (Ok/1, Err/1)
+enum IoError #2 (NotFound/0, Denied/0, InUse/0, Refused/0, Closed/0, Other/1)
+
+reactor Gate #0
+    node 0 limit param slot 0 arg 0 <- []
+    node 1 accepted state slot 1 init Gate.accepted.init#4 <- []
+    node 2 released state slot 2 init Gate.released.init#5 <- []
+    node 3 rejected state slot 3 init Gate.rejected.init#6 <- []
+    node 4 open signal Gate.open#7 <- [accepted, released]
+    node 5 healthy signal Gate.healthy#8 <- [open, limit]
+    node 6 snapshot signal Gate.snapshot#9 export <- [accepted, rejected, open, healthy]
+    order [limit, accepted, released, rejected, open, healthy, snapshot]
+    input 0 opened capacity 64 overflow reject handler Gate.on.opened#2
+        plan [accepted, rejected, open, healthy, snapshot]
+    input 1 closed capacity 64 overflow reject handler Gate.on.closed#3
+        plan [released, open, healthy, snapshot]
+    exports [snapshot]
+
+task fn report #0(_0/open)
+    local _1
+    local _2
+    local _3
+  b0:
+    _1 = task builtin sleep(1)
+    await _1 -> _2, resume b1
+  b1:
+    _3 = builtin print(_0/open)
+    return _3
+
+task fn main #1()
+    local _0/gate
+    local _1
+    local _2
+    local _3
+    local _4
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+    local _10
+    local _11
+    local _12
+    local _13
+    local _14
+    local _15
+    local _16
+    local _17
+    local _18
+    local _19
+  b0:
+    scope enter
+    _2 = spawn reactor Gate#0(2)
+    _0/gate = _2
+    _3 = input 0 of _0/gate
+    _4 = task builtin send(_3, ())
+    await _4 -> _5, resume b1
+  b1:
+    _6 = input 0 of _0/gate
+    _7 = task builtin send(_6, ())
+    await _7 -> _8, resume b2
+  b2:
+    _9 = input 0 of _0/gate
+    _10 = task builtin send(_9, ())
+    await _10 -> _11, resume b3
+  b3:
+    _12 = input 1 of _0/gate
+    _13 = task builtin send(_12, ())
+    await _13 -> _14, resume b4
+  b4:
+    _15 = task builtin sleep(50)
+    await _15 -> _16, resume b5
+  b5:
+    _17 = export 0 of _0/gate
+    _18 = builtin latest(_17)
+    _19 = builtin print(_18)
+    _1 = _19
+    scope exit, resume b6
+  b6:
+    return _1
+
+fn Gate.on.opened #2(_0/limit, _1/accepted, _2/released, _3/rejected)
+    local _4
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+    local _10
+  b0:
+    _4 = _1/accepted add.i 1
+    _1/accepted = _4
+    set slot 1 = _1/accepted
+    _6 = _1/accepted sub.i _2/released
+    _7 = _6 gt _0/limit
+    branch _7 ? b1 : b2
+  b1:
+    _8 = _3/rejected add.i 1
+    _3/rejected = _8
+    set slot 3 = _3/rejected
+    _9 = _1/accepted sub.i _2/released
+    _10 = task report#0(_9)
+    emit _10
+    _5 = ()
+    goto b3
+  b2:
+    _5 = ()
+    goto b3
+  b3:
+    return _5
+
+fn Gate.on.closed #3(_0/limit, _1/accepted, _2/released, _3/rejected)
+    local _4
+  b0:
+    _4 = _2/released add.i 1
+    _2/released = _4
+    set slot 2 = _2/released
+    return ()
+
+fn Gate.accepted.init #4()
+  b0:
+    return 0
+
+fn Gate.released.init #5()
+  b0:
+    return 0
+
+fn Gate.rejected.init #6()
+  b0:
+    return 0
+
+fn Gate.open #7(_0/accepted, _1/released)
+    local _2
+  b0:
+    _2 = _0/accepted sub.i _1/released
+    return _2
+
+fn Gate.healthy #8(_0/open, _1/limit)
+    local _2
+  b0:
+    _2 = _0/open le _1/limit
+    return _2
+
+fn Gate.snapshot #9(_0/accepted, _1/rejected, _2/open, _3/healthy)
+    local _4
+  b0:
+    _4 = #Snapshot(_0/accepted, _1/rejected, _2/open, _3/healthy)
+    return _4
+
+=== graph ===
+reactor Gate #0
+    node 0 limit param slot 0 arg 0 <- []
+    node 1 accepted state slot 1 init Gate.accepted.init#4 <- []
+    node 2 released state slot 2 init Gate.released.init#5 <- []
+    node 3 rejected state slot 3 init Gate.rejected.init#6 <- []
+    node 4 open signal Gate.open#7 <- [accepted, released]
+    node 5 healthy signal Gate.healthy#8 <- [open, limit]
+    node 6 snapshot signal Gate.snapshot#9 export <- [accepted, rejected, open, healthy]
+    order [limit, accepted, released, rejected, open, healthy, snapshot]
+    input 0 opened capacity 64 overflow reject handler Gate.on.opened#2
+        plan [accepted, rejected, open, healthy, snapshot]
+    input 1 closed capacity 64 overflow reject handler Gate.on.closed#3
+        plan [released, open, healthy, snapshot]
+    exports [snapshot]
+
+=== output ===
+3
+#Snapshot(accepted: 3, rejected: 1, open: 2, healthy: true)
+=== result ===
+()
+=== trace ===
+0ms t0 spawn main root
+0ms t0 resume
+0ms t0 scope enter 1
+0ms R0 create Gate in t0
+0ms R0 publish 0
+0ms t0 park timer 50ms
+0ms R0 turn 0 opened
+0ms R0 commit accepted
+0ms R0 recompute open
+0ms R0 recompute healthy
+0ms R0 recompute snapshot
+0ms R0 publish 1
+0ms R0 turn 1 opened
+0ms R0 commit accepted
+0ms R0 recompute open
+0ms R0 recompute healthy
+0ms R0 recompute snapshot
+0ms R0 publish 2
+0ms R0 turn 2 opened
+0ms R0 commit accepted
+0ms R0 commit rejected
+0ms R0 recompute open
+0ms R0 recompute healthy
+0ms R0 recompute snapshot
+0ms R0 publish 3
+0ms t1 spawn report in t0
+0ms R0 effect report t1
+0ms t1 resume
+0ms t1 park timer 1ms
+0ms R0 turn 3 closed
+0ms R0 commit released
+0ms R0 recompute open
+0ms R0 recompute healthy
+0ms R0 recompute snapshot
+0ms R0 publish 4
+1ms -- clock
+1ms t1 resume
+1ms t1 done
+50ms -- clock
+50ms t0 resume
+50ms R0 stop
+50ms t0 scope exit 1
+50ms t0 done

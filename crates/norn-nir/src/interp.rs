@@ -14,8 +14,12 @@ use std::fmt::Write as _;
 use std::io;
 use std::rc::Rc;
 
+use std::cell::RefCell;
+
+use norn_hir::hir;
 use norn_hir::hir::{BinOp, Builtin, EnumId, UnOp, io_error};
-use norn_rt::{Body, Cx, Runtime, Step};
+use norn_rt::graph::{Handled, InputSpec, NodeSpec, ReactorSpec};
+use norn_rt::{Body, Cx, Effect, Engine, Graph, ReactorId, Runtime, Step, Update};
 
 pub use norn_rt::{Captured, Clock, Config, Output, Poll, ResourceId, ResourceKind, Stdout, Trap};
 
@@ -34,6 +38,12 @@ pub enum Value {
     Task(Rc<TaskValue>),
     /// A handle into the runtime's resource table.
     Resource(ResourceKind, ResourceId),
+    /// A handle to a running reactor.
+    Reactor(ReactorId),
+    /// One of its inputs, as a value `send` can be handed.
+    Input(ReactorId, usize),
+    /// One of its exported signals, as a value `latest` can read.
+    Signal(ReactorId, usize),
 }
 
 #[derive(PartialEq, Debug)]
@@ -80,7 +90,12 @@ pub fn execute<'p>(
     let root = Value::Task(Rc::new(TaskValue {
         kind: TaskKind::Fn(entry, Vec::new()),
     }));
-    let mut runtime = Runtime::new(config, out, move |value| body(program, value));
+    let engine = Engine {
+        make: Box::new(move |value| body(program, value)),
+        graph: Box::new(Nodes { program }),
+        reactors: specs(program),
+    };
+    let mut runtime = Runtime::new(config, out, engine);
     let value = runtime.block_on(root);
     Outcome {
         value,
@@ -123,9 +138,7 @@ enum State {
 
 impl Body<Value> for TaskBody<'_> {
     fn resume(&mut self, cx: &mut Cx<'_, '_, Value>) -> Step<Value> {
-        let interpreter = Interpreter {
-            program: self.program,
-        };
+        let interpreter = Interpreter::new(self.program);
         let stepped = match &mut self.state {
             State::Frames(frames) => interpreter.resume_task(frames, Some(cx)),
             State::Builtin(builtin, args) => match interpreter.poll_builtin(cx, *builtin, args) {
@@ -162,6 +175,36 @@ fn new_frame(program: &Program, function: FnId, args: Vec<Value>, dest: Option<P
 
 struct Interpreter<'p> {
     program: &'p Program,
+    /// Where a handler's slot writes and effect requests accumulate.
+    ///
+    /// `None` everywhere else, which is the second reason `SetSlot` and `Emit` cannot appear in
+    /// ordinary code: `lower`'s verifier rejects them statically, and reaching one with nothing to
+    /// put it in traps.
+    turn: Option<RefCell<Handled<Value>>>,
+}
+
+impl<'p> Interpreter<'p> {
+    fn new(program: &'p Program) -> Interpreter<'p> {
+        Interpreter {
+            program,
+            turn: None,
+        }
+    }
+
+    /// Run a plain function to completion with no runtime in reach.
+    ///
+    /// This is the whole of how a turn evaluates anything. Passing `None` for the `Cx` is not a
+    /// convention the evaluator follows — it is the absence of the thing every impure arm needs, so
+    /// there is no path from here to printing, spawning, or suspending.
+    fn call(&self, function: FnId, args: Vec<Value>) -> Result<Value, Trap> {
+        let mut frames = vec![new_frame(self.program, function, args, None)];
+        match self.resume_task(&mut frames, None)? {
+            Step::Done(value) => Ok(value),
+            // Unreachable: every suspension point asks for a `Cx` first and traps without one.
+            Step::Park => Err(Trap::new("a reactor node suspended", "turn")),
+            Step::Trap(trap) => Err(trap),
+        }
+    }
 }
 
 impl Interpreter<'_> {
@@ -210,6 +253,40 @@ impl Interpreter<'_> {
                         };
                         let moved = moved_resources(&task.kind);
                         impure(cx.as_deref_mut(), "spawn")?.spawn(value, &moved)?;
+                    }
+                    Instr::SpawnReactor {
+                        dest,
+                        reactor,
+                        args,
+                    } => {
+                        frame.instr += 1;
+                        let args: Vec<Value> =
+                            args.iter().map(|arg| read_operand(frame, arg)).collect();
+                        let id = impure(cx.as_deref_mut(), "spawn reactor")?
+                            .create_reactor(*reactor, args)?;
+                        let dest = dest.clone();
+                        write_place(frame, &dest, Value::Reactor(id));
+                    }
+                    Instr::SetSlot(slot, operand) => {
+                        frame.instr += 1;
+                        let value = read_operand(frame, operand);
+                        let Some(turn) = &self.turn else {
+                            return Err(self.trap(frame, "a state commit outside a turn"));
+                        };
+                        turn.borrow_mut().writes.push((*slot, value));
+                    }
+                    Instr::Emit { task, returns } => {
+                        frame.instr += 1;
+                        let value = read_operand(frame, task);
+                        let Some(turn) = &self.turn else {
+                            return Err(self.trap(frame, "an effect request outside a turn"));
+                        };
+                        // Built, not started. The runtime launches it after the snapshot is
+                        // published, so describing it here cannot perform it.
+                        turn.borrow_mut().effects.push(Effect {
+                            task: value,
+                            returns: *returns,
+                        });
                     }
                 }
                 continue;
@@ -348,6 +425,18 @@ impl Interpreter<'_> {
                 let fields = args.iter().map(|arg| read_operand(frame, arg)).collect();
                 Value::Variant(*enum_id, *variant, Rc::new(fields))
             }
+            Rvalue::ReactorInput(operand, index) => match read_operand(frame, operand) {
+                Value::Reactor(id) => Value::Input(id, *index),
+                other => {
+                    return Err(self.trap(frame, format!("not a reactor handle: {other:?}")));
+                }
+            },
+            Rvalue::ReactorExport(operand, index) => match read_operand(frame, operand) {
+                Value::Reactor(id) => Value::Signal(id, *index),
+                other => {
+                    return Err(self.trap(frame, format!("not a reactor handle: {other:?}")));
+                }
+            },
             Rvalue::Call(..) => unreachable!("calls are handled by the frame stack"),
         })
     }
@@ -377,6 +466,18 @@ impl Interpreter<'_> {
                     Ok(port) => Value::Int(port),
                     Err(err) => {
                         return Err(self.trap(frame, format!("`listener_port`: {}", err.kind())));
+                    }
+                }
+            }
+            Builtin::Latest => {
+                let Value::Signal(reactor, export) = &args[0] else {
+                    return Err(self.trap(frame, "`latest` of something that is not a signal"));
+                };
+                let (reactor, export) = (*reactor, *export);
+                match impure(cx, "latest")?.latest(reactor, export) {
+                    Some(value) => value,
+                    None => {
+                        return Err(self.trap(frame, "`latest` of an export that does not exist"));
                     }
                 }
             }
@@ -434,6 +535,18 @@ impl Interpreter<'_> {
             Builtin::TcpClose => {
                 cx.close(resource(name, &args[0])?);
                 Poll::Ready(Value::Unit)
+            }
+            Builtin::Send => {
+                let Value::Input(reactor, input) = &args[0] else {
+                    return Err(Trap::new(
+                        "`send` to something that is not an input",
+                        "runtime",
+                    ));
+                };
+                match cx.send(*reactor, *input, args[1].clone()) {
+                    Poll::Ready(()) => Poll::Ready(Value::Unit),
+                    Poll::Pending => Poll::Pending,
+                }
             }
             plain => {
                 return Err(Trap::new(
@@ -521,6 +634,9 @@ impl Interpreter<'_> {
                 format!("<task {name}>")
             }
             Value::Resource(kind, id) => format!("<{} {id}>", kind.name()),
+            Value::Reactor(id) => format!("<reactor {id}>"),
+            Value::Input(id, index) => format!("<input {index} of {id}>"),
+            Value::Signal(id, index) => format!("<signal {index} of {id}>"),
             Value::Record(id, fields) => {
                 let layout = &self.program.records[*id];
                 let mut out = format!("#{}(", layout.name);
@@ -714,5 +830,143 @@ fn write_place(frame: &mut Frame, place: &Place, value: Value) {
 
 /// Render a value without an interpreter in hand. Used by `norn run` to print a result.
 pub fn render(program: &Program, value: &Value) -> String {
-    Interpreter { program }.render(value)
+    Interpreter::new(program).render(value)
+}
+
+/// The interpreter as the runtime's graph engine.
+///
+/// Every method here takes values and returns values, because that is all `trait Graph<V>` offers.
+/// There is no `Cx` to reach for, so purity is not a rule this implementation follows — it is a
+/// shape it could not break if it tried.
+struct Nodes<'p> {
+    program: &'p Program,
+}
+
+impl Graph<Value> for Nodes<'_> {
+    fn create(&self, reactor: usize, args: Vec<Value>) -> Result<Vec<Value>, Trap> {
+        let def = &self.program.reactors[reactor];
+        let interpreter = Interpreter::new(self.program);
+        // Parameters come before state in slot order, and an initialiser may read only parameters,
+        // so one pass in slot order is enough: everything an initialiser can name is already there.
+        let mut values: Vec<Option<Value>> = vec![None; def.nodes.len()];
+        for &node in &def.slots {
+            let value = match &def.nodes[node].kind {
+                NodeKind::Param { index, .. } => args.get(*index).cloned().ok_or_else(|| {
+                    Trap::new("a reactor was created with too few arguments", "runtime")
+                })?,
+                NodeKind::State { init, .. } => {
+                    let mut deps = Vec::with_capacity(def.nodes[node].deps.len());
+                    for &dep in &def.nodes[node].deps {
+                        let Some(value) = &values[dep] else {
+                            return Err(Trap::new(
+                                "a state initialiser read a value that is not ready",
+                                "runtime",
+                            ));
+                        };
+                        deps.push(value.clone());
+                    }
+                    interpreter.call(*init, deps)?
+                }
+                NodeKind::Signal { .. } => unreachable!("a signal holds no slot"),
+            };
+            values[node] = Some(value);
+        }
+        Ok(def
+            .slots
+            .iter()
+            .map(|node| values[*node].clone().expect("just filled"))
+            .collect())
+    }
+
+    fn handle(
+        &self,
+        reactor: usize,
+        input: usize,
+        message: Value,
+        slots: &[Value],
+    ) -> Result<Handled<Value>, Trap> {
+        let function = self.program.reactors[reactor].inputs[input].handler;
+        // An input carrying `()` binds nothing, so the handler's arity says whether the message is
+        // one of its arguments.
+        let mut args = Vec::with_capacity(slots.len() + 1);
+        if self.program.fns[function].params == slots.len() + 1 {
+            args.push(message);
+        }
+        args.extend(slots.iter().cloned());
+
+        let interpreter = Interpreter {
+            program: self.program,
+            turn: Some(RefCell::new(Handled {
+                writes: Vec::new(),
+                effects: Vec::new(),
+            })),
+        };
+        interpreter.call(function, args)?;
+        Ok(interpreter.turn.expect("just installed").into_inner())
+    }
+
+    fn recompute(
+        &self,
+        reactor: usize,
+        node: usize,
+        deps: &[Value],
+    ) -> Result<Update<Value>, Trap> {
+        let NodeKind::Signal { body } = self.program.reactors[reactor].nodes[node].kind else {
+            return Err(Trap::new(
+                "recomputed a node that is not a signal",
+                "runtime",
+            ));
+        };
+        let value = Interpreter::new(self.program).call(body, deps.to_vec())?;
+        // Always `Set`: deciding a value is unchanged needs an equality on `Value`, and the only
+        // pruning v0 does is the static one — each input's plan.
+        Ok(Update::Set(value))
+    }
+}
+
+/// The declared overflow policy, in the runtime's vocabulary.
+///
+/// Spelled twice on purpose. `norn-rt` may not depend on the front end — the same category of
+/// decision as `ResourceKind` — so the translation is one match rather than a shared crate, and a
+/// new policy has to be added on both sides deliberately.
+fn overflow(policy: hir::Overflow) -> norn_rt::Overflow {
+    match policy {
+        hir::Overflow::Reject => norn_rt::Overflow::Reject,
+        hir::Overflow::DropOldest => norn_rt::Overflow::DropOldest,
+        hir::Overflow::DropNewest => norn_rt::Overflow::DropNewest,
+        hir::Overflow::Wait => norn_rt::Overflow::Wait,
+    }
+}
+
+/// The graph, as the runtime consumes it: names, indices, and enums, with nothing of NIR in it.
+fn specs(program: &Program) -> Vec<ReactorSpec> {
+    program
+        .reactors
+        .iter()
+        .map(|reactor| ReactorSpec {
+            name: reactor.name.clone(),
+            nodes: reactor
+                .nodes
+                .iter()
+                .map(|node| NodeSpec {
+                    name: node.name.clone(),
+                    deps: node.deps.clone(),
+                    slot: node.kind.slot(),
+                })
+                .collect(),
+            slots: reactor.slots.clone(),
+            inputs: reactor
+                .inputs
+                .iter()
+                .map(|input| InputSpec {
+                    name: input.name.clone(),
+                    capacity: input.capacity,
+                    overflow: overflow(input.overflow),
+                    plan: input.plan.clone(),
+                })
+                .collect(),
+            order: reactor.order.clone(),
+            exports: reactor.exports.clone(),
+        })
+        .collect()
 }

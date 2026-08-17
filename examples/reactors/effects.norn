@@ -1,0 +1,72 @@
+// An effect's result re-entering as a later input: `DESIGN.md` §2's
+// `EffectResult → ReactorMailbox → a later turn`, written out.
+//
+// The order to read off the trace is the whole claim. For each `queued` message the turn commits
+// `pending`, publishes, and only *then* starts `deliver` — never the other way round, and never
+// with `deliver` running while the graph is part-way settled. Each delivery finishes some turns
+// later and arrives as a `settled` message, which is an ordinary input with an ordinary handler.
+
+enum Outcome {
+    Delivered(I64)
+    Failed
+}
+
+record Report {
+    pending: I64
+    delivered: I64
+    failed: I64
+}
+
+task fn deliver(id: I64) -> Outcome
+    uses { clock }
+{
+    await sleep(id)
+    if id == 2 {
+        #Outcome.Failed
+    } else {
+        #Outcome.Delivered(id)
+    }
+}
+
+reactor Mailbox()
+    uses { clock }
+{
+    input queued: I64 [capacity: 8, overflow: reject]
+    input settled: Outcome [capacity: 8, overflow: reject]
+
+    state pending: I64 = 0
+    state delivered: I64 = 0
+    state failed: I64 = 0
+
+    on queued(id) {
+        pending = pending + 1
+        after_commit deliver(id) -> settled
+    }
+
+    on settled(outcome) {
+        pending = pending - 1
+        match outcome {
+            #Outcome.Delivered(_) => {
+                delivered = delivered + 1
+            }
+            #Outcome.Failed => {
+                failed = failed + 1
+            }
+        }
+    }
+
+    export signal report = #Report(pending: pending, delivered: delivered, failed: failed)
+}
+
+task fn main() -> ()
+    uses { clock }
+{
+    scope {
+        let mailbox = spawn reactor Mailbox()
+        await send(mailbox.queued, 1)
+        await send(mailbox.queued, 2)
+        await send(mailbox.queued, 3)
+        await sleep(50)
+        print(latest(mailbox.report))
+    }
+}

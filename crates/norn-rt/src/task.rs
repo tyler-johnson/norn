@@ -5,6 +5,7 @@
 
 use crate::Body;
 use crate::clock::Millis;
+use crate::graph::{Completion, ReactorId};
 use crate::poll::ResourceId;
 use crate::scope::Scope;
 
@@ -40,7 +41,13 @@ impl Status {
 
 pub(crate) enum Wait {
     Timer(Millis),
-    Io { resource: ResourceId, write: bool },
+    Io {
+        resource: ResourceId,
+        write: bool,
+    },
+    /// Parked on a full mailbox whose input declared `overflow: wait`. Woken by the turn that
+    /// makes room.
+    Mailbox(ReactorId),
 }
 
 pub(crate) struct TaskState<'e, V> {
@@ -54,5 +61,8 @@ pub(crate) struct TaskState<'e, V> {
     pub wait: Option<Wait>,
     /// Resources this task owns and will close when it ends, however it ends.
     pub resources: Vec<ResourceId>,
+    /// Where this task's value goes when it finishes, when it is an effect a reactor asked for.
+    /// Without it `finish` would drop every non-root value, and an effect could not report back.
+    pub completion: Option<Completion>,
     pub status: Status,
 }

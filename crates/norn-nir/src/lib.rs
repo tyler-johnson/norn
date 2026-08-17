@@ -10,4 +10,4 @@ pub mod nir;
 
 pub use interp::{Captured, Clock, Config, Outcome, Output, Stdout, Trap, Value, execute, run};
 pub use lower::lower;
-pub use nir::{Program, print};
+pub use nir::{Program, print, print_graph};
