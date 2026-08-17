@@ -82,8 +82,12 @@ backend should therefore be made as cheap as possible for as long as possible.
 **Decision: emit a restricted subset of Rust and compile it with `rustc`.**
 
 The restriction is the substance of the decision. Generated code may use structs, enums, `match`,
-loops, `Rc`/`Arc`, and calls into `norn-rt`. It may **not** use `async`, lifetimes, or traits. That
-subset maps one-to-one onto a direct Cranelift backend later, so the eventual swap is mechanical.
+loops, `Rc`/`Arc`, and calls into `norn-rt`. It may **not** use `async` or lifetimes, and it may
+contain no trait *definitions* and no generics. What it must do is implement `norn-rt`'s two engine
+traits monomorphically: it already produces a `Box<dyn Body<V>>` for every task, and from M3 it also
+implements `Graph<V>` for the reactor tables. Those two are the ABI between backend and runtime, and
+a vtable of fixed shape is not what this rule exists to prevent. That subset maps one-to-one onto a
+direct Cranelift backend later, so the eventual swap is mechanical.
 The moment generated code leans on `rustc`'s `async` lowering or its borrow checker, Norn has
 borrowed semantics it must eventually own, and the swap stops being mechanical.
 
@@ -103,8 +107,18 @@ Alternatives considered:
   built-in `Result<T, E>` and `Option<T>` with `?`.
 - **Tasks** — `task fn`, `await`, `scope { spawn ... }`, cancellation, structured join on scope exit.
 - **Reactors** — static graphs only: `input` with declared capacity and overflow policy, `state`,
-  `signal`, `event`, the operators `hold` / `scan` / `count` / `map` / `merge` / `combine`,
-  `after_commit` effect requests, `export`, `.latest()`, `.send()`.
+  `signal`, `on` handlers, `after_commit` effect requests, `export`, `latest`, and `send`.
+  `uses { … }` applies to a reactor as well as to a task: it is the authority the reactor's effects
+  need, and the spawner's set must cover it.
+
+  `combine` is struck, subsumed by lifting: a signal expression may mention any number of nodes and
+  is lifted to a function of them, so combining is what an ordinary expression already does. `hold`,
+  `scan`, `count`, `map`, `merge`, `delay`, and `keyed` are deferred alongside `event` nodes — they
+  are stream shape and scheduling rather than causality, and M3 is the causality milestone.
+
+  `latest` and `send` are ordinary functions over a *closed handle table*: `reactor.input` and
+  `reactor.export` are the only members a handle has. The language has no method resolution, so
+  `.latest()` and `.send()` cannot be spelled as methods until it does.
 - **Memory** — move checking, affine operating-system resources released on scope exit *and* on
   cancellation, `Shared<T>` immutable reference counting.
 - **Effects** — `uses { ... }` as a checked annotation.
@@ -219,8 +233,19 @@ readable diagnostic, topological propagation plan, state-slot allocation. Runtim
 declared overflow policy, serial turn execution, atomic snapshot publication, effect launch strictly
 after stabilisation.
 
-*Done when:* the configuration-watching reactor from `DESIGN.md` §5 runs; `norn graph App` prints
-the dependency graph; turn traces are deterministic and golden-tested.
+The done-when is stated against a worked example built from TCP and timers rather than against
+`DESIGN.md` §5's configuration watcher. That six-line sketch needs `fs.read_json<Config>` (generics),
+file I/O, an inotify `fs.watch`, `map_task`, and `Event.once` — five things v0 excludes — so passing
+it would mean building most of M6 first. The claims it was chosen to demonstrate are unchanged; only
+the program making them is smaller.
+
+*Done when:* `examples/reactors/gate.norn` runs — a reactor counting what the M2 echo server holds
+open — and its golden trace shows one recompute pass and one publish per turn, an effect starting
+only after the publish of the turn that requested it, and a snapshot whose diamond-descended fields
+never disagree; `norn graph <file> [Name]` prints nodes, slots, the topological order, the per-input
+propagation plans, and the exports; every overflow policy is observable in a trace;
+`examples/reactor-errors/` snapshots one diagnostic per rule, `cycle.norn` among them; and every
+example reproduces its trace exactly under `--virtual-clock`.
 
 ### M4 — Ownership
 
@@ -277,6 +302,8 @@ norn/
 │   ├── run/                 programs that must check, lower, and run
 │   ├── tasks/               programs whose NIR, output, and trace are golden  (M2)
 │   ├── tcp/                 the echo server                                   (M2)
+│   ├── reactors/            programs whose graph and turn trace are golden    (M3)
+│   ├── reactor-errors/      reactors that must not check                      (M3)
 │   └── type-errors/         programs that must not check
 ├── editors/
 │   └── vscode/              grammar, snippets, and a `norn check` matcher
@@ -287,8 +314,12 @@ norn/
 
 Ordered roughly by when it becomes worth doing, not by importance:
 
-1. **M7 — dynamic subgraphs.** `switch`, child graph regions, reactor-local arenas, subscription
-   lifetimes. Requires the trace tooling from M3.
+1. **M7 — dynamic subgraphs and the operator vocabulary.** `switch`, child graph regions,
+   reactor-local arenas, subscription lifetimes. Closures arrive here too — nothing in M3's surface
+   needed one, and dynamic switching is what real closures are for — and with them `event` nodes,
+   `export event`, and the operators M3 deferred: `hold`, `scan`, `count`, `map`, `merge`, `delay`,
+   `keyed`, and `map_task` policies. The read side of an event also wants `for await`, which needs a
+   loop construct. Requires the trace tooling from M3.
 2. **Multi-threaded scheduler.** Work stealing, parallel reactors on separate workers. The
    single-threaded loop is a correctness baseline to differential-test against.
 3. **Language server.** `norn-lsp` over stdio: diagnostics first, which is `norn_hir::check`'s

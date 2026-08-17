@@ -180,9 +180,13 @@ signal greeting  = "Hello, " + full_name
 signal can_edit  = session.role.allows(Edit) && document.is_open
 ```
 
+**Mentioning a node in a signal expression reads its current value, and the whole expression is lifted to a function of the nodes it mentions.** `full_name` above depends on `user` because it names it; `greeting` depends on `full_name` for the same reason; nothing declares a subscription. That rule is what lets ordinary expressions — arithmetic, `match`, `if`, constructors, calls to pure functions — serve as the reactive vocabulary, rather than an operator for each shape.
+
 If one input replaces `user`, no observer sees a new first name with an old last name. If one input changes both `session` and `document`, `can_edit` is published only after both changes have propagated.
 
 ### State and feedback
+
+This section and §5 and §10 write reactors in an operator-chain style; §6 writes them with explicit `state` and `on` handlers. Both are sketches of the same semantics, and **the v0 subset implements §6's**: explicit state cells with signals as pure derived views. The operator style needs generics and method resolution, which v0 does not have; §6's needs neither, and the last of the open questions below notes that explicit durable state cells are also the friendlier model for snapshotting.
 
 State is explicit through operators such as `hold`, `scan`, and `delay`. An instantaneous dependency cycle is rejected:
 
@@ -448,8 +452,7 @@ reactor Mailbox() {
     on send(message) {
         pending = pending.insert(message.id, Queued)
 
-        after_commit deliver(message)
-            .returns(delivery_finished)
+        after_commit deliver(message) -> delivery_finished
     }
 
     on delivery_finished(id, result) {
@@ -458,7 +461,7 @@ reactor Mailbox() {
 }
 ```
 
-The exact syntax is open, but the semantics are not: the state indicating that delivery is queued becomes stable before delivery begins. A completion becomes a later input. This supports tracing and deterministic tests without claiming that an email or HTTP call can be rolled back.
+The exact syntax is open — v0 spells the result channel `-> delivery_finished` rather than `.returns(…)`, since it has no method resolution — but the semantics are not: the state indicating that delivery is queued becomes stable before delivery begins. A completion becomes a later input. This supports tracing and deterministic tests without claiming that an email or HTTP call can be rolled back.
 
 ### Failure domains
 
@@ -723,7 +726,7 @@ Static reactor graphs can become compact dependency tables and direct function c
 | Component | Responsibility |
 |---|---|
 | **Task scheduler** | Work stealing, coroutine resumption, cancellation, structured scopes, and a separate pool for explicitly blocking foreign calls. |
-| **I/O reactor** | Platform-specific nonblocking sockets, timers, process signals, and supported asynchronous file operations. |
+| **Readiness poller** | Platform-specific nonblocking sockets, timers, process signals, and supported asynchronous file operations. Named for what it answers rather than for the pattern it implements: "reactor" is the usual word, and in this language a reactor is a graph of state and signals. |
 | **Reactive engine** | Mailbox sequencing, turn execution, propagation, stable publication, effect launch, and graph introspection. |
 | **Memory services** | Task regions, shared-value counts, reactor-local graph reclamation, and affine-resource finalization on cancellation. |
 | **Observability** | Structured traces connecting input sequence, graph recomputation, effects, task spans, queue delay, and allocation. |
@@ -841,7 +844,7 @@ task fn main() -> Result<()>
     return Ok(())
 }
 
-task fn handle(app: App.Handle, request: http.Request)
+task fn handle(app: App, request: http.Request)
     -> Result<http.Response>
     uses { fs.read, fs.write, net.connect, clock }
 {
@@ -1346,6 +1349,8 @@ A systematic literature review may reveal a closer precedent than those identifi
 
 Forbidding suspension and I/O is straightforward. Forbidding all potentially long computation is harder. A compiler cannot generally prove a function finishes quickly. Options include requiring total functions in signal expressions, using cost annotations, imposing cooperative budgets, or accepting that "non-blocking" is partly a discipline enforced by tooling and runtime warnings.
 
+*v0 answers this with a theorem rather than a discipline, and only because it can.* The subset has no `while`, no `for`, and no `loop`, so recursion is the only way a pure function can fail to return; one pass over the call graph reachable from a node body rejects it, and every turn is then provably terminating with no annotation burden and no runtime budget. The answer expires the day loops arrive, and should be replaced rather than extended when they do — at which point the options above become live again.
+
 **What is the exact relationship between state and signals?**
 
 One model exposes explicit reactor state and treats signals as derived views. Another permits stateful signal operators such as `scan` throughout the graph. The latter is expressive but can make durable snapshotting and schema evolution harder. A practical language may distinguish durable state cells from ephemeral graph state.
@@ -1356,7 +1361,7 @@ Independent pure subgraphs can theoretically recompute in parallel while preserv
 
 **How should exported signals be observed?**
 
-`latest()` can return an immutable published snapshot without entering the reactor. Stronger reads may need a message and response to ensure ordering relative to prior sends. The language should distinguish stale-tolerant observation from synchronized queries rather than leave that difference implicit.
+`latest()` can return an immutable published snapshot without entering the reactor. Stronger reads may need a message and response to ensure ordering relative to prior sends. The language should distinguish stale-tolerant observation from synchronized queries rather than leave that difference implicit. v0 implements the stale-tolerant half only: `latest` reads the last published snapshot, and the synchronized read remains open.
 
 **How much of ownership should users see?**
 
