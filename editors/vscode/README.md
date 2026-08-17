@@ -31,7 +31,8 @@ To build a `.vsix` instead, `make editor-package` (needs `npm`).
 **Capitalization carries no meaning in Norn.** `Profile` and `profile` are the same kind of name;
 only the `#` mark separates building data from calling a function, and only *position* separates a
 type from a value. So the grammar finds types positionally rather than by case: inside a parameter
-list, after `->`, and inside a `record` or `enum` body. A named argument — `#User(id: 7)` — is
+list — a `fn`'s or a `reactor`'s — after `->`, inside a `record` or `enum` body, and after the
+colon of an `input`, `state`, or `signal` declaration. A named argument — `#User(id: 7)` — is
 lexically identical to a field declaration, so outside those contexts nothing is guessed at, and
 `id` stays an ordinary name rather than being mis-coloured as a type.
 
@@ -42,8 +43,16 @@ Beyond that:
 - Capability names inside `uses { … }` are highlighted as constants. The grammar colours whatever is
   written rather than checking it against the v0 vocabulary — the checker owns that list and names
   the three when you get it wrong.
-- Reserved words (`loop`, `state`, `reactor`, and the rest of `lex.rs`'s list) are marked
-  `invalid.illegal`, in binding positions too. `let state = 1` is an error, and the editor says so
+- `reactor`, `input`, `state`, `signal`, `on`, `after`, and `export` colour as the declarations
+  they are, and a reactor's members read as members rather than as calls: `reactor Gate(…)` names a
+  type, `on opened(…)` names the input it answers, and `after work() -> settled` colours `settled`
+  as the input the result comes back on rather than as a return type.
+- The queue clause `[capacity: 64, overflow: reject]` is anchored on its bracket, so `capacity` and
+  `overflow` colour as the attributes they are there and stay ordinary names everywhere else —
+  they are contextual words, not reserved ones. The four overflow policies colour as constants,
+  because that vocabulary is closed.
+- Reserved words (`loop`, `event`, `for`, `while`, and the rest of `lex.rs`'s list) are marked
+  `invalid.illegal`, in binding positions too. `let event = 1` is an error, and the editor says so
   before the compiler has to.
 - `2.seconds` is a projection off an integer; `2.5` is a float. The grammar splits them the same way
   the lexer does — a dot begins a fraction only when a digit follows it.
@@ -51,7 +60,10 @@ Beyond that:
 
 `crates/norn-hir/tests/editor.rs` asserts that every keyword, reserved word, and builtin the front
 end knows appears in this grammar, so a word added to the language cannot be silently forgotten
-here.
+here. It checks membership rather than placement, which is the half a test can cheaply own; the
+other half is checked by hand, by running the example corpus through `vscode-textmate` itself and
+diffing the tokens against the previous grammar. Nothing from that check is committed — it needs
+npm, and the workspace has no dependencies.
 
 ## Diagnostics
 
@@ -61,7 +73,8 @@ format. The repository's `.vscode/tasks.json` wires it up:
 - **norn: check this file** — the default build task (`Ctrl+Shift+B`); errors land in the Problems
   panel with squiggles in the editor.
 - **norn: check the examples**, **norn: run this file** (under the virtual clock, with the event
-  trace), **norn: format this file**.
+  trace), **norn: graph this file** (the reactor's nodes, slots, propagation order, and per-input
+  plans), **norn: format this file**.
 
 These shell out to `cargo run --profile dogfood`, so they work in a fresh checkout without
 installing the driver first. `make install` puts `norn` on your `PATH` if you would rather the tasks

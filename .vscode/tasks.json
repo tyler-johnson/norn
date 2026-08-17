@@ -5,43 +5,84 @@
       "label": "norn: check this file",
       "type": "shell",
       "command": "cargo run -q --profile dogfood --bin norn -- check ${relativeFile}",
-      "options": { "cwd": "${workspaceFolder}" },
-      "group": { "kind": "build", "isDefault": true },
-      "presentation": { "reveal": "silent", "clear": true },
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "presentation": {
+        "reveal": "silent",
+        "clear": true
+      },
       "problemMatcher": "$norn"
     },
     {
       "label": "norn: check the examples",
       "type": "shell",
-      "command": "cargo run -q --profile dogfood --bin norn -- check examples/*.norn examples/run/*.norn examples/tasks/*.norn examples/tcp/*.norn",
-      "options": { "cwd": "${workspaceFolder}" },
+      "command": "cargo run -q --profile dogfood --bin norn -- check examples/*.norn examples/run/*.norn examples/tasks/*.norn examples/tcp/*.norn examples/reactors/*.norn",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
       "group": "build",
-      "presentation": { "reveal": "always", "clear": true },
+      "presentation": {
+        "reveal": "always",
+        "clear": true
+      },
       "problemMatcher": "$norn"
     },
     {
       "label": "norn: run this file",
       "type": "shell",
       "command": "cargo run -q --profile dogfood --bin norn -- run --trace --virtual-clock ${relativeFile}",
-      "options": { "cwd": "${workspaceFolder}" },
-      "presentation": { "reveal": "always", "clear": true },
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "clear": true
+      },
+      "problemMatcher": "$norn"
+    },
+    {
+      "label": "norn: graph this file",
+      "type": "shell",
+      "command": "cargo run -q --profile dogfood --bin norn -- graph ${relativeFile}",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "clear": true
+      },
       "problemMatcher": "$norn"
     },
     {
       "label": "norn: format this file",
       "type": "shell",
       "command": "cargo run -q --profile dogfood --bin norn -- fmt ${relativeFile}",
-      "options": { "cwd": "${workspaceFolder}" },
-      "presentation": { "reveal": "silent", "clear": true },
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "silent",
+        "clear": true
+      },
       "problemMatcher": "$norn"
     },
     {
       "label": "cargo test",
       "type": "shell",
       "command": "cargo test --workspace",
-      "options": { "cwd": "${workspaceFolder}" },
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
       "group": "test",
-      "presentation": { "reveal": "always", "clear": true },
+      "presentation": {
+        "reveal": "always",
+        "clear": true
+      },
       "problemMatcher": "$rustc"
     }
   ]

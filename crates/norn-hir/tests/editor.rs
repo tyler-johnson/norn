@@ -52,6 +52,93 @@ fn every_builtin_is_in_the_grammar() {
     }
 }
 
+/// A TextMate grammar is ordered: the first rule that matches at a position wins, and a generic
+/// rule placed too early silently swallows what a specific one meant to claim. Nothing about that
+/// shows up as an error — the text just colours wrongly — so the orderings the grammar depends on
+/// are asserted here.
+///
+/// Every pair below is a bug that has actually been possible. `-> settled` in an `after` statement
+/// really did colour as a return type until `#after-stmt` was moved ahead of `#return-type`.
+#[test]
+fn specific_rules_precede_the_generic_ones_they_would_lose_to() {
+    let order = top_level_patterns();
+    let position = |name: &str| {
+        order
+            .iter()
+            .position(|found| found == name)
+            .unwrap_or_else(|| panic!("{name} is not in the grammar's top-level patterns"))
+    };
+    let precedes = [
+        (
+            "#after-stmt",
+            "#return-type",
+            "the name after `->` in an `after` statement is an input, not a return type",
+        ),
+        (
+            "#reactor-decl",
+            "#call",
+            "`Gate` in `reactor Gate(…)` is a declaration, not a call",
+        ),
+        (
+            "#spawn-reactor",
+            "#call",
+            "`Gate` in `spawn reactor Gate(…)` names a reactor, not a function",
+        ),
+        (
+            "#on-decl",
+            "#call",
+            "`opened` in `on opened(…)` is the input being answered, not a call",
+        ),
+        (
+            "#member-typed",
+            "#member-plain",
+            "the annotated form of a member has to be tried before the bare one",
+        ),
+        (
+            "#member-typed",
+            "#keywords",
+            "`input`/`state`/`signal` carry a name and a type position, which the bare keyword rule does not",
+        ),
+        (
+            "#queue-clause",
+            "#call",
+            "`capacity:` inside a queue clause is an attribute, not a named argument",
+        ),
+    ];
+    for (earlier, later, why) in precedes {
+        assert!(
+            position(earlier) < position(later),
+            "{earlier} must come before {later} in {}: {why}",
+            grammar_path().display()
+        );
+    }
+}
+
+/// The `#name` includes of the grammar's top-level `patterns`, in order.
+///
+/// Read by slicing rather than parsing, because the workspace has no dependencies and a JSON
+/// parser is not worth acquiring for one test. The top-level array is everything between the first
+/// `"patterns"` key and `"repository"`, which is the only place the two can be confused.
+fn top_level_patterns() -> Vec<String> {
+    let grammar = grammar();
+    let start = grammar
+        .find("\"patterns\"")
+        .expect("the grammar has top-level patterns");
+    let end = grammar[start..]
+        .find("\"repository\"")
+        .map(|at| start + at)
+        .unwrap_or(grammar.len());
+    let patterns = &grammar[start..end];
+    patterns
+        .match_indices("\"#")
+        .map(|(at, _)| {
+            let rest = &patterns[at + 1..];
+            let close = rest.find('"').expect("an include name is quoted");
+            rest[..close].to_string()
+        })
+        .collect()
+}
+
 #[test]
 fn the_extension_claims_norn_files() {
     let manifest = read(&editor_dir().join("package.json"));

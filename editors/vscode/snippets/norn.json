@@ -12,22 +12,38 @@
   },
   "function": {
     "prefix": "fn",
-    "body": ["fn ${1:name}(${2}) -> ${3:()} {", "\t$0", "}"],
+    "body": [
+      "fn ${1:name}(${2}) -> ${3:()} {",
+      "\t$0",
+      "}"
+    ],
     "description": "A plain function"
   },
   "record": {
     "prefix": "record",
-    "body": ["record ${1:Name} {", "\t${2:field}: ${3:I64}", "}"],
+    "body": [
+      "record ${1:Name} {",
+      "\t${2:field}: ${3:I64}",
+      "}"
+    ],
     "description": "A record declaration"
   },
   "enum": {
     "prefix": "enum",
-    "body": ["enum ${1:Name} {", "\t${2:Variant}", "}"],
+    "body": [
+      "enum ${1:Name} {",
+      "\t${2:Variant}",
+      "}"
+    ],
     "description": "An enum declaration"
   },
   "match": {
     "prefix": "match",
-    "body": ["match ${1:value} {", "\t${2:_} => ${3:()}", "}"],
+    "body": [
+      "match ${1:value} {",
+      "\t${2:_} => ${3:()}",
+      "}"
+    ],
     "description": "A match expression"
   },
   "match on a result": {
@@ -42,7 +58,12 @@
   },
   "scope": {
     "prefix": "scope",
-    "body": ["scope {", "\tspawn ${1:worker()}", "\t$0", "}"],
+    "body": [
+      "scope {",
+      "\tspawn ${1:worker()}",
+      "\t$0",
+      "}"
+    ],
     "description": "A concurrency scope: every task spawned inside is cancelled and joined on the way out"
   },
   "main": {
@@ -56,5 +77,73 @@
       "}"
     ],
     "description": "A task `main` returning a Result"
+  },
+  "reactor": {
+    "prefix": "reactor",
+    "body": [
+      "reactor ${1:Name}(${2}) {",
+      "\tinput ${3:happened}: ${4:()} [capacity: ${5:64}, overflow: ${6|reject,drop_oldest,drop_newest,wait|}]",
+      "",
+      "\tstate ${7:count}: ${8:I64} = ${9:0}",
+      "",
+      "\ton ${3:happened}() {",
+      "\t\t${7:count} = ${7:count} + 1",
+      "\t}",
+      "",
+      "\texport signal ${10:snapshot} = ${7:count}",
+      "}"
+    ],
+    "description": "A reactor: an input, a state cell, a handler, and an exported signal"
+  },
+  "input": {
+    "prefix": "input",
+    "body": [
+      "input ${1:name}: ${2:()} [capacity: ${3:64}, overflow: ${4|reject,drop_oldest,drop_newest,wait|}]"
+    ],
+    "description": "A bounded input mailbox. There is no default: the bound and what happens when it is full are both declared"
+  },
+  "state": {
+    "prefix": "state",
+    "body": [
+      "state ${1:name}: ${2:I64} = ${3:0}"
+    ],
+    "description": "A state cell \u2014 the only thing a handler may assign, and the temporal boundary a feedback loop crosses"
+  },
+  "signal": {
+    "prefix": "signal",
+    "body": [
+      "signal ${1:name} = ${2:expression}"
+    ],
+    "description": "A signal: a pure derived view, recomputed when what it mentions changes"
+  },
+  "exported signal": {
+    "prefix": "exportsignal",
+    "body": [
+      "export signal ${1:name} = ${2:expression}"
+    ],
+    "description": "An exported signal, readable from outside with `latest`. Unexported signals are reactor-private"
+  },
+  "handler": {
+    "prefix": "on",
+    "body": [
+      "on ${1:input}(${2}) {",
+      "\t$0",
+      "}"
+    ],
+    "description": "A handler for one input. State is assigned here and nowhere else"
+  },
+  "effect request": {
+    "prefix": "after",
+    "body": [
+      "after ${1:work()} -> ${2:settled}"
+    ],
+    "description": "Request an effect. It is built now and started once the snapshot is published; its result returns as a later input"
+  },
+  "spawn a reactor": {
+    "prefix": "spawnreactor",
+    "body": [
+      "let ${1:name} = spawn reactor ${2:Name}(${3})"
+    ],
+    "description": "Create a reactor, owned by the enclosing scope"
   }
 }
