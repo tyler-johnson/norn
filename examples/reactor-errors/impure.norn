@@ -1,0 +1,20 @@
+// `print` needs no capability and is still something the world can see happen, which is exactly
+// what a turn promises never to allow. Purity is not the same question as authority.
+
+reactor Logger(prefix: String) {
+    input line: String [capacity: 8, overflow: reject]
+
+    state seen: I64 = 0
+
+    on line(text) {
+        print(prefix + text)
+        seen = seen + 1
+    }
+
+    signal report: String = greet(seen)
+}
+
+fn greet(n: I64) -> String {
+    print("counting")
+    "counted"
+}

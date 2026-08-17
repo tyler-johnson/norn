@@ -1,0 +1,30 @@
+// A reactor's `uses` is the authority its effects need, and the spawner's set must cover it —
+// checked where the reactor is created, because afterwards nothing can tell what a handle will do.
+
+reactor Beeper(every: I64)
+    uses { clock }
+{
+    input rang: () [capacity: 8, overflow: reject]
+
+    state rings: I64 = 0
+
+    on rang() {
+        rings = rings + 1
+        after_commit beep(every)
+    }
+
+    export signal count = rings
+}
+
+task fn beep(every: I64) -> ()
+    uses { clock }
+{
+    await sleep(every)
+}
+
+task fn main() -> () {
+    scope {
+        let beeper = spawn reactor Beeper(every: 10)
+        await send(beeper.rang, ())
+    }
+}

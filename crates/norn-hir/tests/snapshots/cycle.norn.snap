@@ -1,0 +1,11 @@
+error: instantaneous causality cycle open → healthy → open
+  --> cycle.norn:13:5
+   |
+13 |     signal open    = accepted - limit + healthy
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `open` depends on `healthy`
+  --> cycle.norn:14:5
+   |
+14 |     signal healthy = open
+   |     ^^^^^^^^^^^^^^^^^^^^^ `healthy` depends on `open`
+   = note: a signal is its expression, so a cycle among signals has no value to settle on
+   = note: break it with a `state` cell: state is the temporal boundary a feedback loop has to cross

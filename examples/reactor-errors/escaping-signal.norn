@@ -1,0 +1,22 @@
+// A signal's type has no spelling, so there is no escape check to write: there is nowhere to
+// declare a field, a parameter, a return type, or a payload that could hold one.
+
+record Held {
+    current: Signal<I64>
+}
+
+reactor Source(seed: I64) {
+    input bumped: () [capacity: 8, overflow: reject]
+
+    state count: I64 = seed
+
+    on bumped() {
+        count = count + 1
+    }
+
+    export signal current = count
+}
+
+fn keep(value: Signal<I64>) -> Event<I64> {
+    value
+}

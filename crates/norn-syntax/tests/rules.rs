@@ -187,7 +187,7 @@ fn patterns_mirror_construction() {
 
 #[test]
 fn reserved_words_explain_themselves() {
-    let rendered = errors("fn main() {\n    let reactor = 1\n}\n");
+    let rendered = errors("fn main() {\n    let event = 1\n}\n");
     assert!(
         rendered.contains("reserved for a later milestone"),
         "{rendered}"

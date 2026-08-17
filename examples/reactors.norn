@@ -1,0 +1,72 @@
+module reactors
+
+// The reactor grammar, as syntax. Nothing here is checked or run — this file is the M0 corpus's
+// regression net for the new productions, the way `tasks.norn` is for tasks, so it deliberately
+// includes forms later milestones will bring meaning to.
+
+record Snapshot {
+    open: I64
+    healthy: Bool
+}
+
+reactor Gate(limit: I64) {
+    input opened: () [capacity: 64, overflow: reject]
+    input closed: () [capacity: 8, overflow: drop_oldest]
+    input measured: Sample [capacity: 1, overflow: drop_newest]
+    input queued: Job [capacity: 128, overflow: wait]
+
+    state accepted: I64 = 0
+    state released: I64 = 0
+
+    on opened() {
+        accepted = accepted + 1
+    }
+
+    on closed() {
+        released = released - 1
+    }
+
+    signal open = accepted - released
+    signal healthy: Bool = open <= limit
+
+    export signal snapshot = #Snapshot(open: open, healthy: healthy)
+}
+
+// `uses` on a reactor is the authority its effects need, and the spawner's set must cover it.
+reactor Mailbox(retries: I64)
+    uses { clock, net.io }
+{
+    input send: OutgoingMessage [capacity: 256, overflow: wait]
+    input delivered: DeliveryResult [capacity: 256, overflow: wait]
+
+    state pending: I64 = 0
+    state failed: I64 = 0
+
+    on send(message) {
+        pending = pending + 1
+        after_commit deliver(message) -> delivered
+    }
+
+    on delivered(result) {
+        pending = pending - 1
+        match result {
+            #DeliveryResult.Ok => ()
+            #DeliveryResult.Failed(_) => {
+                failed = failed + 1
+            }
+        }
+    }
+
+    export signal depth = pending
+    export signal report = #Report(pending: pending, failed: failed, retries: retries)
+}
+
+task fn drive(limit: I64) -> ()
+    uses { clock }
+{
+    scope {
+        let gate = spawn reactor Gate(limit: limit)
+        await send(gate.opened, ())
+        print(latest(gate.snapshot))
+    }
+}

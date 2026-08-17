@@ -10,9 +10,15 @@ error: statements are separated by line breaks, not `;`
 9 |     let a = 1;
   |              ^
 
-error: `state` is reserved for a later milestone
+error: `event` is reserved for a later milestone
   --> statements.norn:14:9
    |
-14 |     let state = 1
+14 |     let event = 1
    |         ^^^^^ reserved word
    = note: it cannot be used as a name yet; see BOOTSTRAP.md §5 for when it becomes available
+
+error: expected a name, found `state`
+  --> statements.norn:19:9
+   |
+19 |     let state = 1
+   |         ^^^^^

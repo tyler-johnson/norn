@@ -11,6 +11,11 @@ fn semicolons() -> I64 {
 }
 
 fn reserved_name() -> I64 {
+    let event = 1
+    return event
+}
+
+fn keyword_name() -> I64 {
     let state = 1
     return state
 }

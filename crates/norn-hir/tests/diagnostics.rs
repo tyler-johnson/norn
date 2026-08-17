@@ -1,8 +1,8 @@
 //! Snapshots of what the checker says when a program is wrong.
 //!
-//! Every file in `examples/type-errors/` must parse cleanly and then fail to check, so that each
-//! snapshot is a type diagnostic rather than a syntax one. The point is not that these programs
-//! are rejected — it is that the wording stays deliberate.
+//! Every file in `examples/type-errors/` and `examples/reactor-errors/` must parse cleanly and then
+//! fail to check, so that each snapshot is a type diagnostic rather than a syntax one. The point is
+//! not that these programs are rejected — it is that the wording stays deliberate.
 
 use std::path::{Path, PathBuf};
 
@@ -10,7 +10,21 @@ use norn_syntax::{SourceFile, parse, render_all};
 
 #[test]
 fn type_errors_are_reported() {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/type-errors");
+    rejected("type-errors");
+}
+
+/// The reactor rules, one file per rule. `cycle.norn` is the one worth reading first: it is the
+/// working example with a single token changed, which makes the diagnostic and the fix the same
+/// artifact.
+#[test]
+fn reactor_errors_are_reported() {
+    rejected("reactor-errors");
+}
+
+fn rejected(directory: &str) {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples")
+        .join(directory);
     let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)
         .unwrap_or_else(|err| panic!("reading {}: {err}", dir.display()))
         .filter_map(Result::ok)
@@ -18,7 +32,7 @@ fn type_errors_are_reported() {
         .filter(|path| path.extension().is_some_and(|ext| ext == "norn"))
         .collect();
     files.sort();
-    assert!(!files.is_empty(), "no type-error examples found");
+    assert!(!files.is_empty(), "no examples found in {directory}");
 
     for path in files {
         let name = path.file_name().unwrap().to_string_lossy().to_string();

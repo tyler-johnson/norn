@@ -1,0 +1,22 @@
+// v0 has no loop construct, so recursion is the only way a pure function can fail to return. One
+// pass over the call graph therefore makes every turn provably terminating.
+
+reactor Summing(upto: I64) {
+    input bumped: () [capacity: 8, overflow: reject]
+
+    state n: I64 = 0
+
+    on bumped() {
+        n = n + 1
+    }
+
+    signal total = sum(n)
+}
+
+fn sum(n: I64) -> I64 {
+    if n <= 0 {
+        0
+    } else {
+        n + sum(n - 1)
+    }
+}

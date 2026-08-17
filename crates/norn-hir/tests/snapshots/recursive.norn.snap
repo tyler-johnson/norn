@@ -1,0 +1,11 @@
+error: `sum` is recursive, and a turn must end
+  --> recursive.norn:13:5
+   |
+13 |     signal total = sum(n)
+   |     ^^^^^^^^^^^^^^^^^^^^^ reached from here
+  --> recursive.norn:16:1
+   |
+16 | fn sum(n: I64) -> I64 {
+   | ^^^^^^^^^^^^^^^^^^^^^^^ the cycle is sum → sum
+   = note: v0 has no loop construct, so recursion is the only way a pure function can fail to return — which is what makes termination provable rather than hoped for
+   = note: compute the value with a bounded expression, or move the work into a `task fn` and request it with `after_commit`

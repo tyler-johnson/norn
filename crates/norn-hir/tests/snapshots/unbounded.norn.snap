@@ -1,0 +1,13 @@
+error: a capacity must be positive
+ --> unbounded.norn:5:35
+  |
+5 |     input arrived: I64 [capacity: 0, overflow: reject]
+  |                                   ^ nothing could ever be queued
+  = note: a mailbox that holds nothing is an input nothing can reach
+
+error: unknown overflow policy `whenever`
+ --> unbounded.norn:6:48
+  |
+6 |     input dropped: I64 [capacity: 4, overflow: whenever]
+  |                                                ^^^^^^^^ not a policy v0 knows
+  = note: the vocabulary is fixed: reject, drop_oldest, drop_newest, wait

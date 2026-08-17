@@ -24,6 +24,8 @@ id!(RecordId, "Index into `Program::records`.");
 id!(EnumId, "Index into `Program::enums`.");
 id!(FnId, "Index into `Program::fns`.");
 id!(LocalId, "Index into the enclosing function's `locals`.");
+id!(ReactorId, "Index into `Program::reactors`.");
+id!(NodeId, "Index into a reactor's `nodes`.");
 
 impl EnumId {
     /// `Option`, `Result`, and `IoError` occupy the first three slots of the enum table. They are
@@ -125,6 +127,25 @@ pub enum Ty {
     /// it did not control the starting of.
     Task(Box<Ty>),
     Resource(Resource),
+    /// A handle to a running reactor. Spelled by its own name, exactly like a `Listener`.
+    Reactor(ReactorId),
+    /// One input of a running reactor, as a value `send` can be handed. The argument is the
+    /// message type.
+    ///
+    /// Unspellable: `resolve_ty` never produces it, so no field, parameter, return, or payload can
+    /// have this type, and the only way to obtain one is `reactor.input` at the point of use.
+    Input(Box<Ty>),
+    /// One exported signal of a running reactor, as a value `latest` can read. The argument is the
+    /// *element* type — the type of the value the signal currently holds.
+    ///
+    /// Unspellable for the same reason, which is what makes "a signal cannot escape its reactor" a
+    /// fact about the grammar rather than a check somebody has to write. `signal count: I64`
+    /// annotates the element type; there is nowhere to write `Signal<I64>` at all.
+    Signal(Box<Ty>),
+    /// Registered, never produced. v0 has no `event` nodes and no way to read one — the read side
+    /// needs a subscription and `for await`, and there is no loop construct yet. It exists so that
+    /// writing `Event<T>` is answered with the milestone rather than "unknown type".
+    Event(Box<Ty>),
     /// The type of an expression that never produces a value: `return`, or a block that always
     /// leaves early. Compatible with every expected type.
     Never,
@@ -151,6 +172,7 @@ pub struct Program {
     pub records: Vec<RecordDef>,
     pub enums: Vec<EnumDef>,
     pub fns: Vec<FnDef>,
+    pub reactors: Vec<ReactorDef>,
     pub main: Option<FnId>,
 }
 
@@ -171,9 +193,153 @@ impl Program {
             }
             Ty::Task(inner) => format!("Task<{}>", self.ty_name(inner)),
             Ty::Resource(resource) => resource.name().into(),
+            Ty::Reactor(id) => self.reactors[id.index()].name.clone(),
+            Ty::Input(inner) => format!("an input taking {}", self.ty_name(inner)),
+            Ty::Signal(inner) => format!("a signal of {}", self.ty_name(inner)),
+            Ty::Event(inner) => format!("an event of {}", self.ty_name(inner)),
             Ty::Never => "!".into(),
             Ty::Error => "?".into(),
         }
+    }
+}
+
+/// What to do with a message that arrives at a full mailbox. There is no default: an unbounded
+/// queue is the one thing the runtime must never create implicitly, and a default capacity would be
+/// a number nobody chose.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Overflow {
+    /// Drop the arriving message.
+    Reject,
+    /// Make room by dropping the oldest message still queued.
+    DropOldest,
+    /// Make room by dropping the newest message still queued.
+    DropNewest,
+    /// Suspend the sender until there is room.
+    Wait,
+}
+
+impl Overflow {
+    pub const ALL: &'static [Overflow] = &[
+        Overflow::Reject,
+        Overflow::DropOldest,
+        Overflow::DropNewest,
+        Overflow::Wait,
+    ];
+
+    pub fn from_name(name: &str) -> Option<Overflow> {
+        match name {
+            "reject" => Some(Overflow::Reject),
+            "drop_oldest" => Some(Overflow::DropOldest),
+            "drop_newest" => Some(Overflow::DropNewest),
+            "wait" => Some(Overflow::Wait),
+            _ => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Overflow::Reject => "reject",
+            Overflow::DropOldest => "drop_oldest",
+            Overflow::DropNewest => "drop_newest",
+            Overflow::Wait => "wait",
+        }
+    }
+}
+
+/// An owner of state and a static dependency graph over it.
+///
+/// After checking there are no expressions left here: every node body and every handler has been
+/// lifted to an ordinary top-level function, and what remains is indices — dependency edges, slot
+/// numbers, and the order to walk them in. That is the whole point of the milestone. The graph is a
+/// compile-time artifact, and the runtime is a loop over it.
+pub struct ReactorDef {
+    pub name: String,
+    /// Constructor parameters, in declaration order. Each is also a node, and a slot: a parameter
+    /// is state that is written once and never again.
+    pub params: Vec<(String, Ty)>,
+    /// The capability set of the effects this reactor launches. Checked against its spawner's.
+    pub uses: Vec<Capability>,
+    pub inputs: Vec<InputDef>,
+    pub nodes: Vec<Node>,
+    /// Node indices holding a value that survives between turns, in **source order**.
+    ///
+    /// Source order and not topological order, deliberately: a slot index is the shape of the
+    /// durable state projection `DESIGN.md` §14 asks for, and adding a derived signal must not
+    /// renumber persisted state.
+    pub slots: Vec<NodeId>,
+    /// A topological order over the whole graph: every node appears after its dependencies. One
+    /// pass over it *is* the fixed point, which is what acyclicity buys.
+    pub order: Vec<NodeId>,
+    /// Exported nodes, in source order. A published snapshot is exactly these values.
+    pub exports: Vec<NodeId>,
+    pub span: Span,
+}
+
+impl ReactorDef {
+    pub fn node(&self, name: &str) -> Option<NodeId> {
+        self.nodes
+            .iter()
+            .position(|node| node.name == name)
+            .map(|index| NodeId(index as u32))
+    }
+
+    pub fn input(&self, name: &str) -> Option<usize> {
+        self.inputs.iter().position(|input| input.name == name)
+    }
+}
+
+pub struct InputDef {
+    pub name: String,
+    /// The message type. `()` means the occurrence itself is the message.
+    pub ty: Ty,
+    pub capacity: usize,
+    pub overflow: Overflow,
+    /// The lifted `on` handler: `(message, every slot in slot order) -> ()`, writing slots and
+    /// requesting effects as it goes.
+    pub handler: FnId,
+    /// The subsequence of `order` this input can reach — its propagation plan. Everything else in
+    /// the graph is provably unaffected by a message on this input, so a turn does not touch it.
+    pub plan: Vec<NodeId>,
+    pub span: Span,
+}
+
+pub struct Node {
+    pub name: String,
+    pub kind: NodeKind,
+    /// The type of the value the node holds.
+    pub ty: Ty,
+    /// The nodes whose values this one is computed from, in the order the lifted function takes
+    /// them as parameters.
+    pub deps: Vec<NodeId>,
+    pub exported: bool,
+    pub span: Span,
+}
+
+pub enum NodeKind {
+    /// A constructor parameter: a slot written once, when the reactor is created.
+    Param { slot: usize, index: usize },
+    /// A state cell: a slot, plus the pure function computing its initial value from the
+    /// constructor parameters it mentions.
+    ///
+    /// State is where a feedback loop crosses a temporal boundary, which is why the cycle check is
+    /// a property of signals alone.
+    State { slot: usize, init: FnId },
+    /// A pure derived view of its dependencies: `deps` in, one value out.
+    Signal { body: FnId },
+}
+
+impl NodeKind {
+    pub fn slot(&self) -> Option<usize> {
+        match self {
+            NodeKind::Param { slot, .. } | NodeKind::State { slot, .. } => Some(*slot),
+            NodeKind::Signal { .. } => None,
+        }
+    }
+
+    /// Whether the node's value is recomputed during propagation rather than committed by a
+    /// handler.
+    pub fn is_signal(&self) -> bool {
+        matches!(self, NodeKind::Signal { .. })
     }
 }
 
@@ -236,7 +402,25 @@ pub struct LocalDef {
     pub name: String,
     pub ty: Ty,
     pub mutable: bool,
+    pub role: LocalRole,
     pub span: Span,
+}
+
+/// Where a local came from. Ordinary code only ever produces `Ordinary`; the rest exist because a
+/// lifted node body or handler binds the reactor's members as parameters, and a diagnostic about
+/// one should say what it actually is rather than "not declared `mut`".
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum LocalRole {
+    Ordinary,
+    /// A reactor constructor parameter.
+    Param,
+    /// A state cell backed by this slot. Assigning to it inside a handler is a commit, which is
+    /// what makes lowering emit `SetSlot` here and nowhere else.
+    State(usize),
+    /// Another node's current value, read-only.
+    Signal,
+    /// The message an `on` handler was invoked with.
+    Message,
 }
 
 /// Which aggregate a `#`-marked constructor builds.
@@ -320,6 +504,23 @@ pub enum ExprKind {
     Spawn {
         expr: Box<Expr>,
     },
+    /// `spawn reactor Gate(limit: 8)`. Creates the reactor, runs it to its first stable state,
+    /// publishes version 0, and yields a handle.
+    SpawnReactor {
+        reactor: ReactorId,
+        args: Vec<Expr>,
+    },
+    /// `gate.opened` — one input of a running reactor, as a value `send` can be handed.
+    ReactorInput {
+        reactor: Box<Expr>,
+        index: usize,
+    },
+    /// `gate.snapshot` — one exported signal, as a value `latest` can read. An unexported signal is
+    /// reactor-private and has no spelling from outside at all.
+    ReactorExport {
+        reactor: Box<Expr>,
+        index: usize,
+    },
     /// Postfix `?`. `ok_variant` distinguishes unwrapping a `Result` from an `Option`.
     Try {
         expr: Box<Expr>,
@@ -372,6 +573,8 @@ pub enum Builtin {
     TcpRead,
     TcpWrite,
     TcpClose,
+    Send,
+    Latest,
 }
 
 impl Builtin {
@@ -387,6 +590,8 @@ impl Builtin {
         Builtin::TcpRead,
         Builtin::TcpWrite,
         Builtin::TcpClose,
+        Builtin::Send,
+        Builtin::Latest,
     ];
 
     pub fn from_name(name: &str) -> Option<Builtin> {
@@ -399,6 +604,8 @@ impl Builtin {
             "tcp_read" => Some(Builtin::TcpRead),
             "tcp_write" => Some(Builtin::TcpWrite),
             "tcp_close" => Some(Builtin::TcpClose),
+            "send" => Some(Builtin::Send),
+            "latest" => Some(Builtin::Latest),
             _ => None,
         }
     }
@@ -413,6 +620,29 @@ impl Builtin {
             Builtin::TcpRead => "tcp_read",
             Builtin::TcpWrite => "tcp_write",
             Builtin::TcpClose => "tcp_close",
+            Builtin::Send => "send",
+            Builtin::Latest => "latest",
+        }
+    }
+
+    /// Whether it may run inside a turn.
+    ///
+    /// A separate question from `capabilities`, and the plainest illustration of why: `print` needs
+    /// no capability and is still something the world can see happen. Observing the graph part-way
+    /// through propagation is exactly what a turn promises never to allow, so the criterion is
+    /// "could anything outside tell that this ran", not "did it need authority".
+    pub fn is_pure(self) -> bool {
+        match self {
+            Builtin::ListenerPort => true,
+            Builtin::Print
+            | Builtin::Sleep
+            | Builtin::TcpListen
+            | Builtin::TcpAccept
+            | Builtin::TcpRead
+            | Builtin::TcpWrite
+            | Builtin::TcpClose
+            | Builtin::Send
+            | Builtin::Latest => false,
         }
     }
 
@@ -423,7 +653,7 @@ impl Builtin {
 
     pub fn capabilities(self) -> &'static [Capability] {
         match self {
-            Builtin::Print | Builtin::ListenerPort => &[],
+            Builtin::Print | Builtin::ListenerPort | Builtin::Send | Builtin::Latest => &[],
             Builtin::Sleep => &[Capability::Clock],
             Builtin::TcpListen => &[Capability::NetListen],
             Builtin::TcpAccept | Builtin::TcpRead | Builtin::TcpWrite | Builtin::TcpClose => {
@@ -432,8 +662,9 @@ impl Builtin {
         }
     }
 
-    /// Parameter types and result type. `print` is the one builtin whose parameter is any type at
-    /// all, and the checker special-cases it rather than pretending there is a type for that.
+    /// Parameter types and result type. `print`, `send`, and `latest` are the builtins whose types
+    /// depend on what they are handed, spelled here as `Ty::Error` — which every type fits — and
+    /// checked properly at the call site rather than pretended to have a type they do not.
     pub fn signature(self) -> (Vec<Ty>, Ty) {
         let listener = Ty::Resource(Resource::Listener);
         let connection = Ty::Resource(Resource::Connection);
@@ -449,6 +680,8 @@ impl Builtin {
             Builtin::TcpRead => (vec![connection], task(fallible(Ty::Str))),
             Builtin::TcpWrite => (vec![connection, Ty::Str], task(fallible(Ty::Unit))),
             Builtin::TcpClose => (vec![connection], task(Ty::Unit)),
+            Builtin::Send => (vec![Ty::Error, Ty::Error], task(Ty::Unit)),
+            Builtin::Latest => (vec![Ty::Error], Ty::Error),
         }
     }
 }
@@ -500,7 +733,20 @@ pub struct Stmt {
 }
 
 pub enum StmtKind {
-    Let { local: LocalId, value: Expr },
-    Assign { place: Expr, value: Expr },
+    Let {
+        local: LocalId,
+        value: Expr,
+    },
+    Assign {
+        place: Expr,
+        value: Expr,
+    },
+    /// `after_commit deliver(m) -> delivered`. The operand is *built* here and started only after
+    /// the snapshot is published — which is what M2's laziness was for. `returns` is the index of
+    /// the input the effect's value comes back on, making a completion a later input.
+    AfterCommit {
+        task: Expr,
+        returns: Option<usize>,
+    },
     Expr(Expr),
 }

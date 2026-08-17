@@ -1,0 +1,22 @@
+// A signal derives a value and requests nothing. Effects are asked for where state changes.
+
+reactor Watcher(threshold: I64) {
+    input measured: I64 [capacity: 8, overflow: reject]
+
+    state level: I64 = 0
+
+    on measured(value) {
+        level = value
+    }
+
+    signal alarm: Bool = {
+        after_commit notify(level)
+        level > threshold
+    }
+}
+
+task fn notify(level: I64) -> ()
+    uses { clock }
+{
+    await sleep(1)
+}

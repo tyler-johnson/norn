@@ -299,6 +299,9 @@ impl Lowerer<'_> {
                 self.switch_to(unreachable);
                 Operand::Const(Const::Unit)
             }
+            hir::ExprKind::SpawnReactor { .. }
+            | hir::ExprKind::ReactorInput { .. }
+            | hir::ExprKind::ReactorExport { .. } => unimplemented!("reactor lowering"),
             hir::ExprKind::Error => Operand::Const(Const::Unit),
         }
     }
@@ -313,6 +316,7 @@ impl Lowerer<'_> {
                 let place = self.place(place);
                 self.assign_to(&place, value);
             }
+            hir::StmtKind::AfterCommit { .. } => unimplemented!("reactor lowering"),
             hir::StmtKind::Expr(expr) => {
                 self.expr(expr);
             }

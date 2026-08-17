@@ -1,0 +1,15 @@
+// A signal is its expression. Assigning to one asks for two definitions of the same value.
+
+reactor Counter(step: I64) {
+    input bumped: () [capacity: 8, overflow: reject]
+
+    state count: I64 = 0
+
+    signal doubled = count * 2
+
+    on bumped() {
+        count = count + step
+        doubled = 0
+        step = step + 1
+    }
+}

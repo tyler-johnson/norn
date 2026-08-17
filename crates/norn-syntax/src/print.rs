@@ -98,6 +98,76 @@ fn print_item(item: &Item) -> String {
             out.push('\n');
             out
         }
+        Item::Reactor(decl) => {
+            let params: Vec<_> = decl
+                .params
+                .iter()
+                .map(|p| format!("{}: {}", p.name.name, print_type(&p.ty)))
+                .collect();
+            let mut out = format!("reactor {}({})", decl.name.name, params.join(", "));
+            if decl.uses.is_empty() {
+                out.push(' ');
+            } else {
+                let caps: Vec<_> = decl.uses.iter().map(|p| p.text()).collect();
+                out.push_str(&format!("\n{INDENT}uses {{ {} }}\n", caps.join(", ")));
+            }
+            out.push_str("{\n");
+            for member in &decl.members {
+                out.push_str(INDENT);
+                out.push_str(&print_member(member));
+                out.push('\n');
+            }
+            out.push_str("}\n");
+            out
+        }
+    }
+}
+
+fn print_member(member: &Member) -> String {
+    match &member.kind {
+        MemberKind::Input { name, ty, queue } => format!(
+            "input {}: {} [capacity: {}, overflow: {}]",
+            name.name,
+            print_type(ty),
+            print_expr(&queue.capacity, 1, LAMBDA),
+            queue.overflow.name
+        ),
+        MemberKind::State { name, ty, init } => format!(
+            "state {}: {} = {}",
+            name.name,
+            print_type(ty),
+            print_expr(init, 1, LAMBDA)
+        ),
+        MemberKind::Signal {
+            exported,
+            name,
+            ty,
+            body,
+        } => {
+            let mut out = String::new();
+            if *exported {
+                out.push_str("export ");
+            }
+            out.push_str(&format!("signal {}", name.name));
+            if let Some(ty) = ty {
+                out.push_str(&format!(": {}", print_type(ty)));
+            }
+            out.push_str(&format!(" = {}", print_expr(body, 1, LAMBDA)));
+            out
+        }
+        MemberKind::On {
+            input,
+            params,
+            body,
+        } => {
+            let params: Vec<_> = params.iter().map(|p| p.name.clone()).collect();
+            format!(
+                "on {}({}) {}",
+                input.name,
+                params.join(", "),
+                print_block(body, 1)
+            )
+        }
     }
 }
 
@@ -168,6 +238,13 @@ fn print_stmt(stmt: &Stmt, indent: usize) -> String {
         StmtKind::Return(None) => "return".into(),
         StmtKind::Return(Some(value)) => {
             format!("return {}", print_expr(value, indent, LAMBDA))
+        }
+        StmtKind::AfterCommit { task, returns } => {
+            let mut out = format!("after_commit {}", print_expr(task, indent, LAMBDA));
+            if let Some(name) = returns {
+                out.push_str(&format!(" -> {}", name.name));
+            }
+            out
         }
         StmtKind::Expr(expr) => print_expr(expr, indent, LAMBDA),
     }
@@ -277,6 +354,18 @@ fn print_expr_bare(expr: &Expr, indent: usize) -> String {
         ExprKind::Await(inner) => format!("await {}", print_expr(inner, indent, UNARY)),
         ExprKind::Scope(block) => format!("scope {}", print_block(block, indent)),
         ExprKind::Spawn(inner) => format!("spawn {}", print_expr(inner, indent, UNARY)),
+        ExprKind::SpawnReactor { path, args } => {
+            let args: Vec<_> = args
+                .iter()
+                .map(|arg| match &arg.name {
+                    Some(name) => {
+                        format!("{}: {}", name.name, print_expr(&arg.value, indent, LAMBDA))
+                    }
+                    None => print_expr(&arg.value, indent, LAMBDA),
+                })
+                .collect();
+            format!("spawn reactor {}({})", path.text(), args.join(", "))
+        }
         // `await f()?` already parses as `(await f())?`, so the parentheses would be noise.
         ExprKind::Try(inner) if matches!(inner.kind, ExprKind::Await(_)) => {
             format!("{}?", print_expr_bare(inner, indent))

@@ -151,6 +151,73 @@ fn dump_item(item: &Item) -> Node {
             children.push(dump_block(&decl.body));
             list("fn", children)
         }
+        Item::Reactor(decl) => {
+            let mut children = vec![atom(&decl.name.name)];
+            children.push(list(
+                "params",
+                decl.params
+                    .iter()
+                    .map(|p| list("param", vec![atom(&p.name.name), dump_type(&p.ty)]))
+                    .collect(),
+            ));
+            if !decl.uses.is_empty() {
+                children.push(list(
+                    "uses",
+                    decl.uses.iter().map(|p| atom(p.text())).collect(),
+                ));
+            }
+            children.extend(decl.members.iter().map(dump_member));
+            list("reactor", children)
+        }
+    }
+}
+
+fn dump_member(member: &Member) -> Node {
+    match &member.kind {
+        MemberKind::Input { name, ty, queue } => list(
+            "input",
+            vec![
+                atom(&name.name),
+                dump_type(ty),
+                list(
+                    "queue",
+                    vec![dump_expr(&queue.capacity), atom(&queue.overflow.name)],
+                ),
+            ],
+        ),
+        MemberKind::State { name, ty, init } => list(
+            "state",
+            vec![atom(&name.name), dump_type(ty), dump_expr(init)],
+        ),
+        MemberKind::Signal {
+            exported,
+            name,
+            ty,
+            body,
+        } => {
+            let mut children = vec![atom(&name.name)];
+            if *exported {
+                children.push(atom("export"));
+            }
+            if let Some(ty) = ty {
+                children.push(list("ty", vec![dump_type(ty)]));
+            }
+            children.push(dump_expr(body));
+            list("signal", children)
+        }
+        MemberKind::On {
+            input,
+            params,
+            body,
+        } => {
+            let mut children = vec![atom(&input.name)];
+            children.push(list(
+                "params",
+                params.iter().map(|p| atom(&p.name)).collect(),
+            ));
+            children.push(dump_block(body));
+            list("on", children)
+        }
     }
 }
 
@@ -197,6 +264,13 @@ fn dump_stmt(stmt: &Stmt) -> Node {
         }
         StmtKind::Return(None) => list("return", vec![]),
         StmtKind::Return(Some(value)) => list("return", vec![dump_expr(value)]),
+        StmtKind::AfterCommit { task, returns } => {
+            let mut children = vec![dump_expr(task)];
+            if let Some(name) = returns {
+                children.push(list("returns", vec![atom(&name.name)]));
+            }
+            list("after-commit", children)
+        }
         StmtKind::Expr(expr) => dump_expr(expr),
     }
 }
@@ -248,6 +322,16 @@ fn dump_expr(expr: &Expr) -> Node {
         ExprKind::Await(inner) => list("await", vec![dump_expr(inner)]),
         ExprKind::Scope(block) => list("scope", vec![dump_block(block)]),
         ExprKind::Spawn(inner) => list("spawn", vec![dump_expr(inner)]),
+        ExprKind::SpawnReactor { path, args } => {
+            let mut children = vec![atom(path.text())];
+            for arg in args {
+                children.push(match &arg.name {
+                    Some(name) => list("arg", vec![atom(&name.name), dump_expr(&arg.value)]),
+                    None => list("arg", vec![dump_expr(&arg.value)]),
+                });
+            }
+            list("spawn-reactor", children)
+        }
         ExprKind::Try(inner) => list("try", vec![dump_expr(inner)]),
         ExprKind::Block(block) => dump_block(block),
         ExprKind::If { cond, then, els } => {

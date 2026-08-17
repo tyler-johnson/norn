@@ -55,6 +55,7 @@ pub enum Item {
     Record(RecordDecl),
     Enum(EnumDecl),
     Fn(FnDecl),
+    Reactor(ReactorDecl),
 }
 
 #[derive(Debug)]
@@ -111,6 +112,56 @@ pub struct Param {
     pub span: Span,
 }
 
+/// An owner of state and a dependency graph over it. Its members are declarations, not statements:
+/// nothing here runs in order, and the order it does run in is computed rather than written.
+#[derive(Debug)]
+pub struct ReactorDecl {
+    pub name: Ident,
+    pub params: Vec<Param>,
+    /// The capability set of the effects this reactor launches. Its spawner's set must cover it.
+    pub uses: Vec<Path>,
+    pub members: Vec<Member>,
+    pub span: Span,
+}
+
+#[derive(Debug)]
+pub struct Member {
+    pub kind: MemberKind,
+    pub span: Span,
+}
+
+#[derive(Debug)]
+pub enum MemberKind {
+    /// `input opened: () [capacity: 64, overflow: reject]`
+    Input { name: Ident, ty: Type, queue: Queue },
+    /// `state accepted: I64 = 0`
+    State { name: Ident, ty: Type, init: Expr },
+    /// `signal open = accepted - released`, optionally `export`ed and optionally annotated. The
+    /// annotation is the *element* type: a signal's own type cannot be written down.
+    Signal {
+        exported: bool,
+        name: Ident,
+        ty: Option<Type>,
+        body: Expr,
+    },
+    /// `on opened() { … }` — the only place state is assigned and the only place an effect is
+    /// requested.
+    On {
+        input: Ident,
+        params: Vec<Ident>,
+        body: Block,
+    },
+}
+
+/// `[capacity: 64, overflow: reject]`. There is no default: an unbounded queue is the one thing
+/// the runtime must never create implicitly, and a default capacity is a number nobody chose.
+#[derive(Debug)]
+pub struct Queue {
+    pub capacity: Expr,
+    pub overflow: Ident,
+    pub span: Span,
+}
+
 #[derive(Clone, Debug)]
 pub struct Type {
     pub kind: TypeKind,
@@ -152,6 +203,12 @@ pub enum StmtKind {
         value: Expr,
     },
     Return(Option<Expr>),
+    /// `after_commit deliver(message) -> delivery_finished` — request an effect, and optionally
+    /// name the input its result comes back on. Legal only inside an `on` handler.
+    AfterCommit {
+        task: Expr,
+        returns: Option<Ident>,
+    },
     Expr(Expr),
 }
 
@@ -204,6 +261,12 @@ pub enum ExprKind {
     Scope(Block),
     /// `spawn e` — start a task in the enclosing scope. It cannot outlive that scope.
     Spawn(Box<Expr>),
+    /// `spawn reactor Gate(limit: 8)` — create a reactor and hand back a handle to it. Spelled as
+    /// a form of `spawn` because it is one: the reactor is owned by the scope that started it.
+    SpawnReactor {
+        path: Path,
+        args: Vec<Arg>,
+    },
     /// Postfix `?`: propagate the error case outward.
     Try(Box<Expr>),
     Match {

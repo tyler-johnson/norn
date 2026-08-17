@@ -1,0 +1,13 @@
+error: `await` cannot appear in a reactor, because it suspends
+  --> suspending.norn:12:9
+   |
+12 |         await sleep(every)
+   |         ^^^^^^^^^^^^^^^^^^ a turn is pure
+   = note: a turn runs to a fixed point with nothing able to observe it part-way; effects leave it through `after_commit`
+
+error: `scope` cannot appear in a reactor, because it starts tasks
+  --> suspending.norn:14:9
+   |
+14 |         scope {
+   |         ^^^^^^^ a turn is pure
+   = note: a turn runs to a fixed point with nothing able to observe it part-way; effects leave it through `after_commit`

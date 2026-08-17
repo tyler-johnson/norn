@@ -1,0 +1,82 @@
+// The M3 worked example: a reactor counting the connections a server is holding open.
+//
+// This is `examples/tcp/echo.norn` with a reactor added and nothing else changed, deliberately —
+// the milestone's diff should show exactly what reactors add. Here the graph is driven by `send`
+// from `main` so that the whole run is deterministic under the virtual clock;
+// `examples/reactors/server.norn` drives the same shape from a real socket.
+//
+// Three claims are made observable in the trace:
+//
+//   - Glitch freedom. `accepted` and `open` descend from `opened` by different paths, and
+//     `snapshot` joins them. One occurrence publishes one version in which both have moved, so no
+//     reader ever sees a `Snapshot` whose `accepted` and `open` disagree.
+//   - Effects after commit. The turn that crosses the limit commits `rejected`, publishes, and only
+//     then starts `report` — in that order, always.
+//   - Serial turns. Two messages sitting in the mailbox are two turns with two sequence numbers,
+//     never one turn that saw both.
+
+record Snapshot {
+    accepted: I64
+    rejected: I64
+    open: I64
+    healthy: Bool
+}
+
+// The effect. It suspends, which is the point: it could not have run inside a turn.
+task fn report(open: I64) -> ()
+    uses { clock }
+{
+    await sleep(1)
+    print(open)
+}
+
+reactor Gate(limit: I64)
+    uses { clock }
+{
+    input opened: () [capacity: 64, overflow: reject]
+    input closed: () [capacity: 64, overflow: reject]
+
+    state accepted: I64 = 0
+    state released: I64 = 0
+    state rejected: I64 = 0
+
+    // A handler runs *before* propagation, so it reads state and never signals: `healthy` here
+    // would silently mean last turn's value. The condition is therefore written from state, which
+    // is also what makes it obvious that it is reading the count this turn just produced.
+    on opened() {
+        accepted = accepted + 1
+        if accepted - released > limit {
+            rejected = rejected + 1
+            after_commit report(accepted - released)
+        }
+    }
+
+    on closed() {
+        released = released + 1
+    }
+
+    signal open = accepted - released
+    signal healthy = open <= limit
+
+    export signal snapshot = #Snapshot(
+        accepted: accepted, rejected: rejected, open: open, healthy: healthy
+    )
+}
+
+task fn main() -> ()
+    uses { clock }
+{
+    scope {
+        let gate = spawn reactor Gate(limit: 2)
+
+        await send(gate.opened, ())
+        await send(gate.opened, ())
+        await send(gate.opened, ())
+        await send(gate.closed, ())
+
+        // Sending only queues. Parking here is what lets the reactor take its four turns, so the
+        // snapshot read afterwards is the one that has seen all of them.
+        await sleep(50)
+        print(latest(gate.snapshot))
+    }
+}

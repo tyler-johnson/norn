@@ -1,0 +1,26 @@
+// A turn runs to a fixed point with nothing able to observe it part-way, so it cannot wait for
+// anything: no `await`, no `spawn`, no `scope`.
+
+reactor Poller(every: I64)
+    uses { clock }
+{
+    input ticked: () [capacity: 8, overflow: reject]
+
+    state ticks: I64 = 0
+
+    on ticked() {
+        await sleep(every)
+        ticks = ticks + 1
+        scope {
+            spawn work()
+        }
+    }
+
+    signal count = ticks
+}
+
+task fn work() -> ()
+    uses { clock }
+{
+    await sleep(1)
+}

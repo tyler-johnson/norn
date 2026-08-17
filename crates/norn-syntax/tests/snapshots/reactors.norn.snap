@@ -1,0 +1,122 @@
+=== ast ===
+(module
+  (module-name reactors)
+  (record Snapshot (field open I64) (field healthy Bool))
+  (reactor Gate
+    (params (param limit I64))
+    (input opened unit (queue (int 64) reject))
+    (input closed unit (queue (int 8) drop_oldest))
+    (input measured Sample (queue (int 1) drop_newest))
+    (input queued Job (queue (int 128) wait))
+    (state accepted I64 (int 0))
+    (state released I64 (int 0))
+    (on opened
+      (params)
+      (block (assign (path accepted) (binary + (path accepted) (int 1)))))
+    (on closed
+      (params)
+      (block (assign (path released) (binary - (path released) (int 1)))))
+    (signal open (binary - (path accepted) (path released)))
+    (signal healthy (ty Bool) (binary <= (path open) (path limit)))
+    (signal snapshot export
+      (construct Snapshot (arg open (path open)) (arg healthy (path healthy)))))
+  (reactor Mailbox
+    (params (param retries I64))
+    (uses clock net.io)
+    (input send OutgoingMessage (queue (int 256) wait))
+    (input delivered DeliveryResult (queue (int 256) wait))
+    (state pending I64 (int 0))
+    (state failed I64 (int 0))
+    (on send
+      (params message)
+      (block
+        (assign (path pending) (binary + (path pending) (int 1)))
+        (after-commit
+          (call (path deliver) (arg (path message)))
+          (returns delivered))))
+    (on delivered
+      (params result)
+      (block
+        (assign (path pending) (binary - (path pending) (int 1)))
+        (match
+          (path result)
+          (arm (construct DeliveryResult.Ok) unit)
+          (arm
+            (construct DeliveryResult.Failed (arg _))
+            (block (assign (path failed) (binary + (path failed) (int 1))))))))
+    (signal depth export (path pending))
+    (signal report export
+      (construct Report
+        (arg pending (path pending))
+        (arg failed (path failed))
+        (arg retries (path retries)))))
+  (fn drive task
+    (params (param limit I64))
+    (ret unit)
+    (uses clock)
+    (block
+      (scope
+        (block
+          (let gate (spawn-reactor Gate (arg limit (path limit))))
+          (await (call (path send) (arg (path gate.opened)) (arg unit)))
+          (call (path print) (arg (call (path latest) (arg (path gate.snapshot))))))))))
+
+=== canonical ===
+module reactors
+
+record Snapshot {
+    open: I64
+    healthy: Bool
+}
+
+reactor Gate(limit: I64) {
+    input opened: () [capacity: 64, overflow: reject]
+    input closed: () [capacity: 8, overflow: drop_oldest]
+    input measured: Sample [capacity: 1, overflow: drop_newest]
+    input queued: Job [capacity: 128, overflow: wait]
+    state accepted: I64 = 0
+    state released: I64 = 0
+    on opened() {
+        accepted = accepted + 1
+    }
+    on closed() {
+        released = released - 1
+    }
+    signal open = accepted - released
+    signal healthy: Bool = open <= limit
+    export signal snapshot = #Snapshot(open: open, healthy: healthy)
+}
+
+reactor Mailbox(retries: I64)
+    uses { clock, net.io }
+{
+    input send: OutgoingMessage [capacity: 256, overflow: wait]
+    input delivered: DeliveryResult [capacity: 256, overflow: wait]
+    state pending: I64 = 0
+    state failed: I64 = 0
+    on send(message) {
+        pending = pending + 1
+        after_commit deliver(message) -> delivered
+    }
+    on delivered(result) {
+        pending = pending - 1
+        match result {
+            #DeliveryResult.Ok => ()
+            #DeliveryResult.Failed(_) => {
+                failed = failed + 1
+            }
+        }
+    }
+    export signal depth = pending
+    export signal report = #Report(pending: pending, failed: failed, retries: retries)
+}
+
+task fn drive(limit: I64) -> ()
+    uses { clock }
+{
+    scope {
+        let gate = spawn reactor Gate(limit: limit)
+        await send(gate.opened, ())
+        print(latest(gate.snapshot))
+    }
+}

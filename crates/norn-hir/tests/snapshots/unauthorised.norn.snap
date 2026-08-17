@@ -1,0 +1,7 @@
+error: `main` does not declare the capability `clock`
+  --> unauthorised.norn:27:22
+   |
+27 |         let beeper = spawn reactor Beeper(every: 10)
+   |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `Beeper` uses it
+   = note: a task's `uses { … }` set must cover every task it creates
+   = note: add it: `uses { clock }`

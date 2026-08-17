@@ -46,7 +46,63 @@ pub fn check(module: &ast::Module) -> Checked {
 enum TypeName {
     Record(RecordId),
     Enum(EnumId),
+    Reactor(ReactorId),
     Builtin(Ty),
+}
+
+/// What kind of expression is being checked, and therefore what it is allowed to do.
+///
+/// This was a `bool` while the only question was "are we in a `task fn`". A turn adds a second,
+/// stricter answer — a node body may not even build a task — and the `after_commit` operand adds a
+/// third that sits between them: it must build a task, and must still not run one.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Ctx {
+    /// An ordinary `fn`.
+    Plain,
+    /// A `task fn`.
+    Task,
+    /// A signal body, a state initialiser, or an `on` handler.
+    Turn,
+    /// The operand of `after_commit`: evaluated during the turn, started after it.
+    Effect,
+}
+
+impl Ctx {
+    /// Whether a task may be *built* here. Building is not running, which is the whole reason
+    /// `after_commit` can describe an effect without performing one.
+    fn builds_tasks(self) -> bool {
+        matches!(self, Ctx::Task | Ctx::Effect)
+    }
+
+    /// Whether execution may suspend here.
+    fn suspends(self) -> bool {
+        matches!(self, Ctx::Task)
+    }
+
+    /// Whether this runs inside a turn, and so may not be observable from outside it.
+    fn in_turn(self) -> bool {
+        matches!(self, Ctx::Turn | Ctx::Effect)
+    }
+}
+
+/// What a reactor member is, for the sake of a diagnostic about reading it in the wrong place.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Sort {
+    Param,
+    Input,
+    State,
+    Signal,
+}
+
+impl Sort {
+    fn describe(self) -> &'static str {
+        match self {
+            Sort::Param => "parameter",
+            Sort::Input => "input",
+            Sort::State => "state",
+            Sort::Signal => "signal",
+        }
+    }
 }
 
 struct Checker {
@@ -54,6 +110,7 @@ struct Checker {
     errors: Vec<Diagnostic>,
     types: HashMap<String, TypeName>,
     fns: HashMap<String, FnId>,
+    reactors: HashMap<String, ReactorId>,
     /// Signatures, resolved before any body is checked so that functions may call one another
     /// regardless of declaration order.
     signatures: Vec<(Vec<(String, Ty)>, Ty)>,
@@ -64,8 +121,17 @@ struct Checker {
     /// declared it uses. Capability checking happens where a task is *built*, because an awaiting
     /// function cannot see a `Task<T>`'s provenance.
     fn_name: String,
-    in_task: bool,
+    ctx: Ctx,
     uses: Vec<Capability>,
+    /// The member namespace of the reactor whose body is being checked, if any. Consulted only
+    /// when a name fails to resolve, so that "you cannot read that here" beats "unknown name".
+    members: HashMap<String, Sort>,
+    /// The reactor being checked, and whether the member being checked is an `on` handler.
+    /// `Ctx::Turn` covers node bodies and handlers alike; these two say which.
+    reactor: Option<ReactorId>,
+    in_handler: bool,
+    /// Whether the expression being checked is an assignment target.
+    assigning: bool,
     /// How many `scope { … }` expressions enclose the expression being checked. Reset per function,
     /// which is what makes "inside a scope in the same function" the rule `spawn` enforces.
     scope_depth: usize,
@@ -150,18 +216,24 @@ impl Checker {
                 records: Vec::new(),
                 enums: vec![option, result, io_error],
                 fns: Vec::new(),
+                reactors: Vec::new(),
                 main: None,
             },
             errors: Vec::new(),
             types: HashMap::new(),
             fns: HashMap::new(),
+            reactors: HashMap::new(),
             signatures: Vec::new(),
             locals: Vec::new(),
             scopes: Vec::new(),
             ret: Ty::Unit,
             fn_name: String::new(),
-            in_task: false,
+            ctx: Ctx::Plain,
             uses: Vec::new(),
+            members: HashMap::new(),
+            reactor: None,
+            in_handler: false,
+            assigning: false,
             scope_depth: 0,
         }
     }
@@ -188,7 +260,28 @@ impl Checker {
         self.declare_types(module);
         self.define_types(module);
         self.declare_fns(module);
+        // Reactors are declared, scanned, and checked between signatures and bodies, because a
+        // `task fn` body may mention a reactor and a node body may call any function.
+        self.declare_reactors(module);
+        let graphs = self.scan_reactors(module);
+        self.check_reactors(module, graphs);
         self.check_fns(module);
+        self.check_turns();
+    }
+
+    /// The one diagnostic every purity rule shares. A turn is not a place where the world can
+    /// notice anything happening, and every way to break that says so the same way.
+    fn impure(&mut self, what: &str, does: &str, span: Span) {
+        self.push(
+            Diagnostic::new(
+                span,
+                format!("`{what}` cannot appear in a reactor, because it {does}"),
+            )
+            .label("a turn is pure")
+            .note(
+                "a turn runs to a fixed point with nothing able to observe it part-way; effects leave it through `after_commit`",
+            ),
+        );
     }
 
     /// Pass one: every type name exists before any type is resolved, so declarations may refer to
@@ -215,6 +308,7 @@ impl Checker {
             let (name, span) = match item {
                 ast::Item::Record(decl) => (&decl.name, decl.span),
                 ast::Item::Enum(decl) => (&decl.name, decl.span),
+                ast::Item::Reactor(decl) => (&decl.name, decl.span),
                 ast::Item::Fn(_) => continue,
             };
             if self.types.contains_key(&name.name) {
@@ -242,6 +336,24 @@ impl Checker {
                         span,
                     });
                     TypeName::Enum(id)
+                }
+                // A reactor handle is a type in the same sense a `Listener` is: it is spelled by
+                // its own name, and it names the thing rather than describing its shape.
+                ast::Item::Reactor(decl) => {
+                    let id = ReactorId(self.program.reactors.len() as u32);
+                    self.program.reactors.push(ReactorDef {
+                        name: decl.name.name.clone(),
+                        params: Vec::new(),
+                        uses: Vec::new(),
+                        inputs: Vec::new(),
+                        nodes: Vec::new(),
+                        slots: Vec::new(),
+                        order: Vec::new(),
+                        exports: Vec::new(),
+                        span,
+                    });
+                    self.reactors.insert(decl.name.name.clone(), id);
+                    TypeName::Reactor(id)
                 }
                 ast::Item::Fn(_) => unreachable!(),
             };
@@ -318,7 +430,7 @@ impl Checker {
                     }
                     self.program.enums[id.index()].variants = variants;
                 }
-                ast::Item::Fn(_) => {}
+                ast::Item::Fn(_) | ast::Item::Reactor(_) => {}
             }
         }
     }
@@ -352,7 +464,7 @@ impl Checker {
                 .map(|p| (p.name.name.clone(), self.resolve_ty(&p.ty)))
                 .collect();
             let ret = decl.ret.as_ref().map_or(Ty::Unit, |ty| self.resolve_ty(ty));
-            let uses = self.capabilities(decl);
+            let uses = self.capabilities(&decl.uses);
             let id = FnId(self.program.fns.len() as u32);
             self.fns.insert(decl.name.name.clone(), id);
             self.signatures.push((params.clone(), ret.clone()));
@@ -378,9 +490,9 @@ impl Checker {
 
     /// Resolve a `uses { … }` list. The vocabulary is closed, so an unknown name is an error that
     /// says what the three are rather than a capability nobody grants.
-    fn capabilities(&mut self, decl: &ast::FnDecl) -> Vec<Capability> {
+    fn capabilities(&mut self, uses: &[ast::Path]) -> Vec<Capability> {
         let mut resolved = Vec::new();
-        for path in &decl.uses {
+        for path in uses {
             let name = path.text();
             match Capability::from_name(&name) {
                 Some(capability) => {
@@ -422,7 +534,10 @@ impl Checker {
             self.scopes = vec![Vec::new()];
             self.ret = ret.clone();
             self.fn_name = decl.name.name.clone();
-            self.in_task = decl.is_task;
+            self.ctx = if decl.is_task { Ctx::Task } else { Ctx::Plain };
+            self.members = HashMap::new();
+            self.reactor = None;
+            self.in_handler = false;
             self.uses = self.program.fns[id.index()].uses.clone();
             self.scope_depth = 0;
             for ((name, ty), param) in params.iter().zip(&decl.params) {
@@ -432,6 +547,864 @@ impl Checker {
             let locals = std::mem::take(&mut self.locals);
             self.program.fns[id.index()].locals = locals;
             self.program.fns[id.index()].body = body;
+        }
+    }
+
+    // ---------------------------------------------------------------- reactors
+
+    /// Pair each reactor declaration with the id `declare_types` gave it, skipping a redeclaration
+    /// so that a duplicate name does not quietly fold two reactors into one.
+    fn reactor_items<'m>(&self, module: &'m ast::Module) -> Vec<(ReactorId, &'m ast::ReactorDecl)> {
+        let mut seen: Vec<ReactorId> = Vec::new();
+        let mut out = Vec::new();
+        for item in &module.items {
+            let ast::Item::Reactor(decl) = item else {
+                continue;
+            };
+            let Some(&id) = self.reactors.get(&decl.name.name) else {
+                continue;
+            };
+            if seen.contains(&id) {
+                continue;
+            }
+            seen.push(id);
+            out.push((id, decl));
+        }
+        out
+    }
+
+    /// Declare a function that was lifted out of a reactor rather than written as one.
+    ///
+    /// Its name is not a legal identifier, so nothing can call it by name; it exists so that a node
+    /// body is an ordinary `FnKind::Plain` function that M1's lowering and M5's backend already
+    /// know how to compile. `FnKind` needs no third variant, because a node function is plain
+    /// because it *is* plain.
+    fn declare_lifted(&mut self, name: String, span: Span) -> FnId {
+        let id = FnId(self.program.fns.len() as u32);
+        self.signatures.push((Vec::new(), Ty::Error));
+        self.program.fns.push(FnDef {
+            name,
+            is_task: false,
+            uses: Vec::new(),
+            params: 0,
+            locals: Vec::new(),
+            ret: Ty::Error,
+            body: Expr {
+                kind: ExprKind::Error,
+                ty: Ty::Error,
+                span,
+            },
+            span,
+        });
+        id
+    }
+
+    /// Pass one: names, parameters, capabilities, input and state *types*, and the member
+    /// namespace. No expression is looked at — the scan that decides what order to look at them in
+    /// has not run yet.
+    fn declare_reactors(&mut self, module: &ast::Module) {
+        for (id, decl) in self.reactor_items(module) {
+            let uses = self.capabilities(&decl.uses);
+            let mut params = Vec::new();
+            let mut nodes: Vec<Node> = Vec::new();
+            let mut slots: Vec<NodeId> = Vec::new();
+            let mut inputs: Vec<InputDef> = Vec::new();
+            let mut taken: HashMap<String, Span> = HashMap::new();
+
+            let claim = |checker: &mut Checker,
+                         taken: &mut HashMap<String, Span>,
+                         name: &ast::Ident|
+             -> bool {
+                if let Some(first) = taken.get(&name.name) {
+                    checker.push(
+                        Diagnostic::new(
+                            name.span,
+                            format!("`{}` is declared twice in `{}`", name.name, decl.name.name),
+                        )
+                        .label("duplicate member")
+                        .secondary(*first, "first declared here"),
+                    );
+                    return false;
+                }
+                taken.insert(name.name.clone(), name.span);
+                true
+            };
+
+            // A parameter is a node and a slot: state written once, when the reactor is created.
+            // Making it one costs a variant and removes a special case from every later pass —
+            // a node body's arguments are then exactly its dependencies, with nothing threaded
+            // alongside them.
+            for (index, param) in decl.params.iter().enumerate() {
+                if !claim(self, &mut taken, &param.name) {
+                    continue;
+                }
+                let ty = self.resolve_ty(&param.ty);
+                let slot = slots.len();
+                slots.push(NodeId(nodes.len() as u32));
+                nodes.push(Node {
+                    name: param.name.name.clone(),
+                    kind: NodeKind::Param { slot, index },
+                    ty: ty.clone(),
+                    deps: Vec::new(),
+                    exported: false,
+                    span: param.span,
+                });
+                params.push((param.name.name.clone(), ty));
+            }
+
+            for member in &decl.members {
+                match &member.kind {
+                    ast::MemberKind::Input { name, ty, queue } => {
+                        if !claim(self, &mut taken, name) {
+                            continue;
+                        }
+                        let ty = self.resolve_ty(ty);
+                        let capacity = self.capacity(&queue.capacity);
+                        let overflow = self.overflow(&queue.overflow);
+                        let handler = self.declare_lifted(
+                            format!("{}.on.{}", decl.name.name, name.name),
+                            member.span,
+                        );
+                        inputs.push(InputDef {
+                            name: name.name.clone(),
+                            ty,
+                            capacity,
+                            overflow,
+                            handler,
+                            plan: Vec::new(),
+                            span: member.span,
+                        });
+                    }
+                    ast::MemberKind::State { name, ty, .. } => {
+                        if !claim(self, &mut taken, name) {
+                            continue;
+                        }
+                        let ty = self.resolve_ty(ty);
+                        let init = self.declare_lifted(
+                            format!("{}.{}.init", decl.name.name, name.name),
+                            member.span,
+                        );
+                        let slot = slots.len();
+                        slots.push(NodeId(nodes.len() as u32));
+                        nodes.push(Node {
+                            name: name.name.clone(),
+                            kind: NodeKind::State { slot, init },
+                            ty,
+                            deps: Vec::new(),
+                            exported: false,
+                            span: member.span,
+                        });
+                    }
+                    ast::MemberKind::Signal { name, exported, .. } => {
+                        if !claim(self, &mut taken, name) {
+                            continue;
+                        }
+                        let body = self.declare_lifted(
+                            format!("{}.{}", decl.name.name, name.name),
+                            member.span,
+                        );
+                        nodes.push(Node {
+                            name: name.name.clone(),
+                            kind: NodeKind::Signal { body },
+                            // Filled in by `check_reactors`, which types the bodies in the order
+                            // the scan worked out.
+                            ty: Ty::Error,
+                            deps: Vec::new(),
+                            exported: *exported,
+                            span: member.span,
+                        });
+                    }
+                    ast::MemberKind::On { .. } => {}
+                }
+            }
+
+            // A handler is matched to its input by name, so both directions have to be checked:
+            // an input with no handler can never do anything, and a handler for no input responds
+            // to a message that cannot arrive.
+            let mut handled: Vec<usize> = Vec::new();
+            for member in &decl.members {
+                let ast::MemberKind::On { input, .. } = &member.kind else {
+                    continue;
+                };
+                let Some(index) = inputs.iter().position(|i| i.name == input.name) else {
+                    let known: Vec<&str> = inputs.iter().map(|i| i.name.as_str()).collect();
+                    let mut diagnostic = Diagnostic::new(
+                        input.span,
+                        format!("`{}` has no input `{}`", decl.name.name, input.name),
+                    )
+                    .label("nothing would send this");
+                    if !known.is_empty() {
+                        diagnostic =
+                            diagnostic.note(format!("its inputs are: {}", known.join(", ")));
+                    }
+                    self.push(diagnostic);
+                    continue;
+                };
+                if handled.contains(&index) {
+                    self.push(
+                        Diagnostic::new(
+                            input.span,
+                            format!("`{}` already has a handler", input.name),
+                        )
+                        .label("second `on` for one input")
+                        .secondary(inputs[index].span, "the input")
+                        .note("one input is one handler: two would need an order between them, and a turn has none"),
+                    );
+                    continue;
+                }
+                handled.push(index);
+            }
+            for (index, input) in inputs.iter().enumerate() {
+                if handled.contains(&index) {
+                    continue;
+                }
+                self.push(
+                    Diagnostic::new(
+                        input.span,
+                        format!("`{}` has no `on {}` handler", input.name, input.name),
+                    )
+                    .label("nothing responds to this")
+                    .note("an input is how a message reaches state; with no handler it can only be dropped"),
+                );
+            }
+
+            let reactor = &mut self.program.reactors[id.index()];
+            reactor.params = params;
+            reactor.uses = uses;
+            reactor.inputs = inputs;
+            reactor.slots = slots;
+            reactor.exports = nodes
+                .iter()
+                .enumerate()
+                .filter(|(_, node)| node.exported)
+                .map(|(index, _)| NodeId(index as u32))
+                .collect();
+            reactor.nodes = nodes;
+        }
+    }
+
+    /// Pass two: the dependency edges, the cycle check, and a topological order — all from the
+    /// shape of the source, before any body is typed.
+    fn scan_reactors(&mut self, module: &ast::Module) -> Vec<Wiring> {
+        let mut wirings = Vec::new();
+        for (id, decl) in self.reactor_items(module) {
+            wirings.push(self.scan_reactor(id, decl));
+        }
+        wirings
+    }
+
+    fn scan_reactor(&mut self, id: ReactorId, decl: &ast::ReactorDecl) -> Wiring {
+        let members = self.member_namespace(id);
+        let count = self.program.reactors[id.index()].nodes.len();
+        let mut deps: Vec<Vec<usize>> = vec![Vec::new(); count];
+        let mut writes: Vec<Vec<usize>> =
+            vec![Vec::new(); self.program.reactors[id.index()].inputs.len()];
+        let mut ok = true;
+
+        for member in &decl.members {
+            match &member.kind {
+                ast::MemberKind::State { name, init, .. } => {
+                    let Some(node) = self.node_index(id, &name.name) else {
+                        continue;
+                    };
+                    let mut scan = Scan::new(&members);
+                    scan.expr(init);
+                    // An initialiser is not propagation: it runs once, before any turn, so it may
+                    // read what is already fixed — the constructor parameters — and nothing else.
+                    // Reading another cell's initial value would need an order between them that
+                    // the graph deliberately does not have.
+                    for (found, span) in &scan.reads {
+                        match members.get(found) {
+                            Some(Sort::Param) => {
+                                let dep =
+                                    self.node_index(id, found).expect("a parameter is a node");
+                                push_once(&mut deps[node], dep);
+                            }
+                            Some(sort) => {
+                                self.push(
+                                    Diagnostic::new(
+                                        *span,
+                                        format!(
+                                            "a `state` initialiser cannot read the {} `{found}`",
+                                            sort.describe()
+                                        ),
+                                    )
+                                    .label("initialisers run before the first turn")
+                                    .note("read a constructor parameter instead, or derive the value with a signal"),
+                                );
+                                ok = false;
+                            }
+                            None => {}
+                        }
+                    }
+                }
+                ast::MemberKind::Signal { name, body, .. } => {
+                    let Some(node) = self.node_index(id, &name.name) else {
+                        continue;
+                    };
+                    let mut scan = Scan::new(&members);
+                    scan.expr(body);
+                    for (found, span) in &scan.reads {
+                        match members.get(found) {
+                            Some(Sort::Input) => {
+                                self.unreadable_member(found, Sort::Input, *span);
+                                ok = false;
+                            }
+                            Some(_) => {
+                                let dep = self.node_index(id, found).expect("a member with a sort");
+                                push_once(&mut deps[node], dep);
+                            }
+                            None => {}
+                        }
+                    }
+                }
+                ast::MemberKind::On {
+                    input,
+                    params,
+                    body,
+                } => {
+                    let Some(index) = self.program.reactors[id.index()].input(&input.name) else {
+                        continue;
+                    };
+                    // The handler's own message binding shadows any member of the same name.
+                    let mut scan = Scan::new(&members);
+                    for param in params {
+                        scan.bind(&param.name);
+                    }
+                    scan.block(body);
+                    for (found, span) in &scan.writes {
+                        match members.get(found) {
+                            Some(Sort::State) => {
+                                let node = self.node_index(id, found).expect("state is a node");
+                                push_once(&mut writes[index], node);
+                            }
+                            // Assignment to a parameter or a signal is reported when the body is
+                            // typed, where the diagnostic can say what the name actually is.
+                            Some(_) | None => {
+                                let _ = span;
+                            }
+                        }
+                    }
+                }
+                ast::MemberKind::Input { .. } => {}
+            }
+        }
+
+        if let Some(cycle) = self.find_cycle(id, &deps) {
+            self.report_cycle(id, &cycle);
+            ok = false;
+        }
+        let order = if ok {
+            topological(&deps)
+        } else {
+            (0..count).collect()
+        };
+
+        let reactor = &mut self.program.reactors[id.index()];
+        for (node, found) in deps.iter().enumerate() {
+            reactor.nodes[node].deps = found.iter().map(|d| NodeId(*d as u32)).collect();
+        }
+        reactor.order = order.iter().map(|n| NodeId(*n as u32)).collect();
+
+        Wiring {
+            deps,
+            order,
+            writes,
+            ok,
+        }
+    }
+
+    /// Pass three: type every body, in the order pass two worked out, and lift each to a function.
+    ///
+    /// Topological order is what makes forward references work: `signal healthy = open < limit`
+    /// can be written above `signal open` because `open` is typed first regardless of where it
+    /// appears in the file.
+    fn check_reactors(&mut self, module: &ast::Module, wirings: Vec<Wiring>) {
+        for ((id, decl), wiring) in self.reactor_items(module).into_iter().zip(wirings) {
+            if !wiring.ok {
+                continue;
+            }
+            self.check_reactor(id, decl, &wiring);
+        }
+    }
+
+    fn check_reactor(&mut self, id: ReactorId, decl: &ast::ReactorDecl, wiring: &Wiring) {
+        let members = self.member_namespace(id);
+        let uses = self.program.reactors[id.index()].uses.clone();
+        let name = self.program.reactors[id.index()].name.clone();
+
+        for &node in &wiring.order {
+            let (kind_fn, node_span) = {
+                let node_def = &self.program.reactors[id.index()].nodes[node];
+                let function = match node_def.kind {
+                    NodeKind::Param { .. } => None,
+                    NodeKind::State { init, .. } => Some(init),
+                    NodeKind::Signal { body, .. } => Some(body),
+                };
+                (function, node_def.span)
+            };
+            let Some(function) = kind_fn else {
+                continue;
+            };
+            let Some(member) =
+                member_for(decl, &self.program.reactors[id.index()].nodes[node].name)
+            else {
+                continue;
+            };
+            let (body, annotation) = match &member.kind {
+                ast::MemberKind::State { ty, init, .. } => (init, Some(ty)),
+                ast::MemberKind::Signal { ty, body, .. } => (body, ty.as_ref()),
+                _ => continue,
+            };
+
+            self.begin_member(&name, function, Ctx::Turn, &uses, id, &members, false);
+            for &dep in &wiring.deps[node] {
+                self.bind_node(id, dep, false);
+            }
+            let expected = annotation.map(|ty| self.resolve_ty(ty));
+            let checked = self.check_expr(body, expected.as_ref());
+            let ty = expected.unwrap_or_else(|| match &checked.ty {
+                Ty::Never => Ty::Error,
+                ty => ty.clone(),
+            });
+            self.finish_member(function, ty.clone(), checked);
+            let _ = node_span;
+            self.program.reactors[id.index()].nodes[node].ty = ty;
+        }
+
+        // Handlers last: every node type is known by now, so a handler can be checked in one pass
+        // whatever order it was written in.
+        for member in &decl.members {
+            let ast::MemberKind::On {
+                input,
+                params,
+                body,
+            } = &member.kind
+            else {
+                continue;
+            };
+            let Some(index) = self.program.reactors[id.index()].input(&input.name) else {
+                continue;
+            };
+            let function = self.program.reactors[id.index()].inputs[index].handler;
+            if self.program.fns[function.index()].ret != Ty::Error {
+                // A second handler for the same input; already reported.
+                continue;
+            }
+
+            self.begin_member(&name, function, Ctx::Turn, &uses, id, &members, true);
+            let message = self.program.reactors[id.index()].inputs[index].ty.clone();
+            self.bind_message(&input.name, params, &message, member.span);
+            // Every slot, in slot order, so that the runtime's call is one shape rather than one
+            // per handler. State is `mut` here and nowhere else: this is the only place a commit
+            // can happen.
+            let slots = self.program.reactors[id.index()].slots.clone();
+            for slot in slots {
+                self.bind_node(id, slot.index(), true);
+            }
+            let checked = self.check_block(body, Some(&Ty::Unit), body.span);
+            self.finish_member(function, Ty::Unit, checked);
+        }
+
+        self.ctx = Ctx::Plain;
+        self.members = HashMap::new();
+        self.reactor = None;
+        self.in_handler = false;
+        self.plans(id, wiring);
+    }
+
+    /// Bind the message an `on` handler was invoked with.
+    ///
+    /// One binding, or none when the message is `()`: an occurrence with no payload has nothing to
+    /// name. Destructuring several names out of one message needs patterns in a parameter position,
+    /// which nothing else in v0 has.
+    fn bind_message(&mut self, input: &str, params: &[ast::Ident], ty: &Ty, span: Span) {
+        let wanted = if *ty == Ty::Unit { 0 } else { 1 };
+        if params.len() == wanted {
+            if let Some(param) = params.first() {
+                self.declare_role(
+                    param.name.clone(),
+                    ty.clone(),
+                    false,
+                    LocalRole::Message,
+                    param.span,
+                );
+            }
+            return;
+        }
+        let message = if wanted == 0 {
+            format!("`{input}` carries no message, so `on {input}()` binds nothing")
+        } else {
+            format!(
+                "`on {input}` binds the message it was sent, so it takes one name, not {}",
+                params.len()
+            )
+        };
+        let mut diagnostic = Diagnostic::new(span, message);
+        diagnostic = if wanted == 0 {
+            diagnostic.label("declared as `()`")
+        } else {
+            diagnostic.note(format!(
+                "write `on {input}(message)`, where `message` is the {} it was sent",
+                self.program.ty_name(ty)
+            ))
+        };
+        self.push(diagnostic);
+        for param in params {
+            self.declare_role(
+                param.name.clone(),
+                Ty::Error,
+                false,
+                LocalRole::Message,
+                param.span,
+            );
+        }
+    }
+
+    /// Start checking one lifted member: a fresh local frame, and the reactor's namespace in hand
+    /// for the sake of diagnostics about names that are members but not readable here.
+    #[allow(clippy::too_many_arguments)]
+    fn begin_member(
+        &mut self,
+        reactor_name: &str,
+        function: FnId,
+        ctx: Ctx,
+        uses: &[Capability],
+        id: ReactorId,
+        members: &HashMap<String, Sort>,
+        handler: bool,
+    ) {
+        self.locals = Vec::new();
+        self.scopes = vec![Vec::new()];
+        self.ret = Ty::Unit;
+        self.fn_name = self.program.fns[function.index()].name.clone();
+        self.ctx = ctx;
+        self.uses = uses.to_vec();
+        self.scope_depth = 0;
+        self.reactor = Some(id);
+        self.in_handler = handler;
+        // A node body sees only what it depends on; a handler sees state but never a signal. Both
+        // are expressed by simply not binding the rest, with `members` supplying the diagnostic.
+        self.members = members.clone();
+        let _ = reactor_name;
+    }
+
+    fn bind_node(&mut self, id: ReactorId, node: usize, mutable: bool) {
+        let node = &self.program.reactors[id.index()].nodes[node];
+        let (name, ty, span) = (node.name.clone(), node.ty.clone(), node.span);
+        let role = match node.kind {
+            NodeKind::Param { .. } => LocalRole::Param,
+            NodeKind::State { slot, .. } => LocalRole::State(slot),
+            NodeKind::Signal { .. } => LocalRole::Signal,
+        };
+        // A parameter is fixed for the reactor's life, so it is never `mut` even in a handler.
+        let mutable = mutable && matches!(role, LocalRole::State(_));
+        self.declare_role(name, ty, mutable, role, span);
+    }
+
+    fn finish_member(&mut self, function: FnId, ret: Ty, body: Expr) {
+        let locals = std::mem::take(&mut self.locals);
+        let params = locals.len() - count_extra(&locals);
+        let def = &mut self.program.fns[function.index()];
+        def.params = params;
+        def.ret = ret;
+        def.locals = locals;
+        def.body = body;
+    }
+
+    /// Pass four's other half: what each input's turn actually has to touch.
+    ///
+    /// A plan is the subsequence of `order` reachable from the state cells that input's handler
+    /// assigns. Everything outside it is provably unaffected by a message on that input, so a turn
+    /// does not walk it — and because it is carved out of `order`, it is a subsequence of `order`
+    /// by construction rather than by a check somebody has to remember.
+    fn plans(&mut self, id: ReactorId, wiring: &Wiring) {
+        let count = self.program.reactors[id.index()].nodes.len();
+        // Dependents, from the dependency edges: propagation runs the other way round.
+        let mut dependents: Vec<Vec<usize>> = vec![Vec::new(); count];
+        for (node, deps) in wiring.deps.iter().enumerate() {
+            for &dep in deps {
+                dependents[dep].push(node);
+            }
+        }
+
+        for index in 0..self.program.reactors[id.index()].inputs.len() {
+            let mut reached = vec![false; count];
+            let mut stack: Vec<usize> = wiring.writes[index].clone();
+            for &node in &stack {
+                reached[node] = true;
+            }
+            while let Some(node) = stack.pop() {
+                for &next in &dependents[node] {
+                    if !reached[next] {
+                        reached[next] = true;
+                        stack.push(next);
+                    }
+                }
+            }
+            let plan: Vec<NodeId> = wiring
+                .order
+                .iter()
+                .filter(|node| reached[**node])
+                .map(|node| NodeId(*node as u32))
+                .collect();
+            self.program.reactors[id.index()].inputs[index].plan = plan;
+        }
+    }
+
+    /// Pass five: everything about a turn that is a property of the *call graph* rather than of one
+    /// expression — that it terminates, and that nothing it reaches can be observed from outside.
+    ///
+    /// Both have the same shape and the same reason for living here. `check_reactors` can see that
+    /// a node body does not itself call `print`, and cannot see that the ordinary function it calls
+    /// does; an ordinary `fn` is allowed to print, because printing needs no authority. So purity
+    /// is checked over the functions a turn can reach, which is the same walk termination needs.
+    ///
+    /// A turn has to terminate, and `DESIGN.md` §14 leaves open how strict that should be — total
+    /// functions, cost annotations, cooperative budgets. v0 can answer it with a theorem instead:
+    /// there is no `while`, no `for`, and no `loop`, so recursion is the only way a pure function
+    /// can fail to return. One pass over the call graph therefore makes every turn provably
+    /// terminating, with no annotation burden and no runtime budget.
+    ///
+    /// This expires the day loops arrive, and should be replaced rather than extended when they do.
+    fn check_turns(&mut self) {
+        let mut turn_fns: Vec<(FnId, Span)> = Vec::new();
+        for reactor in &self.program.reactors {
+            for node in &reactor.nodes {
+                match node.kind {
+                    NodeKind::Param { .. } => {}
+                    NodeKind::State { init, .. } => turn_fns.push((init, node.span)),
+                    NodeKind::Signal { body, .. } => turn_fns.push((body, node.span)),
+                }
+            }
+            for input in &reactor.inputs {
+                turn_fns.push((input.handler, input.span));
+            }
+        }
+        if turn_fns.is_empty() {
+            return;
+        }
+
+        let calls: Vec<Vec<FnId>> = self
+            .program
+            .fns
+            .iter()
+            .map(|def| {
+                let mut found = Vec::new();
+                collect_calls(&def.body, &mut found);
+                found
+            })
+            .collect();
+        let impurities: Vec<Option<(Builtin, Span)>> = self
+            .program
+            .fns
+            .iter()
+            .map(|def| impure_builtin(&def.body))
+            .collect();
+
+        for (function, span) in turn_fns {
+            // Reported once per turn function even when several reachable functions are impure:
+            // the first one is what has to change, and listing the rest is noise until it does.
+            if let Some((culprit, builtin, at)) = reachable_impurity(&calls, &impurities, function)
+                && culprit != function
+            {
+                let name = self.program.fns[culprit.index()].name.clone();
+                self.push(
+                    Diagnostic::new(
+                        span,
+                        format!(
+                            "this reaches `{}`, which calls `{}`",
+                            name,
+                            builtin.name()
+                        ),
+                    )
+                    .label("a turn is pure")
+                    .secondary(at, format!("`{}` is something the world can see happen", builtin.name()))
+                    .note("purity is not the same question as authority: `print` needs no capability and is still observable")
+                    .note("effects leave a turn through `after_commit`, which starts them once the snapshot is published"),
+                );
+            }
+
+            let Some(cycle) = reachable_cycle(&calls, function) else {
+                continue;
+            };
+            let names: Vec<&str> = cycle
+                .iter()
+                .map(|id| self.program.fns[id.index()].name.as_str())
+                .collect();
+            let culprit = cycle[0];
+            let message = format!("`{}` is recursive, and a turn must end", names[0]);
+            let mut diagnostic = Diagnostic::new(span, message)
+                .label("reached from here")
+                .secondary(
+                    self.program.fns[culprit.index()].span,
+                    format!("the cycle is {}", names.join(" → ")),
+                );
+            diagnostic = diagnostic
+                .note("v0 has no loop construct, so recursion is the only way a pure function can fail to return — which is what makes termination provable rather than hoped for")
+                .note("compute the value with a bounded expression, or move the work into a `task fn` and request it with `after_commit`");
+            self.push(diagnostic);
+        }
+    }
+
+    fn member_namespace(&self, id: ReactorId) -> HashMap<String, Sort> {
+        let reactor = &self.program.reactors[id.index()];
+        let mut members = HashMap::new();
+        for node in &reactor.nodes {
+            let sort = match node.kind {
+                NodeKind::Param { .. } => Sort::Param,
+                NodeKind::State { .. } => Sort::State,
+                NodeKind::Signal { .. } => Sort::Signal,
+            };
+            members.insert(node.name.clone(), sort);
+        }
+        for input in &reactor.inputs {
+            members.insert(input.name.clone(), Sort::Input);
+        }
+        members
+    }
+
+    fn node_index(&self, id: ReactorId, name: &str) -> Option<usize> {
+        self.program.reactors[id.index()]
+            .nodes
+            .iter()
+            .position(|node| node.name == name)
+    }
+
+    /// Find one instantaneous cycle, as the path that closes it.
+    ///
+    /// Only edges *between signals* can close one: a state cell is a temporal boundary, so a
+    /// feedback loop that crosses one is exactly the accepted kind. That is also why one pass over
+    /// the topological order is the fixed point rather than an iteration to convergence.
+    fn find_cycle(&self, id: ReactorId, deps: &[Vec<usize>]) -> Option<Vec<usize>> {
+        let reactor = &self.program.reactors[id.index()];
+        let instantaneous = |node: usize| reactor.nodes[node].kind.is_signal();
+
+        #[derive(Clone, Copy, PartialEq)]
+        enum Mark {
+            White,
+            Grey,
+            Black,
+        }
+        let mut marks = vec![Mark::White; deps.len()];
+        let mut path: Vec<usize> = Vec::new();
+
+        // Iterative rather than recursive, and started from every node in source order, so the
+        // cycle reported for a given program is always the same one.
+        for start in 0..deps.len() {
+            if !instantaneous(start) || marks[start] != Mark::White {
+                continue;
+            }
+            let mut stack = vec![(start, 0usize)];
+            marks[start] = Mark::Grey;
+            path.push(start);
+            while let Some((node, next)) = stack.pop() {
+                if next >= deps[node].len() {
+                    marks[node] = Mark::Black;
+                    path.pop();
+                    continue;
+                }
+                stack.push((node, next + 1));
+                let dep = deps[node][next];
+                if !instantaneous(dep) {
+                    continue;
+                }
+                match marks[dep] {
+                    Mark::Grey => {
+                        let at = path.iter().position(|n| *n == dep).unwrap_or(0);
+                        let mut cycle = path[at..].to_vec();
+                        cycle.push(dep);
+                        return Some(cycle);
+                    }
+                    Mark::Black => {}
+                    Mark::White => {
+                        marks[dep] = Mark::Grey;
+                        path.push(dep);
+                        stack.push((dep, 0));
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Report a cycle across every span involved.
+    ///
+    /// This is what `Diagnostic::secondary` exists for. A causality cycle is inherently
+    /// multi-site — `a` depends on `b` and `b` on `a` is a fact about two declarations — and
+    /// demoting the second to a note would lose the line and column that make it fixable.
+    fn report_cycle(&mut self, id: ReactorId, cycle: &[usize]) {
+        let reactor = &self.program.reactors[id.index()];
+        let names: Vec<String> = cycle
+            .iter()
+            .map(|node| reactor.nodes[*node].name.clone())
+            .collect();
+        let spans: Vec<(Span, String)> = cycle[..cycle.len() - 1]
+            .iter()
+            .enumerate()
+            .map(|(step, node)| {
+                let node = &reactor.nodes[*node];
+                (
+                    node.span,
+                    format!("`{}` depends on `{}`", node.name, names[step + 1]),
+                )
+            })
+            .collect();
+
+        let mut spans = spans.into_iter();
+        let (head_span, head_label) = spans.next().expect("a cycle has at least one step");
+        let mut diagnostic = Diagnostic::new(
+            head_span,
+            format!("instantaneous causality cycle {}", names.join(" → ")),
+        )
+        .label(head_label);
+        for (span, label) in spans {
+            diagnostic = diagnostic.secondary(span, label);
+        }
+        self.push(diagnostic.note(
+            "a signal is its expression, so a cycle among signals has no value to settle on",
+        ).note(
+            "break it with a `state` cell: state is the temporal boundary a feedback loop has to cross",
+        ));
+    }
+
+    fn capacity(&mut self, expr: &ast::Expr) -> usize {
+        match expr.kind {
+            ast::ExprKind::Int(value) if value > 0 => value as usize,
+            ast::ExprKind::Int(_) => {
+                self.push(
+                    Diagnostic::new(expr.span, "a capacity must be positive")
+                        .label("nothing could ever be queued")
+                        .note("a mailbox that holds nothing is an input nothing can reach"),
+                );
+                1
+            }
+            _ => {
+                self.push(
+                    Diagnostic::new(expr.span, "a capacity must be an integer literal")
+                        .label("not a literal")
+                        .note("the bound is part of the reactor's shape, so it is known before anything runs"),
+                );
+                1
+            }
+        }
+    }
+
+    fn overflow(&mut self, name: &ast::Ident) -> Overflow {
+        match Overflow::from_name(&name.name) {
+            Some(overflow) => overflow,
+            None => {
+                let known: Vec<&str> = Overflow::ALL.iter().map(|o| o.name()).collect();
+                self.push(
+                    Diagnostic::new(
+                        name.span,
+                        format!("unknown overflow policy `{}`", name.name),
+                    )
+                    .label("not a policy v0 knows")
+                    .note(format!("the vocabulary is fixed: {}", known.join(", "))),
+                );
+                Overflow::Reject
+            }
         }
     }
 
@@ -472,6 +1445,28 @@ impl Checker {
                             None => Ty::Error,
                         };
                     }
+                    // A signal's own type has no spelling. Registering the names here is what
+                    // turns the attempt into a teaching diagnostic instead of "unknown type", and
+                    // it is also why there is no escape check to write: a signal cannot appear in
+                    // a field, a parameter, a return type, or a payload, because there is nowhere
+                    // to write it down.
+                    "Signal" | "Event" => {
+                        self.push(
+                            Diagnostic::new(
+                                ty.span,
+                                format!("`{name}` is not a type that can be written"),
+                            )
+                            .label(format!(
+                                "{} lives inside a reactor",
+                                if name == "Event" { "an event" } else { "a signal" }
+                            ))
+                            .note(
+                                "declare it as a member — `signal open = …` — and annotate the element type, as in `signal open: I64 = …`",
+                            )
+                            .note("outside its reactor it is reached through an `export`, and read with `latest`"),
+                        );
+                        return Ty::Error;
+                    }
                     _ => {}
                 }
                 if !args.is_empty() {
@@ -485,6 +1480,7 @@ impl Checker {
                     Some(TypeName::Builtin(ty)) => ty.clone(),
                     Some(TypeName::Record(id)) => Ty::Record(*id),
                     Some(TypeName::Enum(id)) => Ty::Enum(*id),
+                    Some(TypeName::Reactor(id)) => Ty::Reactor(*id),
                     None => {
                         self.error(path.span, format!("unknown type `{name}`"));
                         Ty::Error
@@ -524,11 +1520,23 @@ impl Checker {
     // ---------------------------------------------------------------- locals
 
     fn declare_local(&mut self, name: String, ty: Ty, mutable: bool, span: Span) -> LocalId {
+        self.declare_role(name, ty, mutable, LocalRole::Ordinary, span)
+    }
+
+    fn declare_role(
+        &mut self,
+        name: String,
+        ty: Ty,
+        mutable: bool,
+        role: LocalRole,
+        span: Span,
+    ) -> LocalId {
         let id = LocalId(self.locals.len() as u32);
         self.locals.push(LocalDef {
             name: name.clone(),
             ty,
             mutable,
+            role,
             span,
         });
         self.scopes
@@ -641,11 +1649,14 @@ impl Checker {
             ast::ExprKind::Await(inner) => self.check_await(inner, span),
             ast::ExprKind::Scope(block) => self.check_scope(block, expected, span),
             ast::ExprKind::Spawn(inner) => self.check_spawn(inner, span),
+            ast::ExprKind::SpawnReactor { path, args } => {
+                self.check_spawn_reactor(path, args, span)
+            }
             ast::ExprKind::Lambda { .. } => {
                 self.push(
                     Diagnostic::new(span, "functions are not values yet")
                         .label("lambda")
-                        .note("closures arrive alongside the reactive operators in M3"),
+                        .note("nothing in v0 needs one: the reactor surface is `input`, `state`, `signal`, and `on`, and closures arrive with the dynamic subgraphs of M7"),
                 );
                 Expr {
                     kind: ExprKind::Error,
@@ -675,7 +1686,11 @@ impl Checker {
     /// the task it is creating needs. Both questions belong here, at the point of creation: once a
     /// `Task<T>` is a value, nothing downstream can tell what it will do.
     fn require_task_authority(&mut self, what: &str, needs: &[Capability], span: Span) -> bool {
-        if !self.in_task {
+        if !self.ctx.builds_tasks() {
+            if self.ctx.in_turn() {
+                self.impure(what, "builds a task", span);
+                return false;
+            }
             let message = format!(
                 "only a `task fn` can create a task, and `{}` is not one",
                 self.fn_name
@@ -726,7 +1741,11 @@ impl Checker {
     }
 
     fn check_await(&mut self, inner: &ast::Expr, span: Span) -> Expr {
-        if !self.in_task {
+        if self.ctx.in_turn() {
+            self.impure("await", "suspends", span);
+            return self.error_expr(span);
+        }
+        if !self.ctx.suspends() {
             self.push(
                 Diagnostic::new(span, "`await` is only available inside a `task fn`")
                     .label("only a task may suspend")
@@ -764,7 +1783,11 @@ impl Checker {
     }
 
     fn check_scope(&mut self, block: &ast::Block, expected: Option<&Ty>, span: Span) -> Expr {
-        if !self.in_task {
+        if self.ctx.in_turn() {
+            self.impure("scope", "starts tasks", span);
+            return self.error_expr(span);
+        }
+        if !self.ctx.suspends() {
             self.push(
                 Diagnostic::new(span, "a `scope` is only available inside a `task fn`")
                     .label("only a task may start other tasks")
@@ -786,7 +1809,11 @@ impl Checker {
     }
 
     fn check_spawn(&mut self, inner: &ast::Expr, span: Span) -> Expr {
-        if !self.in_task {
+        if self.ctx.in_turn() {
+            self.impure("spawn", "starts a task", span);
+            return self.error_expr(span);
+        }
+        if !self.ctx.suspends() {
             self.push(
                 Diagnostic::new(span, "`spawn` is only available inside a `task fn`")
                     .label("only a task may start other tasks")
@@ -842,11 +1869,18 @@ impl Checker {
         let span = path.span;
         let head = &path.segments[0];
         let Some(local) = self.lookup_local(&head.name) else {
+            // Inside a reactor, a name that does not resolve is very often a member that is real
+            // but unreadable *here*, and saying which is the whole difference between a diagnostic
+            // that teaches the rule and one that looks like a typo.
+            if let Some(sort) = self.members.get(&head.name).copied() {
+                self.unreadable_member(&head.name, sort, span);
+                return self.error_expr(span);
+            }
             if path.segments.len() == 1 && self.fns.contains_key(&head.name) {
                 self.push(
                     Diagnostic::new(span, "functions are not values yet")
                         .label(format!("`{}` can only be called", head.name))
-                        .note("first-class functions arrive with closures in M3"),
+                        .note("first-class functions arrive with closures in M7"),
                 );
             } else {
                 self.error(span, format!("unknown name `{}`", head.name));
@@ -871,6 +1905,43 @@ impl Checker {
         expr
     }
 
+    /// A reactor member that exists but is not in scope where it was written.
+    fn unreadable_member(&mut self, name: &str, sort: Sort, span: Span) {
+        if sort == Sort::Signal && self.assigning {
+            self.push(
+                Diagnostic::new(
+                    span,
+                    format!("`{name}` is a signal, and a signal is never assigned"),
+                )
+                .label("derived, not stored")
+                .note("a signal *is* its expression; two definitions of one value is what assigning to it would mean")
+                .note("to make it settable, declare it as `state` and assign it here instead"),
+            );
+            return;
+        }
+        let diagnostic = match sort {
+            // The rule that is absolute rather than explained. A handler runs *before*
+            // propagation, so a signal read there would quietly mean last turn's value — and a
+            // language whose central claim is glitch freedom should not have a way to read a
+            // stale value that looks exactly like reading a fresh one.
+            Sort::Signal => Diagnostic::new(
+                span,
+                format!("an `on` handler cannot read the signal `{name}`"),
+            )
+            .label("signals are recomputed after the handler runs")
+            .note("reading it here would mean the previous turn's value, which is never what was meant")
+            .note("compute the condition from state, or move the decision into a signal of its own"),
+            Sort::Input => Diagnostic::new(span, format!("`{name}` is an input, not a value"))
+                .label("an input is a mailbox")
+                .note("respond to it with `on {name}(…) {{ … }}`; a node body cannot read one"),
+            Sort::Param | Sort::State => {
+                Diagnostic::new(span, format!("`{name}` is not in scope here"))
+                    .label(format!("a reactor {}", sort.describe()))
+            }
+        };
+        self.push(diagnostic);
+    }
+
     fn field_access(&mut self, base: Expr, name: &ast::Ident, span: Span) -> Expr {
         if base.ty.is_error() {
             return Expr {
@@ -879,6 +1950,62 @@ impl Checker {
                 span,
             };
         }
+        // A reactor handle has no fields, but it does have members, and `gate.opened` is how one is
+        // named from outside. Inputs and exported signals are the only two that have a spelling
+        // there: an unexported signal is reactor-private, which is what `export` is for.
+        if let Ty::Reactor(id) = base.ty {
+            let reactor = &self.program.reactors[id.index()];
+            if let Some(index) = reactor.input(&name.name) {
+                let ty = Ty::Input(Box::new(reactor.inputs[index].ty.clone()));
+                return Expr {
+                    kind: ExprKind::ReactorInput {
+                        reactor: Box::new(base),
+                        index,
+                    },
+                    ty,
+                    span,
+                };
+            }
+            if let Some(index) = reactor
+                .exports
+                .iter()
+                .position(|node| reactor.nodes[node.index()].name == name.name)
+            {
+                let ty = Ty::Signal(Box::new(
+                    reactor.nodes[reactor.exports[index].index()].ty.clone(),
+                ));
+                return Expr {
+                    kind: ExprKind::ReactorExport {
+                        reactor: Box::new(base),
+                        index,
+                    },
+                    ty,
+                    span,
+                };
+            }
+            let reactor_name = reactor.name.clone();
+            let private = reactor
+                .node(&name.name)
+                .is_some_and(|node| !reactor.nodes[node.index()].exported);
+            let mut diagnostic = Diagnostic::new(
+                name.span,
+                format!(
+                    "`{reactor_name}` has no input or exported signal `{}`",
+                    name.name
+                ),
+            );
+            diagnostic = if private {
+                diagnostic.label("declared, but not exported").note(format!(
+                    "write `export signal {}` to make it readable from outside",
+                    name.name
+                ))
+            } else {
+                diagnostic.label("unknown member")
+            };
+            self.push(diagnostic);
+            return self.error_expr(span);
+        }
+
         let Ty::Record(id) = base.ty else {
             let message = format!("{} has no fields", self.program.ty_name(&base.ty));
             self.push(
@@ -1089,7 +2216,7 @@ impl Checker {
         let ast::ExprKind::Path(path) = &callee.kind else {
             self.push(
                 Diagnostic::new(callee.span, "only a named function can be called")
-                    .note("methods and function values arrive in M3"),
+                    .note("methods and function values arrive with M7; a reactor's members are reached as `handle.member`, and nothing else has any"),
             );
             return Expr {
                 kind: ExprKind::Error,
@@ -1157,6 +2284,12 @@ impl Checker {
     fn check_builtin(&mut self, builtin: Builtin, args: &[ast::Arg], span: Span) -> Expr {
         let (params, ret) = builtin.signature();
         let name = builtin.name();
+        // Purity is asked before anything else, because the answer does not depend on the
+        // arguments and the diagnostic should be about the call rather than about a type.
+        if self.ctx.in_turn() && !builtin.is_pure() {
+            self.impure(name, "is something the world can see happen", span);
+            return self.error_expr(span);
+        }
         if args.len() != params.len() || args.iter().any(|arg| arg.name.is_some()) {
             let message = format!(
                 "`{name}` takes {} positional argument{}",
@@ -1168,6 +2301,15 @@ impl Checker {
         }
         if builtin.is_task() && !self.require_task_authority(name, builtin.capabilities(), span) {
             return self.error_expr(span);
+        }
+        // `send` and `latest` are typed by what they are handed rather than by a signature, the
+        // way `print` is. Both take a member of a running reactor, which is the only way to name
+        // one from outside — there is no method resolution in v0, so the handle table is closed
+        // and these two are the whole of it.
+        match builtin {
+            Builtin::Send => return self.check_send(args, span),
+            Builtin::Latest => return self.check_latest(args, span),
+            _ => {}
         }
 
         let mut checked = Vec::with_capacity(params.len());
@@ -1183,6 +2325,127 @@ impl Checker {
                 args: checked,
             },
             ty: ret,
+            span,
+        }
+    }
+
+    /// `send(gate.opened, message)` — put a message in a reactor's mailbox.
+    ///
+    /// It builds a task rather than doing it, because a `wait` mailbox that is full suspends the
+    /// sender, and one spelling should not sometimes suspend and sometimes not.
+    fn check_send(&mut self, args: &[ast::Arg], span: Span) -> Expr {
+        let target = self.check_expr(&args[0].value, None);
+        if target.ty.is_error() {
+            return self.error_expr(span);
+        }
+        let Ty::Input(message) = target.ty.clone() else {
+            let message = format!(
+                "`send` needs an input of a reactor, not {}",
+                self.program.ty_name(&target.ty)
+            );
+            self.push(
+                Diagnostic::new(args[0].span, message)
+                    .label("not an input")
+                    .note("name one on a handle, as in `send(gate.opened, ())`"),
+            );
+            return self.error_expr(span);
+        };
+        let value = self.check_expr(&args[1].value, Some(&message));
+        Expr {
+            kind: ExprKind::Builtin {
+                builtin: Builtin::Send,
+                args: vec![target, value],
+            },
+            ty: Ty::Task(Box::new(Ty::Unit)),
+            span,
+        }
+    }
+
+    /// `latest(gate.snapshot)` — the last published value of an exported signal.
+    ///
+    /// It does not enter the reactor and does not wait for one: what it returns is a version that
+    /// was stable when it was published. A read synchronised with the reactor's own turn is a
+    /// stronger thing that `DESIGN.md` §14 leaves open.
+    fn check_latest(&mut self, args: &[ast::Arg], span: Span) -> Expr {
+        let target = self.check_expr(&args[0].value, None);
+        if target.ty.is_error() {
+            return self.error_expr(span);
+        }
+        let Ty::Signal(element) = target.ty.clone() else {
+            let message = format!(
+                "`latest` needs an exported signal, not {}",
+                self.program.ty_name(&target.ty)
+            );
+            self.push(
+                Diagnostic::new(args[0].span, message)
+                    .label("not a signal")
+                    .note("name one on a handle, as in `latest(gate.snapshot)`"),
+            );
+            return self.error_expr(span);
+        };
+        Expr {
+            kind: ExprKind::Builtin {
+                builtin: Builtin::Latest,
+                args: vec![target],
+            },
+            ty: *element,
+            span,
+        }
+    }
+
+    /// `spawn reactor Gate(limit: 8)`.
+    ///
+    /// The reactor is owned by the scope that started it, exactly as a spawned task is, and the
+    /// capability check is the same one a task gets: authority is checked where the thing that
+    /// will use it is created, because afterwards nothing can tell what a handle will do.
+    fn check_spawn_reactor(&mut self, path: &ast::Path, args: &[ast::Arg], span: Span) -> Expr {
+        if self.ctx.in_turn() {
+            self.impure("spawn reactor", "creates a reactor", span);
+            return self.error_expr(span);
+        }
+        if !self.ctx.suspends() {
+            self.push(
+                Diagnostic::new(span, "`spawn reactor` is only available inside a `task fn`")
+                    .label("only a task may own a reactor")
+                    .note("mark the enclosing function `task fn`"),
+            );
+            return self.error_expr(span);
+        }
+        if self.scope_depth == 0 {
+            self.push(
+                Diagnostic::new(span, "`spawn reactor` must appear inside a `scope`")
+                    .label("nothing here would cancel it")
+                    .note("wrap it in `scope { … }`: a reactor may not outlive the scope that started it"),
+            );
+            return self.error_expr(span);
+        }
+        let name = path.text();
+        let Some(&id) = self.reactors.get(&name) else {
+            self.push(
+                Diagnostic::new(path.span, format!("unknown reactor `{name}`"))
+                    .label("not a reactor"),
+            );
+            return self.error_expr(span);
+        };
+
+        let params = self.program.reactors[id.index()].params.clone();
+        let names: Vec<String> = params.iter().map(|(name, _)| name.clone()).collect();
+        let Some(order) = self.argument_order(&names, args, &name, "parameter", span) else {
+            return self.error_expr(span);
+        };
+        let mut checked = Vec::with_capacity(params.len());
+        for (index, (_, ty)) in params.iter().enumerate() {
+            checked.push(self.check_expr(&args[order[index]].value, Some(ty)));
+        }
+
+        let needs = self.program.reactors[id.index()].uses.clone();
+        self.require_task_authority(&name, &needs, span);
+        Expr {
+            kind: ExprKind::SpawnReactor {
+                reactor: id,
+                args: checked,
+            },
+            ty: Ty::Reactor(id),
             span,
         }
     }
@@ -1609,7 +2872,11 @@ impl Checker {
                 StmtKind::Let { local, value }
             }
             ast::StmtKind::Assign { target, value } => {
+                // Checked as an assignment target, so that a reactor member which is real but not
+                // writable here is told it cannot be *written* rather than that it cannot be read.
+                self.assigning = true;
                 let place = self.check_expr(target, None);
+                self.assigning = false;
                 self.check_assignable(&place, target.span);
                 let value = self.check_expr(value, Some(&place.ty));
                 StmtKind::Assign { place, value }
@@ -1633,9 +2900,111 @@ impl Checker {
                     span,
                 })
             }
+            ast::StmtKind::AfterCommit { task, returns } => {
+                self.check_after_commit(task, returns.as_ref(), span)
+            }
             ast::StmtKind::Expr(expr) => StmtKind::Expr(self.check_expr(expr, None)),
         };
         Stmt { kind, span }
+    }
+
+    /// `after_commit deliver(m) -> delivered`.
+    ///
+    /// The operand is *built* here and started only after the snapshot is published. Building runs
+    /// nothing — that is what M2's laziness was for — so describing an effect in the middle of a
+    /// turn cannot perform one, and no code path exists by which an effect observes an
+    /// intermediate graph.
+    fn check_after_commit(
+        &mut self,
+        task: &ast::Expr,
+        returns: Option<&ast::Ident>,
+        span: Span,
+    ) -> StmtKind {
+        if !self.in_handler {
+            self.push(
+                Diagnostic::new(span, "`after_commit` is only available inside an `on` handler")
+                    .label("nothing here commits")
+                    .note("a signal derives a value and requests nothing; effects are asked for where state changes"),
+            );
+            return StmtKind::Expr(self.error_expr(span));
+        }
+
+        // `Ctx::Effect` is the one place inside a turn where building a task is allowed. It still
+        // may not *run* one, and its argument expressions are still evaluated during the turn, so
+        // everything else a turn forbids stays forbidden.
+        let outer = self.ctx;
+        self.ctx = Ctx::Effect;
+        let task = self.check_expr(task, None);
+        self.ctx = outer;
+
+        if task.ty.is_error() {
+            return StmtKind::Expr(self.error_expr(span));
+        }
+        let Ty::Task(produced) = task.ty.clone() else {
+            let message = format!(
+                "`after_commit` describes work to start later, and this is {}",
+                self.program.ty_name(&task.ty)
+            );
+            self.push(
+                Diagnostic::new(task.span, message)
+                    .label("not a task")
+                    .note("call a `task fn`: the call builds the work without running it, which is what lets the snapshot be published first"),
+            );
+            return StmtKind::Expr(self.error_expr(span));
+        };
+
+        let Some(name) = returns else {
+            if *produced != Ty::Unit {
+                let message = format!(
+                    "this effect produces {}, and nothing would receive it",
+                    self.program.ty_name(&produced)
+                );
+                self.push(
+                    Diagnostic::new(span, message)
+                        .label("the value is dropped")
+                        .note("name the input it comes back on: `after_commit … -> handled`"),
+                );
+                return StmtKind::Expr(self.error_expr(span));
+            }
+            return StmtKind::AfterCommit {
+                task,
+                returns: None,
+            };
+        };
+
+        // A completion re-enters as a later input. That is the whole `EffectResult →
+        // ReactorMailbox → a later turn` loop of `DESIGN.md` §2, spelled as one arrow.
+        let id = self.reactor.expect("a handler belongs to a reactor");
+        let reactor = &self.program.reactors[id.index()];
+        let Some(index) = reactor.input(&name.name) else {
+            let reactor_name = reactor.name.clone();
+            self.push(
+                Diagnostic::new(
+                    name.span,
+                    format!("`{reactor_name}` has no input `{}`", name.name),
+                )
+                .label("unknown input")
+                .note(
+                    "an effect's result comes back as a message, so it needs an input to arrive on",
+                ),
+            );
+            return StmtKind::Expr(self.error_expr(span));
+        };
+        let wanted = reactor.inputs[index].ty.clone();
+        if !produced.fits(&wanted) {
+            let message = format!(
+                "this effect produces {}, but `{}` takes {}",
+                self.program.ty_name(&produced),
+                name.name,
+                self.program.ty_name(&wanted)
+            );
+            self.push(Diagnostic::new(span, message).label("the result would not fit"));
+            return StmtKind::Expr(self.error_expr(span));
+        }
+        StmtKind::AfterCommit {
+            task,
+            returns: Some(index),
+        }
     }
 
     /// An assignment target must be a local, or a chain of fields rooted at one, and that local
@@ -1646,14 +3015,37 @@ impl Checker {
             match &cursor.kind {
                 ExprKind::Local(id) => {
                     let local = &self.locals[id.index()];
-                    if !local.mutable {
-                        let name = local.name.clone();
-                        self.push(
+                    if local.mutable {
+                        return;
+                    }
+                    let name = local.name.clone();
+                    let diagnostic = match local.role {
+                        LocalRole::Signal => {
+                            Diagnostic::new(span, format!("`{name}` is a signal, and a signal is never assigned"))
+                                .label("derived, not stored")
+                                .note("a signal *is* its expression; to make it settable, declare it as `state` and assign it in a handler")
+                        }
+                        LocalRole::Param => {
+                            Diagnostic::new(span, format!("`{name}` is a reactor parameter"))
+                                .label("fixed when the reactor was created")
+                                .note("declare a `state` cell initialised from it if it needs to change")
+                        }
+                        LocalRole::State(_) => {
+                            Diagnostic::new(span, format!("`{name}` can only be assigned inside an `on` handler"))
+                                .label("a node body is pure")
+                                .note("state changes are what a handler is for; a signal derives from state rather than setting it")
+                        }
+                        LocalRole::Message => {
+                            Diagnostic::new(span, format!("`{name}` is the message this handler was given"))
+                                .label("cannot assign")
+                        }
+                        LocalRole::Ordinary => {
                             Diagnostic::new(span, format!("`{name}` is not declared `mut`"))
                                 .label("cannot assign")
-                                .note(format!("declare it as `let mut {name} = …`")),
-                        );
-                    }
+                                .note(format!("declare it as `let mut {name} = …`"))
+                        }
+                    };
+                    self.push(diagnostic);
                     return;
                 }
                 ExprKind::Field { base, .. } => cursor = base,
@@ -2191,6 +3583,526 @@ impl Checker {
                 })
                 .collect(),
         )
+    }
+}
+
+/// What the syntactic scan worked out about one reactor.
+struct Wiring {
+    /// Dependency node indices per node, in the order the lifted function takes them.
+    deps: Vec<Vec<usize>>,
+    /// A topological order over the whole graph.
+    order: Vec<usize>,
+    /// Per input, the state nodes its handler assigns.
+    writes: Vec<Vec<usize>>,
+    /// False when the graph could not be built — a cycle, or a reference that is not a node. The
+    /// bodies are then left unchecked rather than reported against a graph that does not exist.
+    ok: bool,
+}
+
+/// The free names an expression mentions, honouring binders.
+///
+/// Purely syntactic, and deliberately so. Checking members in declaration order would report
+/// `DESIGN.md` §3's flagship error — `signal a = b + 1` / `signal b = a + 1` — as *unknown name
+/// `b`*, and that diagnostic is half of what this milestone exists to demonstrate. A scan yields
+/// the edges, the cycle, and a topological order before any body is typed; the bodies are then
+/// typed *in* that order, so forward references work and the cycle error is the cycle error.
+struct Scan<'a> {
+    members: &'a HashMap<String, Sort>,
+    /// Names bound by enclosing `let`s and patterns, innermost last. A local shadows a member, so
+    /// `let open = 1` inside a signal body is not a reference to the signal `open`.
+    bound: Vec<Vec<String>>,
+    reads: Vec<(String, Span)>,
+    writes: Vec<(String, Span)>,
+}
+
+impl<'a> Scan<'a> {
+    fn new(members: &'a HashMap<String, Sort>) -> Scan<'a> {
+        Scan {
+            members,
+            bound: vec![Vec::new()],
+            reads: Vec::new(),
+            writes: Vec::new(),
+        }
+    }
+
+    fn is_bound(&self, name: &str) -> bool {
+        self.bound
+            .iter()
+            .any(|frame| frame.iter().any(|bound| bound == name))
+    }
+
+    fn bind(&mut self, name: &str) {
+        self.bound
+            .last_mut()
+            .expect("a frame is open")
+            .push(name.to_string());
+    }
+
+    fn read(&mut self, name: &str, span: Span) {
+        if self.is_bound(name) || !self.members.contains_key(name) {
+            return;
+        }
+        if !self.reads.iter().any(|(seen, _)| seen == name) {
+            self.reads.push((name.to_string(), span));
+        }
+    }
+
+    fn expr(&mut self, expr: &ast::Expr) {
+        match &expr.kind {
+            ast::ExprKind::Path(path) => {
+                let head = &path.segments[0];
+                self.read(&head.name, head.span);
+            }
+            ast::ExprKind::Field { base, .. } => self.expr(base),
+            ast::ExprKind::Call { callee, args, .. } => {
+                // The callee of a call is a function name, never a member. Scanning it would make
+                // a member named like a function into a dependency of everything that calls it.
+                if !matches!(callee.kind, ast::ExprKind::Path(_)) {
+                    self.expr(callee);
+                }
+                for arg in args {
+                    self.expr(&arg.value);
+                }
+            }
+            ast::ExprKind::Construct { args, .. } | ast::ExprKind::SpawnReactor { args, .. } => {
+                for arg in args {
+                    self.expr(&arg.value);
+                }
+            }
+            ast::ExprKind::Unary { expr, .. }
+            | ast::ExprKind::Await(expr)
+            | ast::ExprKind::Spawn(expr)
+            | ast::ExprKind::Try(expr) => self.expr(expr),
+            ast::ExprKind::Binary { lhs, rhs, .. } => {
+                self.expr(lhs);
+                self.expr(rhs);
+            }
+            ast::ExprKind::Index { base, index } => {
+                self.expr(base);
+                self.expr(index);
+            }
+            ast::ExprKind::Block(block) | ast::ExprKind::Scope(block) => self.block(block),
+            ast::ExprKind::If { cond, then, els } => {
+                self.expr(cond);
+                self.block(then);
+                if let Some(els) = els {
+                    self.expr(els);
+                }
+            }
+            ast::ExprKind::Match { scrutinee, arms } => {
+                self.expr(scrutinee);
+                for arm in arms {
+                    self.bound.push(Vec::new());
+                    self.pat(&arm.pat);
+                    if let Some(guard) = &arm.guard {
+                        self.expr(guard);
+                    }
+                    self.expr(&arm.body);
+                    self.bound.pop();
+                }
+            }
+            ast::ExprKind::Lambda { params, body, .. } => {
+                self.bound.push(Vec::new());
+                for param in params {
+                    self.pat(param);
+                }
+                self.expr(body);
+                self.bound.pop();
+            }
+            ast::ExprKind::Unit
+            | ast::ExprKind::Int(_)
+            | ast::ExprKind::Float(_)
+            | ast::ExprKind::Str(_)
+            | ast::ExprKind::Bool(_) => {}
+        }
+    }
+
+    fn block(&mut self, block: &ast::Block) {
+        self.bound.push(Vec::new());
+        for stmt in &block.stmts {
+            match &stmt.kind {
+                ast::StmtKind::Let { name, value, .. } => {
+                    // The initialiser is scanned first: a binding is not in scope in its own value.
+                    self.expr(value);
+                    self.bind(&name.name);
+                }
+                ast::StmtKind::Assign { target, value } => {
+                    self.expr(value);
+                    match &target.kind {
+                        // A bare name is a write and not a read.
+                        ast::ExprKind::Path(path) if path.segments.len() == 1 => {
+                            let head = &path.segments[0];
+                            if !self.is_bound(&head.name) && self.members.contains_key(&head.name) {
+                                self.writes.push((head.name.clone(), head.span));
+                            }
+                        }
+                        // A projection reads the cell to rebuild it, so it is both.
+                        _ => {
+                            self.expr(target);
+                            if let Some((name, span)) = head_name(target)
+                                && !self.is_bound(&name)
+                                && self.members.contains_key(&name)
+                            {
+                                self.writes.push((name, span));
+                            }
+                        }
+                    }
+                }
+                ast::StmtKind::Return(value) => {
+                    if let Some(value) = value {
+                        self.expr(value);
+                    }
+                }
+                // `returns` names an input, which is not a value and so not a dependency.
+                ast::StmtKind::AfterCommit { task, .. } => self.expr(task),
+                ast::StmtKind::Expr(expr) => self.expr(expr),
+            }
+        }
+        self.bound.pop();
+    }
+
+    fn pat(&mut self, pat: &ast::Pat) {
+        match &pat.kind {
+            ast::PatKind::Binding(name) => self.bind(&name.name),
+            ast::PatKind::Construct { args, .. } => {
+                for arg in args {
+                    self.pat(&arg.pat);
+                }
+            }
+            ast::PatKind::Or(alts) => {
+                for alt in alts {
+                    self.pat(alt);
+                }
+            }
+            ast::PatKind::Wild
+            | ast::PatKind::Int(_)
+            | ast::PatKind::Str(_)
+            | ast::PatKind::Bool(_) => {}
+        }
+    }
+}
+
+fn push_once(list: &mut Vec<usize>, value: usize) {
+    if !list.contains(&value) {
+        list.push(value);
+    }
+}
+
+/// The member declaration a node came from.
+fn member_for<'m>(decl: &'m ast::ReactorDecl, name: &str) -> Option<&'m ast::Member> {
+    decl.members.iter().find(|member| match &member.kind {
+        ast::MemberKind::State { name: found, .. }
+        | ast::MemberKind::Signal { name: found, .. } => found.name == name,
+        _ => false,
+    })
+}
+
+/// How many of a lifted function's locals are ordinary bindings rather than parameters.
+///
+/// Parameters are declared first and locals only ever appended, so the parameter count is the
+/// number of leading locals that came from the lifting.
+fn count_extra(locals: &[LocalDef]) -> usize {
+    locals
+        .iter()
+        .filter(|local| local.role == LocalRole::Ordinary)
+        .count()
+}
+
+/// A topological order over `deps`: every node after everything it depends on.
+///
+/// Depth-first from each node in source order, which is what makes the result a function of the
+/// program rather than of a hash seed. Graph construction must not iterate a `HashMap`: a
+/// randomised order would make the propagation plan differ between runs, and a milestone whose
+/// central claim is turn determinism cannot afford that.
+fn topological(deps: &[Vec<usize>]) -> Vec<usize> {
+    let mut order = Vec::with_capacity(deps.len());
+    let mut placed = vec![false; deps.len()];
+    for start in 0..deps.len() {
+        if placed[start] {
+            continue;
+        }
+        let mut stack = vec![(start, 0usize)];
+        while let Some((node, next)) = stack.pop() {
+            if next < deps[node].len() {
+                stack.push((node, next + 1));
+                let dep = deps[node][next];
+                if !placed[dep] && !stack.iter().any(|(open, _)| *open == dep) {
+                    stack.push((dep, 0));
+                }
+            } else if !placed[node] {
+                placed[node] = true;
+                order.push(node);
+            }
+        }
+    }
+    order
+}
+
+/// Every function this expression calls.
+fn collect_calls(expr: &Expr, found: &mut Vec<FnId>) {
+    match &expr.kind {
+        ExprKind::Call { callee, args } => {
+            if !found.contains(callee) {
+                found.push(*callee);
+            }
+            for arg in args {
+                collect_calls(arg, found);
+            }
+        }
+        ExprKind::Builtin { args, .. }
+        | ExprKind::Construct { args, .. }
+        | ExprKind::SpawnReactor { args, .. } => {
+            for arg in args {
+                collect_calls(arg, found);
+            }
+        }
+        ExprKind::Field { base: inner, .. }
+        | ExprKind::Unary { expr: inner, .. }
+        | ExprKind::Await { expr: inner }
+        | ExprKind::Scope { body: inner }
+        | ExprKind::Spawn { expr: inner }
+        | ExprKind::Try { expr: inner, .. }
+        | ExprKind::ReactorInput { reactor: inner, .. }
+        | ExprKind::ReactorExport { reactor: inner, .. } => collect_calls(inner, found),
+        ExprKind::Binary { lhs, rhs, .. } | ExprKind::ShortCircuit { lhs, rhs, .. } => {
+            collect_calls(lhs, found);
+            collect_calls(rhs, found);
+        }
+        ExprKind::Match { scrutinee, arms } => {
+            collect_calls(scrutinee, found);
+            for arm in arms {
+                if let Some(guard) = &arm.guard {
+                    collect_calls(guard, found);
+                }
+                collect_calls(&arm.body, found);
+            }
+        }
+        ExprKind::If { cond, then, els } => {
+            collect_calls(cond, found);
+            collect_calls(then, found);
+            if let Some(els) = els {
+                collect_calls(els, found);
+            }
+        }
+        ExprKind::Block { stmts, tail } => {
+            for stmt in stmts {
+                match &stmt.kind {
+                    StmtKind::Let { value, .. } => collect_calls(value, found),
+                    StmtKind::Assign { place, value } => {
+                        collect_calls(place, found);
+                        collect_calls(value, found);
+                    }
+                    StmtKind::AfterCommit { task, .. } => {
+                        for arg in effect_arguments(task) {
+                            collect_calls(arg, found);
+                        }
+                    }
+                    StmtKind::Expr(expr) => collect_calls(expr, found),
+                }
+            }
+            if let Some(tail) = tail {
+                collect_calls(tail, found);
+            }
+        }
+        ExprKind::Return { value } => {
+            if let Some(value) = value {
+                collect_calls(value, found);
+            }
+        }
+        ExprKind::Unit
+        | ExprKind::Int(_)
+        | ExprKind::Float(_)
+        | ExprKind::Str(_)
+        | ExprKind::Bool(_)
+        | ExprKind::Local(_)
+        | ExprKind::Error => {}
+    }
+}
+
+/// The parts of an `after_commit` operand that actually run during the turn.
+///
+/// The head call does not: `after_commit deliver(m)` *builds* `deliver(m)` and the runtime starts
+/// it once the snapshot is published, so neither what `deliver` calls nor how long it takes is a
+/// property of the turn. Its arguments are another matter — those are evaluated on the spot, and
+/// everything a turn forbids still applies to them.
+///
+/// This is the whole of why laziness was worth having. If calling a `task fn` ran it, there would
+/// be no way to describe an effect from inside a turn at all.
+fn effect_arguments(task: &Expr) -> &[Expr] {
+    match &task.kind {
+        ExprKind::Call { args, .. } | ExprKind::Builtin { args, .. } => args,
+        _ => std::slice::from_ref(task),
+    }
+}
+
+/// The first impure builtin an expression calls, if any.
+fn impure_builtin(expr: &Expr) -> Option<(Builtin, Span)> {
+    let mut found = None;
+    walk(expr, &mut |expr| {
+        if found.is_some() {
+            return;
+        }
+        if let ExprKind::Builtin { builtin, .. } = &expr.kind
+            && !builtin.is_pure()
+        {
+            found = Some((*builtin, expr.span));
+        }
+    });
+    found
+}
+
+/// The nearest function reachable from `start` that calls an impure builtin.
+fn reachable_impurity(
+    calls: &[Vec<FnId>],
+    impurities: &[Option<(Builtin, Span)>],
+    start: FnId,
+) -> Option<(FnId, Builtin, Span)> {
+    let mut seen = vec![false; calls.len()];
+    // Breadth-first, so the function reported is the one closest to the node body: that is the
+    // call the reader has to look at, and the rest of the chain follows from it.
+    let mut queue = std::collections::VecDeque::from([start]);
+    seen[start.index()] = true;
+    while let Some(function) = queue.pop_front() {
+        if let Some((builtin, span)) = impurities[function.index()] {
+            return Some((function, builtin, span));
+        }
+        for &callee in &calls[function.index()] {
+            if !seen[callee.index()] {
+                seen[callee.index()] = true;
+                queue.push_back(callee);
+            }
+        }
+    }
+    None
+}
+
+/// Visit every subexpression, outermost first.
+fn walk(expr: &Expr, visit: &mut impl FnMut(&Expr)) {
+    visit(expr);
+    match &expr.kind {
+        ExprKind::Call { args, .. }
+        | ExprKind::Builtin { args, .. }
+        | ExprKind::Construct { args, .. }
+        | ExprKind::SpawnReactor { args, .. } => {
+            for arg in args {
+                walk(arg, visit);
+            }
+        }
+        ExprKind::Field { base: inner, .. }
+        | ExprKind::Unary { expr: inner, .. }
+        | ExprKind::Await { expr: inner }
+        | ExprKind::Scope { body: inner }
+        | ExprKind::Spawn { expr: inner }
+        | ExprKind::Try { expr: inner, .. }
+        | ExprKind::ReactorInput { reactor: inner, .. }
+        | ExprKind::ReactorExport { reactor: inner, .. } => walk(inner, visit),
+        ExprKind::Binary { lhs, rhs, .. } | ExprKind::ShortCircuit { lhs, rhs, .. } => {
+            walk(lhs, visit);
+            walk(rhs, visit);
+        }
+        ExprKind::Match { scrutinee, arms } => {
+            walk(scrutinee, visit);
+            for arm in arms {
+                if let Some(guard) = &arm.guard {
+                    walk(guard, visit);
+                }
+                walk(&arm.body, visit);
+            }
+        }
+        ExprKind::If { cond, then, els } => {
+            walk(cond, visit);
+            walk(then, visit);
+            if let Some(els) = els {
+                walk(els, visit);
+            }
+        }
+        ExprKind::Block { stmts, tail } => {
+            for stmt in stmts {
+                match &stmt.kind {
+                    StmtKind::Let { value, .. } => walk(value, visit),
+                    StmtKind::Assign { place, value } => {
+                        walk(place, visit);
+                        walk(value, visit);
+                    }
+                    StmtKind::AfterCommit { task, .. } => {
+                        for arg in effect_arguments(task) {
+                            walk(arg, visit);
+                        }
+                    }
+                    StmtKind::Expr(expr) => walk(expr, visit),
+                }
+            }
+            if let Some(tail) = tail {
+                walk(tail, visit);
+            }
+        }
+        ExprKind::Return { value } => {
+            if let Some(value) = value {
+                walk(value, visit);
+            }
+        }
+        ExprKind::Unit
+        | ExprKind::Int(_)
+        | ExprKind::Float(_)
+        | ExprKind::Str(_)
+        | ExprKind::Bool(_)
+        | ExprKind::Local(_)
+        | ExprKind::Error => {}
+    }
+}
+
+/// A cycle in the call graph reachable from `start`, as the functions that close it.
+///
+/// The search is over the *reachable* subgraph rather than the whole program: an ordinary
+/// recursive function is perfectly legal, and only becomes an error when a turn can reach it.
+fn reachable_cycle(calls: &[Vec<FnId>], start: FnId) -> Option<Vec<FnId>> {
+    #[derive(Clone, Copy, PartialEq)]
+    enum Mark {
+        White,
+        Grey,
+        Black,
+    }
+    let mut marks = vec![Mark::White; calls.len()];
+    let mut path: Vec<FnId> = vec![start];
+    let mut stack = vec![(start, 0usize)];
+    marks[start.index()] = Mark::Grey;
+
+    while let Some((function, next)) = stack.pop() {
+        let edges = &calls[function.index()];
+        if next >= edges.len() {
+            marks[function.index()] = Mark::Black;
+            path.pop();
+            continue;
+        }
+        stack.push((function, next + 1));
+        let callee = edges[next];
+        match marks[callee.index()] {
+            Mark::Grey => {
+                let at = path.iter().position(|id| *id == callee).unwrap_or(0);
+                let mut cycle = path[at..].to_vec();
+                cycle.push(callee);
+                return Some(cycle);
+            }
+            Mark::Black => {}
+            Mark::White => {
+                marks[callee.index()] = Mark::Grey;
+                path.push(callee);
+                stack.push((callee, 0));
+            }
+        }
+    }
+    None
+}
+
+/// The local a projection chain is rooted at: `a` in `a.b.c`.
+fn head_name(expr: &ast::Expr) -> Option<(String, Span)> {
+    match &expr.kind {
+        ast::ExprKind::Path(path) => {
+            let head = &path.segments[0];
+            Some((head.name.clone(), head.span))
+        }
+        ast::ExprKind::Field { base, .. } | ast::ExprKind::Index { base, .. } => head_name(base),
+        _ => None,
     }
 }
 

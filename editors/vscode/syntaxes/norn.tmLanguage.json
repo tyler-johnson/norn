@@ -329,7 +329,7 @@
     "reserved": {
       "comment": "Words held for a later milestone. The lexer refuses them as names, so showing them as errors is the truth rather than a warning.",
       "name": "invalid.illegal.reserved.norn",
-      "match": "\\b(?:after_commit|as|blocking|break|const|continue|delay|event|export|for|impl|in|input|interface|loop|macro|on|pub|reactor|signal|source|state|static|trait|type|where|while)\\b"
+      "match": "\\b(?:as|blocking|break|const|continue|delay|event|for|impl|in|interface|loop|macro|pub|source|static|trait|type|where|while)\\b"
     },
 
     "keywords": {
@@ -352,8 +352,17 @@
           "match": "\\b(?:task|mut)\\b"
         },
         {
+          "comment": "Reactor members: declarations, not statements — none of them runs where it is written.",
+          "name": "keyword.control.reactive.norn",
+          "match": "\\b(?:input|state|signal|on|after_commit)\\b"
+        },
+        {
           "name": "storage.type.norn",
-          "match": "\\b(?:fn|record|enum)\\b"
+          "match": "\\b(?:fn|record|enum|reactor)\\b"
+        },
+        {
+          "name": "storage.modifier.export.norn",
+          "match": "\\b(?:export)\\b"
         },
         {
           "name": "keyword.other.norn",
@@ -395,7 +404,7 @@
 
     "builtin-fns": {
       "name": "support.function.builtin.norn",
-      "match": "\\b(?:print|listener_port|sleep|tcp_listen|tcp_accept|tcp_read|tcp_write|tcp_close)\\b(?=\\s*\\()"
+      "match": "\\b(?:print|listener_port|sleep|tcp_listen|tcp_accept|tcp_read|tcp_write|tcp_close|send|latest)\\b(?=\\s*\\()"
     },
 
     "call": {

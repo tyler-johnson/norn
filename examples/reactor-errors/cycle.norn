@@ -1,0 +1,15 @@
+// One token from the working example. `open` and `healthy` each name the other, and neither has a
+// value to settle on — which is what `DESIGN.md` §3's flagship diagnostic is about.
+
+reactor Gate(limit: I64) {
+    input opened: () [capacity: 8, overflow: reject]
+
+    state accepted: I64 = 0
+
+    on opened() {
+        accepted = accepted + 1
+    }
+
+    signal open    = accepted - limit + healthy
+    signal healthy = open
+}

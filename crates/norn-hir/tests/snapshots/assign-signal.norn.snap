@@ -1,0 +1,14 @@
+error: `doubled` is a signal, and a signal is never assigned
+  --> assign-signal.norn:12:9
+   |
+12 |         doubled = 0
+   |         ^^^^^^^ derived, not stored
+   = note: a signal *is* its expression; two definitions of one value is what assigning to it would mean
+   = note: to make it settable, declare it as `state` and assign it here instead
+
+error: `step` is a reactor parameter
+  --> assign-signal.norn:13:9
+   |
+13 |         step = step + 1
+   |         ^^^^ fixed when the reactor was created
+   = note: declare a `state` cell initialised from it if it needs to change

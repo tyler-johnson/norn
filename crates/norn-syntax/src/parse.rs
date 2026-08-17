@@ -176,6 +176,7 @@ impl Parser {
             TokenKind::Kw(Kw::Fn) | TokenKind::Kw(Kw::Task) => {
                 items.push(Item::Fn(self.fn_decl()?))
             }
+            TokenKind::Kw(Kw::Reactor) => items.push(Item::Reactor(self.reactor_decl()?)),
             TokenKind::Kw(Kw::Module) => {
                 let span = self.peek().span;
                 return Err(self.push(
@@ -203,7 +204,7 @@ impl Parser {
                         format!("expected a declaration, found {}", other.describe()),
                     )
                     .note(
-                        "a file contains `use`, `record`, `enum`, `fn`, and `task fn` declarations",
+                        "a file contains `use`, `record`, `enum`, `fn`, `task fn`, and `reactor` declarations",
                     ),
                 ));
             }
@@ -225,6 +226,7 @@ impl Parser {
                     | TokenKind::Kw(Kw::Enum)
                     | TokenKind::Kw(Kw::Fn)
                     | TokenKind::Kw(Kw::Task)
+                    | TokenKind::Kw(Kw::Reactor)
             );
             if starts_decl && token.nl_before {
                 return;
@@ -312,23 +314,7 @@ impl Parser {
         self.expect(TokenKind::Kw(Kw::Fn))?;
         let name = self.ident()?;
 
-        self.expect(TokenKind::LParen)?;
-        let mut params = Vec::new();
-        while !self.at(&TokenKind::RParen) && !self.at_eof() {
-            let pname = self.ident()?;
-            self.expect(TokenKind::Colon)?;
-            let ty = self.ty()?;
-            let span = pname.span.to(ty.span);
-            params.push(Param {
-                name: pname,
-                ty,
-                span,
-            });
-            if !self.eat(&TokenKind::Comma) {
-                break;
-            }
-        }
-        self.expect(TokenKind::RParen)?;
+        let params = self.param_list()?;
 
         let ret = if self.eat(&TokenKind::ThinArrow) {
             Some(self.ty()?)
@@ -338,7 +324,7 @@ impl Parser {
 
         let mut uses = Vec::new();
         if self.at(&TokenKind::Kw(Kw::Uses)) {
-            let uses_span = self.advance().span;
+            let uses_span = self.peek().span;
             if !is_task {
                 self.errors.push(
                     Diagnostic::new(uses_span, "only a `task fn` may declare capabilities")
@@ -348,12 +334,7 @@ impl Parser {
                         ),
                 );
             }
-            self.expect(TokenKind::LBrace)?;
-            while !self.at(&TokenKind::RBrace) && !self.at_eof() {
-                uses.push(self.path()?);
-                self.separator(&TokenKind::RBrace, "capability")?;
-            }
-            self.expect(TokenKind::RBrace)?;
+            uses = self.uses_clause()?;
         }
 
         let body = self.block()?;
@@ -367,6 +348,186 @@ impl Parser {
             body,
             span,
         })
+    }
+
+    fn param_list(&mut self) -> PResult<Vec<Param>> {
+        self.expect(TokenKind::LParen)?;
+        let mut params = Vec::new();
+        while !self.at(&TokenKind::RParen) && !self.at_eof() {
+            let name = self.ident()?;
+            self.expect(TokenKind::Colon)?;
+            let ty = self.ty()?;
+            let span = name.span.to(ty.span);
+            params.push(Param { name, ty, span });
+            if !self.eat(&TokenKind::Comma) {
+                break;
+            }
+        }
+        self.expect(TokenKind::RParen)?;
+        Ok(params)
+    }
+
+    /// `uses { clock, net.io }`. The caller has already decided whether a `uses` is allowed here.
+    fn uses_clause(&mut self) -> PResult<Vec<Path>> {
+        self.expect(TokenKind::Kw(Kw::Uses))?;
+        self.expect(TokenKind::LBrace)?;
+        let mut uses = Vec::new();
+        while !self.at(&TokenKind::RBrace) && !self.at_eof() {
+            uses.push(self.path()?);
+            self.separator(&TokenKind::RBrace, "capability")?;
+        }
+        self.expect(TokenKind::RBrace)?;
+        Ok(uses)
+    }
+
+    fn reactor_decl(&mut self) -> PResult<ReactorDecl> {
+        let start = self.advance().span;
+        let name = self.ident()?;
+        let params = self.param_list()?;
+        let uses = if self.at(&TokenKind::Kw(Kw::Uses)) {
+            self.uses_clause()?
+        } else {
+            Vec::new()
+        };
+
+        self.expect(TokenKind::LBrace)?;
+        let mut members = Vec::new();
+        while !self.at(&TokenKind::RBrace) && !self.at_eof() {
+            members.push(self.member()?);
+        }
+        let end = self.expect(TokenKind::RBrace)?.span;
+        Ok(ReactorDecl {
+            name,
+            params,
+            uses,
+            members,
+            span: start.to(end),
+        })
+    }
+
+    /// One member of a reactor. Members are separated by line breaks like statements, but unlike
+    /// statements they are declarations: none of them runs where it is written.
+    fn member(&mut self) -> PResult<Member> {
+        let start = self.peek().span;
+        match self.peek_kind().clone() {
+            TokenKind::Kw(Kw::Input) => {
+                self.advance();
+                let name = self.ident()?;
+                self.expect(TokenKind::Colon)?;
+                let ty = self.ty()?;
+                let queue = self.queue_clause()?;
+                let span = start.to(queue.span);
+                Ok(Member {
+                    kind: MemberKind::Input { name, ty, queue },
+                    span,
+                })
+            }
+            TokenKind::Kw(Kw::State) => {
+                self.advance();
+                let name = self.ident()?;
+                self.expect(TokenKind::Colon)?;
+                let ty = self.ty()?;
+                self.expect(TokenKind::Eq)?;
+                let init = self.expr()?;
+                let span = start.to(init.span);
+                Ok(Member {
+                    kind: MemberKind::State { name, ty, init },
+                    span,
+                })
+            }
+            TokenKind::Kw(Kw::Export) | TokenKind::Kw(Kw::Signal) => {
+                let exported = self.eat(&TokenKind::Kw(Kw::Export));
+                self.expect(TokenKind::Kw(Kw::Signal))?;
+                let name = self.ident()?;
+                let ty = if self.eat(&TokenKind::Colon) {
+                    Some(self.ty()?)
+                } else {
+                    None
+                };
+                self.expect(TokenKind::Eq)?;
+                let body = self.expr()?;
+                let span = start.to(body.span);
+                Ok(Member {
+                    kind: MemberKind::Signal {
+                        exported,
+                        name,
+                        ty,
+                        body,
+                    },
+                    span,
+                })
+            }
+            TokenKind::Kw(Kw::On) => {
+                self.advance();
+                let input = self.ident()?;
+                self.expect(TokenKind::LParen)?;
+                let mut params = Vec::new();
+                while !self.at(&TokenKind::RParen) && !self.at_eof() {
+                    params.push(self.ident()?);
+                    if !self.eat(&TokenKind::Comma) {
+                        break;
+                    }
+                }
+                self.expect(TokenKind::RParen)?;
+                let body = self.block()?;
+                let span = start.to(body.span);
+                Ok(Member {
+                    kind: MemberKind::On {
+                        input,
+                        params,
+                        body,
+                    },
+                    span,
+                })
+            }
+            TokenKind::Reserved(word) => Err(self.push(reserved_diagnostic(start, &word))),
+            other => Err(self.push(
+                Diagnostic::new(
+                    start,
+                    format!("expected a reactor member, found {}", other.describe()),
+                )
+                .note("a reactor contains `input`, `state`, `signal`, `export signal`, and `on` declarations"),
+            )),
+        }
+    }
+
+    /// `[capacity: 64, overflow: reject]`. Both are required, in that order — there is nothing to
+    /// default a queue policy to that anyone would have chosen on purpose.
+    fn queue_clause(&mut self) -> PResult<Queue> {
+        let start = self.peek().span;
+        if !self.at(&TokenKind::LBracket) {
+            let found = self.peek_kind().describe();
+            return Err(self.push(
+                Diagnostic::new(
+                    start,
+                    format!("expected `[capacity: …, overflow: …]` after an input type, found {found}"),
+                )
+                .label("no queue policy")
+                .note("an input is a bounded mailbox; the bound and what happens when it is full are both declared"),
+            ));
+        }
+        self.advance();
+        self.expect_name("capacity")?;
+        self.expect(TokenKind::Colon)?;
+        let capacity = self.expr()?;
+        self.expect(TokenKind::Comma)?;
+        self.expect_name("overflow")?;
+        self.expect(TokenKind::Colon)?;
+        let overflow = self.ident()?;
+        let end = self.expect(TokenKind::RBracket)?.span;
+        Ok(Queue {
+            capacity,
+            overflow,
+            span: start.to(end),
+        })
+    }
+
+    /// Expect one particular ordinary identifier — a contextual word, reserved nowhere else.
+    fn expect_name(&mut self, want: &str) -> PResult<Span> {
+        match self.peek_kind().clone() {
+            TokenKind::Ident(name) if name == want => Ok(self.advance().span),
+            other => Err(self.error(format!("expected `{want}`, found {}", other.describe()))),
+        }
     }
 
     /// Accept a comma, a line break, or the closing token as an item separator.
@@ -517,6 +678,22 @@ impl Parser {
                 let span = value.as_ref().map_or(start, |v| start.to(v.span));
                 Ok(Stmt {
                     kind: StmtKind::Return(value),
+                    span,
+                })
+            }
+            TokenKind::Kw(Kw::AfterCommit) => {
+                self.advance();
+                let task = self.expr()?;
+                let mut span = start.to(task.span);
+                let returns = if self.eat(&TokenKind::ThinArrow) {
+                    let name = self.ident()?;
+                    span = span.to(name.span);
+                    Some(name)
+                } else {
+                    None
+                };
+                Ok(Stmt {
+                    kind: StmtKind::AfterCommit { task, returns },
                     span,
                 })
             }
@@ -793,6 +970,42 @@ impl Parser {
                 let span = start.to(block.span);
                 Ok(Expr {
                     kind: ExprKind::Scope(block),
+                    span,
+                })
+            }
+            TokenKind::Kw(Kw::Spawn)
+                if matches!(self.peek_at(1).kind, TokenKind::Kw(Kw::Reactor)) =>
+            {
+                self.advance();
+                self.advance();
+                let path = self.path()?;
+                let mut span = start.to(path.span);
+                self.expect(TokenKind::LParen)?;
+                let mut args = Vec::new();
+                while !self.at(&TokenKind::RParen) && !self.at_eof() {
+                    let arg_start = self.peek().span;
+                    let name = match (self.peek_kind().clone(), &self.peek_at(1).kind) {
+                        (TokenKind::Ident(name), TokenKind::Colon) => {
+                            let span = self.advance().span;
+                            self.advance();
+                            Some(Ident { name, span })
+                        }
+                        _ => None,
+                    };
+                    let value = self.expr()?;
+                    let arg_span = arg_start.to(value.span);
+                    args.push(Arg {
+                        name,
+                        value,
+                        span: arg_span,
+                    });
+                    if !self.eat(&TokenKind::Comma) {
+                        break;
+                    }
+                }
+                span = span.to(self.expect(TokenKind::RParen)?.span);
+                Ok(Expr {
+                    kind: ExprKind::SpawnReactor { path, args },
                     span,
                 })
             }

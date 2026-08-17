@@ -1,0 +1,19 @@
+// There is no default queue policy: an unbounded queue is the one thing the runtime must never
+// create implicitly, and a default capacity is a number nobody chose.
+
+reactor Sink(name: String) {
+    input arrived: I64 [capacity: 0, overflow: reject]
+    input dropped: I64 [capacity: 4, overflow: whenever]
+
+    state total: I64 = 0
+
+    on arrived(value) {
+        total = total + value
+    }
+
+    on dropped(value) {
+        total = total - value
+    }
+
+    export signal sum = total
+}
