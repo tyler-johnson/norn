@@ -2,11 +2,14 @@
   "name": "norn",
   "displayName": "Norn",
   "description": "Syntax highlighting for the Norn language.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "norn-lang",
   "engines": {
     "vscode": "^1.75.0"
   },
+  "extensionKind": [
+    "workspace"
+  ],
   "categories": [
     "Programming Languages",
     "Snippets"
