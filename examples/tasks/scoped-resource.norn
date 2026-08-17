@@ -1,0 +1,36 @@
+// A scope closes what the scope opened.
+//
+// `resource.norn` shows a handle moving into a child and being closed when that child is cancelled.
+// This is the other half: a descriptor opened inside a `scope { … }` and never moved anywhere is
+// closed when the scope is left, not when the task that contains the scope eventually ends. The two
+// listeners are opened by the same task, and the trace shows one `close` at the scope exit and the
+// other only at `done`.
+//
+// Nothing here says `close`. The extent of the `scope` is the whole of the cleanup story, which is
+// also why it holds on the error path: `?` returns, and a return unwinds every open scope.
+
+task fn main() -> Result<(), IoError>
+    uses { clock, net.listen, net.io }
+{
+    let outer = await tcp_listen(0)?
+
+    scope {
+        let inner = await tcp_listen(0)?
+        print(compare(listener_port(outer), listener_port(inner)))
+        await sleep(1)
+    }
+
+    print("the inner socket is closed and the outer one is not")
+    await sleep(1)
+    #Ok(())
+}
+
+// Ports are chosen by the operating system, so the trace can say whether they differ but never
+// which they were.
+fn compare(a: I64, b: I64) -> String {
+    if a == b {
+        "one socket, twice"
+    } else {
+        "two sockets are open"
+    }
+}

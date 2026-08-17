@@ -56,11 +56,11 @@ pub(crate) struct TaskState<'e, V> {
     /// everything else the runtime owns.
     pub body: Option<Box<dyn Body<V> + 'e>>,
     pub parent: Option<TaskId>,
-    /// Scopes the task has open, innermost last. A spawned child joins the innermost one.
+    /// Scopes the task has open, innermost last. A spawned child joins the innermost one, and so
+    /// does a freshly opened resource: a scope is what owns things, which is why leaving one closes
+    /// what it opened rather than deferring every descriptor to the end of the task.
     pub scopes: Vec<Scope>,
     pub wait: Option<Wait>,
-    /// Resources this task owns and will close when it ends, however it ends.
-    pub resources: Vec<ResourceId>,
     /// Where this task's value goes when it finishes, when it is an effect a reactor asked for.
     /// Without it `finish` would drop every non-root value, and an effect could not report back.
     pub completion: Option<Completion>,

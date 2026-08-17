@@ -5,16 +5,17 @@
 //! code, so there is nothing left to wait for. Cleanup is the resource table, not a user-visible
 //! handler.
 //!
-//! Resources are owned by the task that created them and closed when it ends, however it ends.
-//! `spawn` transfers any handle passed to the child, which is the dynamic shadow of the move rule
-//! M4 will make static.
+//! Resources are owned by the scope that created them and closed when it is left, however it is
+//! left — normally, through an error, or through cancellation, because lowering unwinds every open
+//! scope on every path out of a function. `spawn` transfers any handle passed to the child, which
+//! is the dynamic half of the move rule the checker enforces statically.
 
 use crate::graph::ReactorId;
 use crate::task::{Status, TaskId, TaskState};
 use crate::trace::Event;
 use crate::{Core, Cx, Poll, ResourceId, Runnable, Trap};
 
-/// One open scope, and what was started inside it.
+/// One open scope, and what was started or opened inside it.
 #[derive(Default)]
 pub struct Scope {
     pub children: Vec<TaskId>,
@@ -22,6 +23,10 @@ pub struct Scope {
     /// all the same, and leaving the scope has to stop it, or a later `send` would queue a message
     /// for a turn that can never happen.
     pub reactors: Vec<ReactorId>,
+    /// Descriptors opened here and not since moved away. Closed on the way out, which is what makes
+    /// "resources close on scope exit" a fact about `scope_exit` rather than about the end of the
+    /// task that happens to contain it.
+    pub resources: Vec<ResourceId>,
 }
 
 /// Who a new task is spawned under, and into which of that task's open scopes.
@@ -56,7 +61,6 @@ impl<'e, V: Clone> Core<'e, V> {
             // even if lowering never emitted an explicit one.
             scopes: vec![Scope::default()],
             wait: None,
-            resources: Vec::new(),
             completion: None,
             status: Status::Ready,
         });
@@ -85,18 +89,30 @@ impl<'e, V: Clone> Core<'e, V> {
     /// Hand a resource to a task that was passed it. Only the current owner can give it away, so a
     /// handle that was copied rather than moved stays where it was.
     fn transfer(&mut self, resource: ResourceId, from: TaskId, to: TaskId) {
-        let owner = self.state_mut(from);
-        let before = owner.resources.len();
-        owner.resources.retain(|held| *held != resource);
-        if owner.resources.len() == before {
+        if !self.disown(from, resource) {
             return;
         }
-        self.state_mut(to).resources.push(resource);
+        // The child is freshly spawned, so its outermost scope is its only one, and it is what will
+        // close the handle when the child ends.
+        self.state_mut(to).scopes[0].resources.push(resource);
         self.emit(Event::Move {
             task: to,
             resource,
             from,
         });
+    }
+
+    /// Remove a resource from whichever of a task's scopes holds it. `false` means this task did not
+    /// own it — a handle that was copied rather than moved, or one already given away.
+    pub(crate) fn disown(&mut self, task: TaskId, resource: ResourceId) -> bool {
+        for scope in &mut self.state_mut(task).scopes {
+            let before = scope.resources.len();
+            scope.resources.retain(|held| *held != resource);
+            if scope.resources.len() != before {
+                return true;
+            }
+        }
+        false
     }
 
     pub(crate) fn finish(&mut self, task: TaskId, value: V) {
@@ -162,10 +178,20 @@ impl<'e, V: Clone> Core<'e, V> {
         scopes[index].reactors.push(reactor);
     }
 
-    /// Close everything the task still owns. This is what makes cancellation leak-free without a
-    /// cleanup handler.
+    /// Close everything the task still owns, in every scope it had open. This is what makes
+    /// cancellation leak-free without a cleanup handler.
     fn release(&mut self, task: TaskId) {
-        let resources = std::mem::take(&mut self.state_mut(task).resources);
+        let resources: Vec<ResourceId> = self
+            .state_mut(task)
+            .scopes
+            .iter_mut()
+            .flat_map(|scope| std::mem::take(&mut scope.resources))
+            .collect();
+        self.close_all(task, resources);
+    }
+
+    /// Close a scope's worth of descriptors, tracing each one that was still open.
+    fn close_all(&mut self, task: TaskId, resources: Vec<ResourceId>) {
         for resource in resources {
             if self.readiness.close(resource) {
                 self.emit(Event::Close { task, resource });
@@ -227,14 +253,16 @@ impl<'e, V: Clone> Cx<'_, 'e, V> {
         let task = self.task;
         let scopes = &mut self.core.state_mut(task).scopes;
         let depth = scopes.len() - 1;
-        // The outermost scope belongs to the task itself and is closed when the task ends.
-        let (children, reactors) = if scopes.len() > 1 {
+        // The outermost scope belongs to the task itself: what it started is stopped here, but what
+        // it opened stays open, because the task is still running and still owns it.
+        let (children, reactors, resources) = if scopes.len() > 1 {
             let scope = scopes.pop().expect("just checked");
-            (scope.children, scope.reactors)
+            (scope.children, scope.reactors, scope.resources)
         } else {
             (
                 std::mem::take(&mut scopes[0].children),
                 std::mem::take(&mut scopes[0].reactors),
+                Vec::new(),
             )
         };
         for child in children {
@@ -243,26 +271,31 @@ impl<'e, V: Clone> Cx<'_, 'e, V> {
         for reactor in reactors {
             self.core.kill_reactor(reactor);
         }
+        // After the children, because a handle they were given is theirs to close, and before the
+        // exit itself, because these descriptors belong to the scope that is ending.
+        self.core.close_all(task, resources);
         self.core.emit(Event::ScopeExit { task, depth });
         Poll::Ready(())
     }
 
-    /// Close a resource explicitly, before the owning task ends.
+    /// Close a resource explicitly, before the scope that owns it ends.
     pub fn close(&mut self, resource: ResourceId) {
         let task = self.task;
-        self.core
-            .state_mut(task)
-            .resources
-            .retain(|held| *held != resource);
+        self.core.disown(task, resource);
         if self.core.readiness.close(resource) {
             self.core.emit(Event::Close { task, resource });
         }
     }
 
-    /// Record a freshly created resource as owned by the running task.
+    /// Record a freshly created resource as owned by the scope the task is standing in.
     pub(crate) fn take_ownership(&mut self, resource: ResourceId) {
         let task = self.task;
-        self.core.state_mut(task).resources.push(resource);
+        let scopes = &mut self.core.state_mut(task).scopes;
+        scopes
+            .last_mut()
+            .expect("every task has at least its own scope")
+            .resources
+            .push(resource);
         if let Some(kind) = self.core.readiness.kind(resource) {
             self.core.emit(Event::Open {
                 task,
