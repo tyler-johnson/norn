@@ -1,0 +1,82 @@
+# Norn for VS Code
+
+Syntax highlighting, a language configuration, and snippets for `.norn` files, plus a problem
+matcher that turns `norn check` output into squiggles. No language server yet — see
+[Toward a language server](#toward-a-language-server).
+
+## Install
+
+```
+make editor-install
+```
+
+from the repository root. That symlinks this directory into `~/.vscode/extensions/norn-lang.norn`;
+reload the window (`Developer: Reload Window`) and any `.norn` file will be coloured. Rerun it after
+moving the checkout. If your editor keeps extensions elsewhere — `~/.vscode-server/extensions` over
+SSH, `~/.vscode-oss/extensions` on VSCodium — link it there instead:
+
+```
+ln -sfn "$PWD/editors/vscode" ~/.vscode-server/extensions/norn-lang.norn
+```
+
+To build a `.vsix` instead, `make editor-package` (needs `npm`).
+
+## What it knows
+
+**Capitalization carries no meaning in Norn.** `Profile` and `profile` are the same kind of name;
+only the `#` mark separates building data from calling a function, and only *position* separates a
+type from a value. So the grammar finds types positionally rather than by case: inside a parameter
+list, after `->`, and inside a `record` or `enum` body. A named argument — `#User(id: 7)` — is
+lexically identical to a field declaration, so outside those contexts nothing is guessed at, and
+`id` stays an ordinary name rather than being mis-coloured as a type.
+
+Beyond that:
+
+- `task`, `await`, `scope`, and `spawn` share a scope, so suspension and structured concurrency read
+  as one family.
+- Capability names inside `uses { … }` are highlighted as constants. The grammar colours whatever is
+  written rather than checking it against the v0 vocabulary — the checker owns that list and names
+  the three when you get it wrong.
+- Reserved words (`loop`, `state`, `reactor`, and the rest of `lex.rs`'s list) are marked
+  `invalid.illegal`, in binding positions too. `let state = 1` is an error, and the editor says so
+  before the compiler has to.
+- `2.seconds` is a projection off an integer; `2.5` is a float. The grammar splits them the same way
+  the lexer does — a dot begins a fraction only when a digit follows it.
+- Block comments nest.
+
+`crates/norn-hir/tests/editor.rs` asserts that every keyword, reserved word, and builtin the front
+end knows appears in this grammar, so a word added to the language cannot be silently forgotten
+here.
+
+## Diagnostics
+
+The extension contributes a `$norn` problem matcher for the driver's `file:line:col` diagnostic
+format. The repository's `.vscode/tasks.json` wires it up:
+
+- **norn: check this file** — the default build task (`Ctrl+Shift+B`); errors land in the Problems
+  panel with squiggles in the editor.
+- **norn: check the examples**, **norn: run this file** (under the virtual clock, with the event
+  trace), **norn: format this file**.
+
+These shell out to `cargo run --profile dogfood`, so they work in a fresh checkout without
+installing the driver first. `make install` puts `norn` on your `PATH` if you would rather the tasks
+call it directly.
+
+## Toward a language server
+
+The front end already produces everything a diagnostics server needs: `norn_hir::check` returns
+spanned `Diagnostic`s, and `SourceFile::line_col` converts a byte offset to a position. A
+`crates/norn-lsp` would be LSP framing over stdio, a document store, and that mapping — no new
+analysis.
+
+What comes after, roughly in order of how much of it already exists:
+
+- **Semantic tokens** would replace the positional type-finding above with the real answer, since
+  the checker knows which names are types. Until then this grammar is the approximation, and the two
+  are meant to agree.
+- **Hover** and **go to definition** from the typed HIR, which already resolves every name to an
+  index and gives every expression a type.
+- **Formatting** from `norn fmt`, which is `print::module` and already canonical.
+- **Inlay hints** for inferred `let` types, and for the capability set a `task fn` actually needs.
+
+Until then, keep the grammar and the lexer in step; the test above is what enforces it.

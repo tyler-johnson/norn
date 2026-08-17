@@ -1,0 +1,60 @@
+{
+  "task function": {
+    "prefix": "taskfn",
+    "body": [
+      "task fn ${1:name}(${2}) -> ${3:()}",
+      "    uses { ${4:clock} }",
+      "{",
+      "\t$0",
+      "}"
+    ],
+    "description": "A task function and its capability set"
+  },
+  "function": {
+    "prefix": "fn",
+    "body": ["fn ${1:name}(${2}) -> ${3:()} {", "\t$0", "}"],
+    "description": "A plain function"
+  },
+  "record": {
+    "prefix": "record",
+    "body": ["record ${1:Name} {", "\t${2:field}: ${3:I64}", "}"],
+    "description": "A record declaration"
+  },
+  "enum": {
+    "prefix": "enum",
+    "body": ["enum ${1:Name} {", "\t${2:Variant}", "}"],
+    "description": "An enum declaration"
+  },
+  "match": {
+    "prefix": "match",
+    "body": ["match ${1:value} {", "\t${2:_} => ${3:()}", "}"],
+    "description": "A match expression"
+  },
+  "match on a result": {
+    "prefix": "matchresult",
+    "body": [
+      "match ${1:value} {",
+      "\t#Ok(${2:v}) => ${3:()}",
+      "\t#Err(${4:e}) => ${5:()}",
+      "}"
+    ],
+    "description": "A match over Result"
+  },
+  "scope": {
+    "prefix": "scope",
+    "body": ["scope {", "\tspawn ${1:worker()}", "\t$0", "}"],
+    "description": "A concurrency scope: every task spawned inside is cancelled and joined on the way out"
+  },
+  "main": {
+    "prefix": "main",
+    "body": [
+      "task fn main() -> Result<(), IoError>",
+      "    uses { ${1:clock} }",
+      "{",
+      "\t$0",
+      "\t#Ok(())",
+      "}"
+    ],
+    "description": "A task `main` returning a Result"
+  }
+}

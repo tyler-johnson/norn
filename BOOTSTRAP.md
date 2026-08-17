@@ -275,7 +275,11 @@ norn/
 ├── examples/                parse corpus
 │   ├── errors/              programs that must not parse
 │   ├── run/                 programs that must check, lower, and run
+│   ├── tasks/               programs whose NIR, output, and trace are golden  (M2)
+│   ├── tcp/                 the echo server                                   (M2)
 │   └── type-errors/         programs that must not check
+├── editors/
+│   └── vscode/              grammar, snippets, and a `norn check` matcher
 └── crates/*/tests/          snapshot and golden-trace corpora
 ```
 
@@ -287,10 +291,14 @@ Ordered roughly by when it becomes worth doing, not by importance:
    lifetimes. Requires the trace tooling from M3.
 2. **Multi-threaded scheduler.** Work stealing, parallel reactors on separate workers. The
    single-threaded loop is a correctness baseline to differential-test against.
-3. **Cranelift backend.** Replaces the Rust emitter once NIR has stopped churning; removes `rustc`
+3. **Language server.** `norn-lsp` over stdio: diagnostics first, which is `norn_hir::check`'s
+   spanned output and nothing new, then semantic tokens, hover, and go-to-definition off the typed
+   HIR. `editors/vscode/` is the stopgap — a TextMate grammar has to find types by position, and
+   semantic tokens are what replace that guess with the checker's answer.
+4. **Cranelift backend.** Replaces the Rust emitter once NIR has stopped churning; removes `rustc`
    from the deployment path.
-4. **Borrow checking.** Until then, `&T` as a non-escaping parameter only.
-5. **Generics and traits.** Required before a real standard library.
-6. **Capability inference, test handlers.** `uses { ... }` is checked but not inferred in v0.
-7. **Derives and constrained attributes.** `@derive(Json)`, `@http_api` — `DESIGN.md` §8 stage 2.
-8. **Durable state projections, supervision policy.**
+5. **Borrow checking.** Until then, `&T` as a non-escaping parameter only.
+6. **Generics and traits.** Required before a real standard library.
+7. **Capability inference, test handlers.** `uses { ... }` is checked but not inferred in v0.
+8. **Derives and constrained attributes.** `@derive(Json)`, `@http_api` — `DESIGN.md` §8 stage 2.
+9. **Durable state projections, supervision policy.**

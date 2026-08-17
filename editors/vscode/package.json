@@ -1,0 +1,78 @@
+{
+  "name": "norn",
+  "displayName": "Norn",
+  "description": "Syntax highlighting for the Norn language.",
+  "version": "0.1.0",
+  "publisher": "norn-lang",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Snippets"
+  ],
+  "keywords": [
+    "norn"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "norn",
+        "aliases": [
+          "Norn",
+          "norn"
+        ],
+        "extensions": [
+          ".norn"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "norn",
+        "scopeName": "source.norn",
+        "path": "./syntaxes/norn.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "norn",
+        "path": "./snippets/norn.json"
+      }
+    ],
+    "configurationDefaults": {
+      "[norn]": {
+        "editor.tabSize": 4,
+        "editor.insertSpaces": true,
+        "editor.trimAutoWhitespace": true,
+        "files.trimTrailingWhitespace": true,
+        "files.insertFinalNewline": true
+      }
+    },
+    "problemMatchers": [
+      {
+        "name": "norn",
+        "owner": "norn",
+        "source": "norn",
+        "fileLocation": [
+          "autoDetect",
+          "${workspaceFolder}"
+        ],
+        "severity": "error",
+        "pattern": [
+          {
+            "regexp": "^error: (.*)$",
+            "message": 1
+          },
+          {
+            "regexp": "^\\s*-->\\s+(.+):(\\d+):(\\d+)\\s*$",
+            "file": 1,
+            "line": 2,
+            "column": 3
+          }
+        ]
+      }
+    ]
+  }
+}

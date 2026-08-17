@@ -360,8 +360,8 @@ pub enum BinOp {
 }
 
 /// Functions the compiler knows about directly. There is no standard library yet, so the set is
-/// exactly what a milestone needs to be observable: `print` and `digits` to say something, and the
-/// timer and socket primitives M2 is about.
+/// exactly what a milestone needs to be observable: `print` to say something, and the timer and
+/// socket primitives M2 is about.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Builtin {
     Print,
@@ -375,6 +375,20 @@ pub enum Builtin {
 }
 
 impl Builtin {
+    /// Every builtin, for consumers that need the list rather than one entry — the editor grammar
+    /// test is the first. It sits beside the exhaustive matches below so that adding a variant puts
+    /// the compiler's finger next to the line that also needs the new name.
+    pub const ALL: &'static [Builtin] = &[
+        Builtin::Print,
+        Builtin::ListenerPort,
+        Builtin::Sleep,
+        Builtin::TcpListen,
+        Builtin::TcpAccept,
+        Builtin::TcpRead,
+        Builtin::TcpWrite,
+        Builtin::TcpClose,
+    ];
+
     pub fn from_name(name: &str) -> Option<Builtin> {
         match name {
             "print" => Some(Builtin::Print),

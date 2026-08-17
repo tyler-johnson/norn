@@ -30,6 +30,30 @@ pub enum Kw {
 }
 
 impl Kw {
+    /// Every keyword, for consumers that need the list rather than one entry — the editor grammar
+    /// test is the first. It sits beside `text`'s exhaustive match so that adding a variant puts
+    /// the compiler's finger next to the line that also needs the new word.
+    pub const ALL: &'static [Kw] = &[
+        Kw::Module,
+        Kw::Use,
+        Kw::Record,
+        Kw::Enum,
+        Kw::Fn,
+        Kw::Task,
+        Kw::Uses,
+        Kw::Let,
+        Kw::Mut,
+        Kw::Return,
+        Kw::Match,
+        Kw::If,
+        Kw::Else,
+        Kw::Await,
+        Kw::Scope,
+        Kw::Spawn,
+        Kw::True,
+        Kw::False,
+    ];
+
     pub fn text(self) -> &'static str {
         match self {
             Kw::Module => "module",

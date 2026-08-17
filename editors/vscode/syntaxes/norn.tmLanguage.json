@@ -1,0 +1,471 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Norn",
+  "scopeName": "source.norn",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#namespace" },
+    { "include": "#fn-decl" },
+    { "include": "#return-type" },
+    { "include": "#record-decl" },
+    { "include": "#enum-decl" },
+    { "include": "#uses-block" },
+    { "include": "#let-typed" },
+    { "include": "#let-plain" },
+    { "include": "#constructor" },
+    { "include": "#reserved" },
+    { "include": "#keywords" },
+    { "include": "#constants" },
+    { "include": "#numbers" },
+    { "include": "#builtin-fns" },
+    { "include": "#call" },
+    { "include": "#field-access" },
+    { "include": "#wildcard" },
+    { "include": "#operators" },
+    { "include": "#punctuation" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.norn",
+          "begin": "//",
+          "end": "$",
+          "beginCaptures": {
+            "0": { "name": "punctuation.definition.comment.norn" }
+          }
+        },
+        { "include": "#block-comment" }
+      ]
+    },
+
+    "block-comment": {
+      "comment": "Block comments nest, so this context includes itself.",
+      "name": "comment.block.norn",
+      "begin": "/\\*",
+      "end": "\\*/",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.comment.begin.norn" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.comment.end.norn" }
+      },
+      "patterns": [{ "include": "#block-comment" }]
+    },
+
+    "strings": {
+      "comment": "A string literal cannot span a line break: the lexer reports one that tries.",
+      "name": "string.quoted.double.norn",
+      "begin": "\"",
+      "end": "\"|$",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.string.begin.norn" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.string.end.norn" }
+      },
+      "patterns": [
+        {
+          "name": "constant.character.escape.norn",
+          "match": "\\\\[ntr0\\\\\"]"
+        },
+        {
+          "comment": "The lexer accepts exactly the six escapes above.",
+          "name": "invalid.illegal.unknown-escape.norn",
+          "match": "\\\\."
+        }
+      ]
+    },
+
+    "namespace": {
+      "match": "\\b(module|use)\\s+([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*)",
+      "captures": {
+        "1": { "name": "keyword.control.import.norn" },
+        "2": { "name": "entity.name.namespace.norn" }
+      }
+    },
+
+    "fn-decl": {
+      "comment": "Spans the parameter list so that `name:` reads as a parameter and everything else in it reads as a type. `applyEndPatternLast` lets the unit type `()` be consumed before the closing paren is considered.",
+      "begin": "(?:\\b(task)\\s+)?\\b(fn)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(\\()",
+      "beginCaptures": {
+        "1": { "name": "storage.modifier.task.norn" },
+        "2": { "name": "storage.type.function.norn" },
+        "3": {
+          "patterns": [
+            { "include": "#reserved" },
+            { "name": "entity.name.function.norn", "match": ".+" }
+          ]
+        },
+        "4": { "name": "punctuation.section.parameters.begin.norn" }
+      },
+      "end": "\\)",
+      "endCaptures": {
+        "0": { "name": "punctuation.section.parameters.end.norn" }
+      },
+      "applyEndPatternLast": true,
+      "patterns": [
+        { "include": "#comments" },
+        { "include": "#param-name" },
+        { "include": "#type" }
+      ]
+    },
+
+    "return-type": {
+      "comment": "Runs from the arrow to the end of the line, which is where a signature's type always ends: the body's brace and the `uses` clause both start fresh.",
+      "begin": "->",
+      "beginCaptures": {
+        "0": { "name": "keyword.operator.arrow.return.norn" }
+      },
+      "end": "(?=\\{)|$",
+      "patterns": [{ "include": "#comments" }, { "include": "#type" }]
+    },
+
+    "record-decl": {
+      "begin": "\\b(record)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(\\{)",
+      "beginCaptures": {
+        "1": { "name": "storage.type.record.norn" },
+        "2": { "name": "entity.name.type.record.norn" },
+        "3": { "name": "punctuation.section.block.begin.norn" }
+      },
+      "end": "\\}",
+      "endCaptures": {
+        "0": { "name": "punctuation.section.block.end.norn" }
+      },
+      "patterns": [
+        { "include": "#comments" },
+        { "include": "#field-name" },
+        { "include": "#type" }
+      ]
+    },
+
+    "enum-decl": {
+      "comment": "A variant is the first word on its line; its payload is a nested paren or brace group, which has to be consumed before the enum's own closing brace is considered.",
+      "begin": "\\b(enum)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(\\{)",
+      "beginCaptures": {
+        "1": { "name": "storage.type.enum.norn" },
+        "2": { "name": "entity.name.type.enum.norn" },
+        "3": { "name": "punctuation.section.block.begin.norn" }
+      },
+      "end": "\\}",
+      "endCaptures": {
+        "0": { "name": "punctuation.section.block.end.norn" }
+      },
+      "applyEndPatternLast": true,
+      "patterns": [
+        { "include": "#comments" },
+        { "include": "#variant-name" },
+        { "include": "#variant-payload" },
+        { "include": "#type" }
+      ]
+    },
+
+    "variant-name": {
+      "match": "^\\s*([A-Za-z_][A-Za-z0-9_]*)",
+      "captures": {
+        "1": { "name": "entity.name.type.variant.norn" }
+      }
+    },
+
+    "variant-payload": {
+      "patterns": [
+        {
+          "begin": "\\{",
+          "end": "\\}",
+          "beginCaptures": {
+            "0": { "name": "punctuation.section.block.begin.norn" }
+          },
+          "endCaptures": {
+            "0": { "name": "punctuation.section.block.end.norn" }
+          },
+          "patterns": [
+            { "include": "#comments" },
+            { "include": "#field-name" },
+            { "include": "#type" }
+          ]
+        },
+        {
+          "begin": "\\(",
+          "end": "\\)",
+          "beginCaptures": {
+            "0": { "name": "punctuation.section.parameters.begin.norn" }
+          },
+          "endCaptures": {
+            "0": { "name": "punctuation.section.parameters.end.norn" }
+          },
+          "applyEndPatternLast": true,
+          "patterns": [
+            { "include": "#comments" },
+            { "include": "#field-name" },
+            { "include": "#type" }
+          ]
+        }
+      ]
+    },
+
+    "uses-block": {
+      "comment": "The v0 vocabulary is `clock`, `net.listen`, and `net.io`, but the checker owns that list and says so by name — the grammar colours whatever is written here rather than second-guessing it.",
+      "begin": "\\b(uses)\\s*(\\{)",
+      "beginCaptures": {
+        "1": { "name": "keyword.other.uses.norn" },
+        "2": { "name": "punctuation.section.block.begin.norn" }
+      },
+      "end": "\\}",
+      "endCaptures": {
+        "0": { "name": "punctuation.section.block.end.norn" }
+      },
+      "patterns": [
+        { "include": "#comments" },
+        {
+          "name": "support.constant.capability.norn",
+          "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*"
+        },
+        { "name": "punctuation.separator.norn", "match": "," }
+      ]
+    },
+
+    "let-typed": {
+      "begin": "\\b(let)\\s+(?:(mut)\\s+)?([A-Za-z_][A-Za-z0-9_]*)\\s*(?=:)",
+      "beginCaptures": {
+        "1": { "name": "keyword.other.let.norn" },
+        "2": { "name": "storage.modifier.mut.norn" },
+        "3": {
+          "patterns": [
+            { "include": "#reserved" },
+            { "name": "variable.other.norn", "match": ".+" }
+          ]
+        }
+      },
+      "end": "(?==)|$",
+      "patterns": [
+        { "name": "punctuation.separator.type.norn", "match": ":" },
+        { "include": "#type" }
+      ]
+    },
+
+    "let-plain": {
+      "match": "\\b(let)\\s+(?:(mut)\\s+)?([A-Za-z_][A-Za-z0-9_]*)",
+      "captures": {
+        "1": { "name": "keyword.other.let.norn" },
+        "2": { "name": "storage.modifier.mut.norn" },
+        "3": {
+          "patterns": [
+            { "include": "#reserved" },
+            { "name": "variable.other.norn", "match": ".+" }
+          ]
+        }
+      }
+    },
+
+    "param-name": {
+      "comment": "Only included from a declaration context, where `name:` introduces something rather than passing it: a named call argument looks identical and is not this.",
+      "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\s*(:)",
+      "captures": {
+        "1": {
+          "patterns": [
+            { "include": "#reserved" },
+            { "name": "variable.parameter.norn", "match": ".+" }
+          ]
+        },
+        "2": { "name": "punctuation.separator.type.norn" }
+      }
+    },
+
+    "field-name": {
+      "comment": "The same shape as a parameter, in a record body or a named enum payload.",
+      "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\s*(:)",
+      "captures": {
+        "1": {
+          "patterns": [
+            { "include": "#reserved" },
+            { "name": "variable.other.member.declaration.norn", "match": ".+" }
+          ]
+        },
+        "2": { "name": "punctuation.separator.type.norn" }
+      }
+    },
+
+    "type": {
+      "comment": "Only ever included from a context that is already known to be a type position, because Norn attaches no meaning to capitalization: `Profile` and `profile` are the same kind of name, and only where they appear says which is a type.",
+      "patterns": [
+        {
+          "name": "storage.modifier.reference.norn",
+          "match": "&(\\s*\\bmut\\b)?"
+        },
+        { "name": "entity.name.type.unit.norn", "match": "\\(\\s*\\)" },
+        {
+          "name": "support.type.builtin.norn",
+          "match": "\\b(?:I64|F64|Bool|String|Task|Result|Option|IoError|Listener|Connection)\\b"
+        },
+        {
+          "name": "entity.name.type.norn",
+          "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b"
+        },
+        {
+          "name": "punctuation.definition.typeparameters.begin.norn",
+          "match": "<"
+        },
+        {
+          "name": "punctuation.definition.typeparameters.end.norn",
+          "match": ">"
+        },
+        { "name": "punctuation.separator.norn", "match": "," },
+        { "name": "punctuation.accessor.norn", "match": "\\." }
+      ]
+    },
+
+    "constructor": {
+      "comment": "`#` is what marks data. `#User(id: 7)` builds a record and `user(id: 7)` calls a function; nothing but the mark separates them.",
+      "match": "(#)([A-Za-z_][A-Za-z0-9_]*)(?:(\\.)([A-Za-z_][A-Za-z0-9_]*))?",
+      "captures": {
+        "1": { "name": "punctuation.definition.constructor.norn" },
+        "2": { "name": "entity.name.type.constructor.norn" },
+        "3": { "name": "punctuation.accessor.norn" },
+        "4": { "name": "entity.name.type.constructor.norn" }
+      }
+    },
+
+    "reserved": {
+      "comment": "Words held for a later milestone. The lexer refuses them as names, so showing them as errors is the truth rather than a warning.",
+      "name": "invalid.illegal.reserved.norn",
+      "match": "\\b(?:after_commit|as|blocking|break|const|continue|delay|event|export|for|impl|in|input|interface|loop|macro|on|pub|reactor|signal|source|state|static|trait|type|where|while)\\b"
+    },
+
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.conditional.norn",
+          "match": "\\b(?:if|else|match)\\b"
+        },
+        {
+          "name": "keyword.control.flow.norn",
+          "match": "\\b(?:return)\\b"
+        },
+        {
+          "comment": "Suspension and structured concurrency: the three words M2 made real.",
+          "name": "keyword.control.concurrency.norn",
+          "match": "\\b(?:await|scope|spawn)\\b"
+        },
+        {
+          "name": "storage.modifier.norn",
+          "match": "\\b(?:task|mut)\\b"
+        },
+        {
+          "name": "storage.type.norn",
+          "match": "\\b(?:fn|record|enum)\\b"
+        },
+        {
+          "name": "keyword.other.norn",
+          "match": "\\b(?:let|uses|module|use)\\b"
+        }
+      ]
+    },
+
+    "constants": {
+      "name": "constant.language.boolean.norn",
+      "match": "\\b(?:true|false)\\b"
+    },
+
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.hex.norn",
+          "match": "\\b0[xX][0-9a-fA-F_]+\\b"
+        },
+        {
+          "name": "constant.numeric.binary.norn",
+          "match": "\\b0[bB][01_]+\\b"
+        },
+        {
+          "comment": "A dot begins a fraction only when a digit follows it, so `2.seconds` stays a projection off an integer.",
+          "name": "constant.numeric.float.norn",
+          "match": "\\b[0-9][0-9_]*\\.[0-9][0-9_]*(?:[eE][+-]?[0-9]+)?\\b"
+        },
+        {
+          "name": "constant.numeric.float.norn",
+          "match": "\\b[0-9][0-9_]*[eE][+-]?[0-9]+\\b"
+        },
+        {
+          "name": "constant.numeric.integer.norn",
+          "match": "\\b[0-9][0-9_]*\\b"
+        }
+      ]
+    },
+
+    "builtin-fns": {
+      "name": "support.function.builtin.norn",
+      "match": "\\b(?:print|listener_port|sleep|tcp_listen|tcp_accept|tcp_read|tcp_write|tcp_close)\\b(?=\\s*\\()"
+    },
+
+    "call": {
+      "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\s*(?=\\()",
+      "captures": {
+        "1": { "name": "entity.name.function.call.norn" }
+      }
+    },
+
+    "field-access": {
+      "comment": "Declines to fire when a paren follows, so `.timeout(d)` reads as the call it is.",
+      "match": "(\\.)([A-Za-z_][A-Za-z0-9_]*)\\b(?!\\s*\\()",
+      "captures": {
+        "1": { "name": "punctuation.accessor.norn" },
+        "2": { "name": "variable.other.member.norn" }
+      }
+    },
+
+    "wildcard": {
+      "name": "variable.language.wildcard.norn",
+      "match": "(?<![A-Za-z0-9_])_(?![A-Za-z0-9_])"
+    },
+
+    "operators": {
+      "patterns": [
+        { "name": "keyword.operator.arrow.norn", "match": "=>" },
+        { "name": "keyword.operator.rest.norn", "match": "\\.\\." },
+        {
+          "name": "keyword.operator.comparison.norn",
+          "match": "==|!=|<=|>="
+        },
+        { "name": "keyword.operator.logical.norn", "match": "&&|\\|\\|" },
+        { "name": "keyword.operator.comparison.norn", "match": "<|>" },
+        { "name": "keyword.operator.logical.norn", "match": "!" },
+        {
+          "comment": "`?` propagates a failure out of the enclosing function, closing any open scope on the way.",
+          "name": "keyword.operator.try.norn",
+          "match": "\\?"
+        },
+        {
+          "name": "keyword.operator.arithmetic.norn",
+          "match": "[+\\-*/%]"
+        },
+        { "name": "keyword.operator.assignment.norn", "match": "=" },
+        { "name": "keyword.operator.norn", "match": "[&|@]" }
+      ]
+    },
+
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.section.block.norn",
+          "match": "[{}]"
+        },
+        {
+          "name": "punctuation.section.parens.norn",
+          "match": "[()]"
+        },
+        {
+          "name": "punctuation.section.brackets.norn",
+          "match": "[\\[\\]]"
+        },
+        { "name": "punctuation.separator.norn", "match": "," },
+        {
+          "comment": "Outside a declaration this colon is a named argument's, not a type's.",
+          "name": "punctuation.separator.key-value.norn",
+          "match": ":"
+        },
+        { "name": "punctuation.accessor.norn", "match": "\\." }
+      ]
+    }
+  }
+}
