@@ -24,6 +24,16 @@ them somewhere else again, the whole install is one line:
 ln -sfn "$PWD/editors/vscode" <that directory>/norn-lang.norn
 ```
 
+**Over Remote-SSH, uninstall any local copy first.** This extension is declarative — a grammar,
+snippets, and a language configuration, with no `main` — so VS Code gives it an `extensionKind` of
+`["ui", "workspace"]` and runs it on the *client* in preference to the remote host. A copy installed
+on your own machine therefore shadows the one on the server, and the symptom is a stale grammar that
+survives every reload: new keywords render as plain identifiers while the old ones still colour,
+because you are looking at the version you installed before the language grew. Uninstall it locally
+and reinstall from the remote window. `make editor-install` symlinks rather than copies precisely so
+that the live install cannot go stale, but it can only do that for the roots on the machine it runs
+on.
+
 To build a `.vsix` instead, `make editor-package` (needs `npm`).
 
 ## What it knows
