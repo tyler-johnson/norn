@@ -1,0 +1,78 @@
+// Using a value that has already been given away. Each function here is wrong in exactly one way.
+//
+// A `Connection` has one owner. Passing it to a call that takes it makes the call the owner, and
+// the name it was passed under holds nothing afterwards — whether the next line reads it, borrows
+// it, or hands it somewhere else again. `tcp_close` is the case worth reading first: closing a
+// socket and then reading from it is not a special rule about descriptors, it is the ordinary rule
+// about names, and that is what makes double-close a compile error.
+
+record Session {
+    conn: Connection
+    opened: I64
+}
+
+// The double close, spelled two ways.
+task fn closes_twice(conn: Connection) -> ()
+    uses { net.io }
+{
+    await tcp_close(conn)
+    await tcp_close(conn)
+}
+
+task fn reads_a_closed_socket(conn: Connection) -> ()
+    uses { net.io }
+{
+    await tcp_close(conn)
+    match await tcp_read(&conn) {
+        #Ok(_) => ()
+        #Err(_) => ()
+    }
+}
+
+task fn serve(conn: Connection) -> ()
+    uses { net.io }
+{
+    await tcp_close(conn)
+}
+
+// A spawned task owns what it was handed, so the second `spawn` has nothing to hand it.
+task fn spawns_it_twice(conn: Connection) -> ()
+    uses { net.io }
+{
+    scope {
+        spawn serve(conn)
+        spawn serve(conn)
+    }
+}
+
+// A branch that moves is a move: after the `if`, `conn` is gone on one path and there is no way to
+// tell from this line which path arrived here.
+task fn moves_on_one_branch(conn: Connection, tidy: Bool) -> ()
+    uses { net.io }
+{
+    if tidy {
+        await tcp_close(conn)
+    }
+    match await tcp_read(&conn) {
+        #Ok(_) => ()
+        #Err(_) => ()
+    }
+}
+
+// Moving one field would leave the rest of the record with no owner and no name. `match` is what
+// takes a value apart.
+task fn opens_the_record(session: Session) -> ()
+    uses { net.io }
+{
+    await tcp_close(session.conn)
+}
+
+// A task is built here and started by `await`, so it is a value like any other and starting it
+// twice is using it twice.
+task fn awaits_one_task_twice(conn: Connection) -> ()
+    uses { net.io }
+{
+    let closing = tcp_close(conn)
+    await closing
+    await closing
+}

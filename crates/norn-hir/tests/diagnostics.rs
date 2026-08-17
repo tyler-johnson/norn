@@ -87,6 +87,76 @@ record Wrapper {
     );
 }
 
+/// The three ways a name survives something that looks like a move. Each is a line of `check_moves`
+/// that would be invisible if only the rejections were tested: an error corpus cannot show that a
+/// correct program is still accepted, and these are the programs most likely to be rejected by
+/// accident.
+#[test]
+fn a_name_survives_what_only_looks_like_a_move() {
+    // A branch that leaves the function cannot reach the code after the `if`, so what it moved is
+    // not moved there. Without that, every `?` before a close would poison the close.
+    accepted(
+        "a diverging branch moves nothing downstream",
+        "\
+task fn main(conn: Connection, bad: Bool) -> ()
+    uses { net.io }
+{
+    if bad {
+        await tcp_close(conn)
+        return ()
+    }
+    await tcp_close(conn)
+}
+",
+    );
+
+    // Assigning a whole name gives it something to own again.
+    accepted(
+        "reassignment revives a name",
+        "\
+task fn main(first: Connection, second: Connection) -> ()
+    uses { net.io }
+{
+    let mut held = first
+    await tcp_close(held)
+    held = second
+    await tcp_close(held)
+}
+",
+    );
+
+    // A pattern takes an aggregate apart. The scrutinee moves whole and the pieces are named, which
+    // is the answer the move-out-of-a-field diagnostic points at.
+    accepted(
+        "a match binding owns the piece it named",
+        "\
+record Session {
+    conn: Connection
+    opened: I64
+}
+
+task fn main(session: Session) -> ()
+    uses { net.io }
+{
+    match session {
+        #Session(conn: conn, opened: _) => await tcp_close(conn)
+    }
+}
+",
+    );
+}
+
+fn accepted(what: &str, source: &str) {
+    let parsed = parse(source);
+    assert!(parsed.ok(), "{what}: did not parse");
+    let checked = norn_hir::check(&parsed.module);
+    assert!(
+        checked.ok(),
+        "{what}:\n{}",
+        render_all(&SourceFile::new("test", source), &checked.errors)
+    );
+}
+
 /// A diagnostic should say what is wrong once, not once per expression that touched the bad value.
 #[test]
 fn one_mistake_reports_once() {
