@@ -1,6 +1,6 @@
 //! The Norn runtime: one scheduler, generic over the value type.
 //!
-//! `norn-rt` owns the clock, the timers, the reactor, the ready queue, scopes, cancellation, and the
+//! `norn-rt` owns the clock, the timers, the readiness poller, the ready queue, scopes, cancellation, and the
 //! resource table. It does not know what a Norn value is: `Runtime<V>` and `trait Body<V>` keep it
 //! ignorant of NIR, so the interpreter instantiates `Runtime<interp::Value>` and the generated code
 //! of M5 will instantiate its own over whatever it represents values with. Two engines with two
@@ -20,13 +20,14 @@ pub mod task;
 pub mod timer;
 pub mod trace;
 
-use crate::poll::Reactor;
+use crate::poll::Readiness;
 use crate::task::{TaskState, Wait};
 use crate::timer::Timers;
 use crate::trace::{Event, Trace, WaitReason};
 
 pub use crate::clock::{Clock, Millis};
 pub use crate::poll::{ResourceId, ResourceKind};
+pub use crate::scope::Parent;
 pub use crate::task::{Status, TaskId};
 
 /// Where a program's output goes. Tests capture it; `norn run` writes it through. It belongs to the
@@ -77,6 +78,16 @@ impl std::fmt::Display for Trap {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{} (in `{}`)", self.message, self.function)
     }
+}
+
+/// Something the scheduler can run a slice of.
+///
+/// One queue rather than two, so that "a reactor takes one input at a time, and a flood of messages
+/// cannot starve a task" is a property of the ordering rather than a claim about it. The second
+/// variant arrives with turns; until then this is a `TaskId` with a name.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Runnable {
+    Task(TaskId),
 }
 
 /// What one resumption of a task body produced.
@@ -148,7 +159,7 @@ impl<'e, V> Runtime<'e, V> {
                 tasks: Vec::new(),
                 ready: VecDeque::new(),
                 timers: Timers::default(),
-                reactor: Reactor::default(),
+                readiness: Readiness::default(),
                 clock: config.clock,
                 trace: Trace::new(config.trace),
                 out,
@@ -179,9 +190,9 @@ impl<'e, V> Runtime<'e, V> {
 /// so that a `Cx` may borrow the rest.
 pub(crate) struct Core<'e, V> {
     tasks: Vec<TaskState<'e, V>>,
-    ready: VecDeque<TaskId>,
+    ready: VecDeque<Runnable>,
     timers: Timers,
-    reactor: Reactor,
+    readiness: Readiness,
     clock: Clock,
     trace: Trace,
     out: &'e mut dyn Output,
@@ -214,10 +225,14 @@ impl<'e, V> Core<'e, V> {
 
         loop {
             while let Some(next) = self.ready.pop_front() {
-                if self.state(next).status != Status::Ready {
-                    continue;
+                match next {
+                    Runnable::Task(task) => {
+                        if self.state(task).status != Status::Ready {
+                            continue;
+                        }
+                        self.step(task)?;
+                    }
                 }
-                self.step(next)?;
                 if let Some(value) = self.result.take() {
                     return Ok(value);
                 }
@@ -264,7 +279,7 @@ impl<'e, V> Core<'e, V> {
     /// Nothing is runnable: let time pass, or wait for a descriptor, and wake whatever that frees.
     fn wait(&mut self) -> Result<(), Trap> {
         let deadline = self.timers.earliest();
-        if self.reactor.is_idle() {
+        if self.readiness.is_idle() {
             let Some(deadline) = deadline else {
                 let root = self.root.expect("the root is spawned before the loop runs");
                 return Err(self.stuck(root));
@@ -275,7 +290,7 @@ impl<'e, V> Core<'e, V> {
         } else {
             let timeout = deadline.map(|at| at.saturating_sub(self.clock.now()));
             let woken = self
-                .reactor
+                .readiness
                 .wait(timeout)
                 .map_err(|err| Trap::new(format!("waiting for readiness: {err}"), "runtime"))?;
             let timed_out = woken.is_empty();
@@ -305,7 +320,7 @@ impl<'e, V> Core<'e, V> {
             return;
         }
         self.state_mut(task).status = Status::Ready;
-        self.ready.push_back(task);
+        self.ready.push_back(Runnable::Task(task));
     }
 
     fn stuck(&self, task: TaskId) -> Trap {
@@ -357,17 +372,17 @@ impl<'e, V> Cx<'_, 'e, V> {
         if !(0..=u16::MAX as i64).contains(&port) {
             return Err(io::Error::from(io::ErrorKind::InvalidInput));
         }
-        let id = self.core.reactor.listen(port as u16)?;
+        let id = self.core.readiness.listen(port as u16)?;
         self.take_ownership(id);
         Ok(id)
     }
 
     pub fn port(&mut self, listener: ResourceId) -> io::Result<i64> {
-        self.core.reactor.port(listener).map(|port| port as i64)
+        self.core.readiness.port(listener).map(|port| port as i64)
     }
 
     pub fn accept(&mut self, listener: ResourceId) -> Poll<io::Result<ResourceId>> {
-        match self.core.reactor.accept(listener) {
+        match self.core.readiness.accept(listener) {
             Ok(Some(id)) => {
                 self.finish_wait();
                 self.take_ownership(id);
@@ -382,7 +397,7 @@ impl<'e, V> Cx<'_, 'e, V> {
     }
 
     pub fn read(&mut self, connection: ResourceId) -> Poll<io::Result<String>> {
-        match self.core.reactor.read(connection) {
+        match self.core.readiness.read(connection) {
             Ok(Some(text)) => {
                 self.finish_wait();
                 Poll::Ready(Ok(text))
@@ -396,7 +411,7 @@ impl<'e, V> Cx<'_, 'e, V> {
     }
 
     pub fn write(&mut self, connection: ResourceId, text: &str) -> Poll<io::Result<()>> {
-        match self.core.reactor.write(connection, text) {
+        match self.core.readiness.write(connection, text) {
             Ok(Some(())) => {
                 self.finish_wait();
                 Poll::Ready(Ok(()))
@@ -412,7 +427,7 @@ impl<'e, V> Cx<'_, 'e, V> {
     /// Register interest and park. `Pending` is returned as whatever the caller's result type is,
     /// because the value only ever arrives on a later attempt.
     fn park_on<T>(&mut self, resource: ResourceId, write: bool) -> Poll<io::Result<T>> {
-        match self.core.reactor.watch(resource, write, self.task) {
+        match self.core.readiness.watch(resource, write, self.task) {
             Ok(()) => {
                 self.core.state_mut(self.task).wait = Some(Wait::Io { resource, write });
                 Poll::Pending
@@ -426,6 +441,6 @@ impl<'e, V> Cx<'_, 'e, V> {
 
     fn finish_wait(&mut self) {
         self.core.state_mut(self.task).wait = None;
-        self.core.reactor.clear(self.task);
+        self.core.readiness.clear(self.task);
     }
 }

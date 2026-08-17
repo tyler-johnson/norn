@@ -127,7 +127,7 @@ impl Body<Value> for TaskBody<'_> {
             program: self.program,
         };
         let stepped = match &mut self.state {
-            State::Frames(frames) => interpreter.resume_task(frames, cx),
+            State::Frames(frames) => interpreter.resume_task(frames, Some(cx)),
             State::Builtin(builtin, args) => match interpreter.poll_builtin(cx, *builtin, args) {
                 Ok(Poll::Ready(value)) => Ok(Step::Done(value)),
                 Ok(Poll::Pending) => Ok(Step::Park),
@@ -173,7 +173,7 @@ impl Interpreter<'_> {
     fn resume_task(
         &self,
         frames: &mut Vec<Frame>,
-        cx: &mut Cx<'_, '_, Value>,
+        mut cx: Option<&mut Cx<'_, '_, Value>>,
     ) -> Result<Step<Value>, Trap> {
         loop {
             let frame = frames
@@ -195,12 +195,12 @@ impl Interpreter<'_> {
                             frames.push(new_frame(self.program, callee, arguments, Some(dest)));
                             continue;
                         }
-                        let value = self.eval(frame, cx, rvalue)?;
+                        let value = self.eval(frame, cx.as_deref_mut(), rvalue)?;
                         write_place(frame, place, value);
                     }
                     Instr::ScopeEnter => {
                         frame.instr += 1;
-                        cx.scope_enter();
+                        impure(cx.as_deref_mut(), "scope")?.scope_enter();
                     }
                     Instr::Spawn(operand) => {
                         frame.instr += 1;
@@ -209,7 +209,7 @@ impl Interpreter<'_> {
                             return Err(self.trap(frame, "spawned a value that is not a task"));
                         };
                         let moved = moved_resources(&task.kind);
-                        cx.spawn(value, &moved)?;
+                        impure(cx.as_deref_mut(), "spawn")?.spawn(value, &moved)?;
                     }
                 }
                 continue;
@@ -261,6 +261,7 @@ impl Interpreter<'_> {
                             frames.push(callee);
                         }
                         TaskKind::Builtin(builtin, args) => {
+                            let cx = impure(cx.as_deref_mut(), builtin.name())?;
                             match self.poll_builtin(cx, *builtin, args)? {
                                 Poll::Ready(value) => {
                                     write_place(frame, dest, value);
@@ -272,13 +273,15 @@ impl Interpreter<'_> {
                         }
                     }
                 }
-                Term::ScopeExit { resume } => match cx.scope_exit() {
-                    Poll::Ready(()) => {
-                        frame.block = *resume;
-                        frame.instr = 0;
+                Term::ScopeExit { resume } => {
+                    match impure(cx.as_deref_mut(), "scope")?.scope_exit() {
+                        Poll::Ready(()) => {
+                            frame.block = *resume;
+                            frame.instr = 0;
+                        }
+                        Poll::Pending => return Ok(Step::Park),
                     }
-                    Poll::Pending => return Ok(Step::Park),
-                },
+                }
                 Term::Trap(message) => {
                     let message = message.to_string();
                     return Err(self.trap(frame, message));
@@ -303,7 +306,7 @@ impl Interpreter<'_> {
     fn eval(
         &self,
         frame: &Frame,
-        cx: &mut Cx<'_, '_, Value>,
+        cx: Option<&mut Cx<'_, '_, Value>>,
         rvalue: &Rvalue,
     ) -> Result<Value, Trap> {
         Ok(match rvalue {
@@ -354,14 +357,14 @@ impl Interpreter<'_> {
     fn builtin(
         &self,
         frame: &Frame,
-        cx: &mut Cx<'_, '_, Value>,
+        cx: Option<&mut Cx<'_, '_, Value>>,
         builtin: Builtin,
         args: &[Value],
     ) -> Result<Value, Trap> {
         Ok(match builtin {
             Builtin::Print => {
                 let text = self.render(&args[0]);
-                cx.print(&text);
+                impure(cx, "print")?.print(&text);
                 Value::Unit
             }
             Builtin::ListenerPort => {
@@ -370,7 +373,7 @@ impl Interpreter<'_> {
                         self.trap(frame, "`listener_port` of something that is not a listener")
                     );
                 };
-                match cx.port(*id) {
+                match impure(cx, "listener_port")?.port(*id) {
                     Ok(port) => Value::Int(port),
                     Err(err) => {
                         return Err(self.trap(frame, format!("`listener_port`: {}", err.kind())));
@@ -581,6 +584,29 @@ fn moved_resources(kind: &TaskKind) -> Vec<ResourceId> {
             _ => None,
         })
         .collect()
+}
+
+/// Reach the runtime, or trap because there is none.
+///
+/// A turn evaluates node bodies with no `Cx` at all, so every arm of the interpreter that could be
+/// observed from outside — printing, spawning, opening a scope, polling a task builtin — is exactly
+/// an arm that has to ask for one. That makes purity a property of what the evaluator was *handed*
+/// rather than a rule it remembers to follow, and it is why one walker serves both.
+///
+/// Reaching here is a compiler bug, not a user error: `check_reactors` rejects an impure call
+/// against the source with a span, and `lower` rejects it again against the node's blocks. This is
+/// the third line, and it exists so that a hole in either of the first two surfaces as a trap rather
+/// than as a turn that quietly printed something.
+fn impure<'a, 'c, 'e, V>(
+    cx: Option<&'a mut Cx<'c, 'e, V>>,
+    what: &str,
+) -> Result<&'a mut Cx<'c, 'e, V>, Trap> {
+    cx.ok_or_else(|| {
+        Trap::new(
+            format!("`{what}` cannot run during a turn: a reactor node is pure"),
+            "turn",
+        )
+    })
 }
 
 fn integer(builtin: &str, value: &Value) -> Result<i64, Trap> {

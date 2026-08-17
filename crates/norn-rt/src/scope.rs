@@ -11,7 +11,7 @@
 
 use crate::task::{Status, TaskId, TaskState};
 use crate::trace::Event;
-use crate::{Core, Cx, Poll, ResourceId, Trap};
+use crate::{Core, Cx, Poll, ResourceId, Runnable, Trap};
 
 /// One open scope and the children spawned into it.
 #[derive(Default)]
@@ -19,11 +19,25 @@ pub struct Scope {
     pub children: Vec<TaskId>,
 }
 
+/// Who a new task is spawned under, and into which of that task's open scopes.
+///
+/// The scope is named rather than assumed. For a task spawning from its own body — the only caller
+/// M2 had — the innermost scope is always right, and `Parent::innermost` says exactly that. It stops
+/// being right the moment something is spawned *later* on behalf of a task whose scope stack has
+/// moved on since: an effect launched after a turn belongs to the scope its reactor was created in,
+/// not to whichever scope its owner happens to be standing in when the effect fires.
+#[derive(Clone, Copy, Debug)]
+pub struct Parent {
+    pub task: TaskId,
+    /// Index into the parent's `scopes`, outermost `0`.
+    pub scope: usize,
+}
+
 impl<'e, V> Core<'e, V> {
     pub(crate) fn spawn(
         &mut self,
         value: V,
-        parent: Option<TaskId>,
+        parent: Option<Parent>,
         moved: &[ResourceId],
     ) -> Result<TaskId, Trap> {
         let body = (self.make)(&value)?;
@@ -32,7 +46,7 @@ impl<'e, V> Core<'e, V> {
         self.tasks.push(TaskState {
             name: name.clone(),
             body: Some(body),
-            parent,
+            parent: parent.map(|parent| parent.task),
             // Every task starts with one implicit scope, so that whatever it spawns dies with it
             // even if lowering never emitted an explicit one.
             scopes: vec![Scope::default()],
@@ -40,20 +54,25 @@ impl<'e, V> Core<'e, V> {
             resources: Vec::new(),
             status: Status::Ready,
         });
-        self.emit(Event::Spawn { task, parent, name });
+        self.emit(Event::Spawn {
+            task,
+            parent: parent.map(|parent| parent.task),
+            name,
+        });
 
         if let Some(parent) = parent {
-            self.state_mut(parent)
-                .scopes
-                .last_mut()
-                .expect("every task has an implicit outermost scope")
-                .children
-                .push(task);
+            let scopes = &mut self.state_mut(parent.task).scopes;
+            // A named scope may already have been left — an effect can outlive the `scope { … }`
+            // its reactor was declared in. Falling back to the outermost scope keeps the child
+            // owned by *something* that will cancel it, which is the invariant that matters; the
+            // scope exit itself is what stops obsolete effects from being launched at all.
+            let index = parent.scope.min(scopes.len() - 1);
+            scopes[index].children.push(task);
             for resource in moved {
-                self.transfer(*resource, parent, task);
+                self.transfer(*resource, parent.task, task);
             }
         }
-        self.ready.push_back(task);
+        self.ready.push_back(Runnable::Task(task));
         Ok(task)
     }
 
@@ -95,7 +114,7 @@ impl<'e, V> Core<'e, V> {
         self.state_mut(task).status = Status::Cancelled;
         self.emit(Event::Cancel { task });
         self.timers.disarm(task);
-        self.reactor.clear(task);
+        self.readiness.clear(task);
         self.cancel_children(task);
         self.release(task);
         self.state_mut(task).body = None;
@@ -119,7 +138,7 @@ impl<'e, V> Core<'e, V> {
     fn release(&mut self, task: TaskId) {
         let resources = std::mem::take(&mut self.state_mut(task).resources);
         for resource in resources {
-            if self.reactor.close(resource) {
+            if self.readiness.close(resource) {
                 self.emit(Event::Close { task, resource });
             }
         }
@@ -150,8 +169,17 @@ impl<'e, V> Core<'e, V> {
 impl<'e, V> Cx<'_, 'e, V> {
     /// Start a task in the innermost open scope of the current task.
     pub fn spawn(&mut self, task: V, moved: &[ResourceId]) -> Result<TaskId, Trap> {
-        let parent = self.task;
+        let parent = self.innermost();
         self.core.spawn(task, Some(parent), moved)
+    }
+
+    /// The running task and the scope it is standing in. A reactor records this when it is created,
+    /// so that effects launched turns later land where the reactor lives.
+    pub fn innermost(&self) -> Parent {
+        Parent {
+            task: self.task,
+            scope: self.core.state(self.task).scopes.len() - 1,
+        }
     }
 
     pub fn scope_enter(&mut self) {
@@ -190,7 +218,7 @@ impl<'e, V> Cx<'_, 'e, V> {
             .state_mut(task)
             .resources
             .retain(|held| *held != resource);
-        if self.core.reactor.close(resource) {
+        if self.core.readiness.close(resource) {
             self.core.emit(Event::Close { task, resource });
         }
     }
@@ -199,7 +227,7 @@ impl<'e, V> Cx<'_, 'e, V> {
     pub(crate) fn take_ownership(&mut self, resource: ResourceId) {
         let task = self.task;
         self.core.state_mut(task).resources.push(resource);
-        if let Some(kind) = self.core.reactor.kind(resource) {
+        if let Some(kind) = self.core.readiness.kind(resource) {
             self.core.emit(Event::Open {
                 task,
                 resource,

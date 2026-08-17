@@ -80,8 +80,25 @@ impl WaitReason {
     }
 }
 
+/// Who a line is about. A trace is read down the subject column, so an event that belongs to no one
+/// in particular has to say so rather than borrow the last task's name.
+pub enum Subject {
+    Task(TaskId),
+    /// The runtime itself: the clock, and anything else with no owner.
+    Runtime,
+}
+
+impl Subject {
+    fn text(&self) -> String {
+        match self {
+            Subject::Task(task) => task.to_string(),
+            Subject::Runtime => "--".into(),
+        }
+    }
+}
+
 impl Event {
-    fn subject(&self) -> Option<TaskId> {
+    fn subject(&self) -> Subject {
         match self {
             Event::Spawn { task, .. }
             | Event::Resume { task }
@@ -92,8 +109,8 @@ impl Event {
             | Event::ScopeExit { task, .. }
             | Event::Open { task, .. }
             | Event::Close { task, .. }
-            | Event::Move { task, .. } => Some(*task),
-            Event::Clock => None,
+            | Event::Move { task, .. } => Subject::Task(*task),
+            Event::Clock => Subject::Runtime,
         }
     }
 
@@ -125,11 +142,12 @@ pub struct Record {
 
 impl Record {
     pub fn line(&self) -> String {
-        let subject = match self.event.subject() {
-            Some(task) => task.to_string(),
-            None => "--".into(),
-        };
-        format!("{}ms {subject} {}", self.at, self.event.text())
+        format!(
+            "{}ms {} {}",
+            self.at,
+            self.event.subject().text(),
+            self.event.text()
+        )
     }
 }
 

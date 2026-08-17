@@ -86,13 +86,17 @@ struct Interest {
 
 /// The resource table and the readiness registry. Slots are never reused, so a stale handle names
 /// a closed resource rather than someone else's socket.
+///
+/// Named for what it answers rather than for the pattern it implements. "Reactor" is the usual word
+/// for this — `DESIGN.md` §9 uses it — but in this language a reactor is a graph of state and
+/// signals, and the two would collide in exactly the file where turns meet I/O.
 #[derive(Default)]
-pub struct Reactor {
+pub struct Readiness {
     entries: Vec<Option<Entry>>,
     interests: Vec<Interest>,
 }
 
-impl Reactor {
+impl Readiness {
     /// Whether nothing is waiting on a descriptor, in which case time is the only thing that can
     /// make a task runnable again.
     pub fn is_idle(&self) -> bool {
@@ -243,7 +247,7 @@ impl Reactor {
     /// Wait for readiness, up to `timeout` milliseconds, and return the tasks that may now proceed.
     ///
     /// An error or hang-up wakes the task too: the point of waking is to let the syscall report
-    /// what happened, and this reactor never interprets a condition it can hand to the language.
+    /// what happened, and the poller never interprets a condition it can hand to the language.
     pub fn wait(&mut self, timeout: Option<Millis>) -> io::Result<Vec<TaskId>> {
         if self.interests.is_empty() {
             return Ok(Vec::new());
