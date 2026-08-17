@@ -1,0 +1,53 @@
+error: a reference cannot be written here
+  --> borrows.norn:10:11
+   |
+10 |     conn: &Connection
+   |           ^^^^^^^^^^^ `&` is only a parameter type
+   = note: a borrow lasts for the call it is passed to, so there is nowhere else it could be kept
+   = note: to hold the value, name it by its own type and take ownership of it
+
+error: a reference cannot be written here
+  --> borrows.norn:14:40
+   |
+14 | fn hands_it_back(conn: &Connection) -> &Connection {
+   |                                        ^^^^^^^^^^^ `&` is only a parameter type
+   = note: a borrow lasts for the call it is passed to, so there is nowhere else it could be kept
+   = note: to hold the value, name it by its own type and take ownership of it
+
+error: `&mut` has no meaning yet
+  --> borrows.norn:19:18
+   |
+19 | fn rewrite(conn: &mut Connection) -> () {
+   |                  ^^^^^^^^^^^^^^^ exclusive borrows arrive with mutation through references
+   = note: v0 borrows only to read: `&T` lets a call look at a value without taking it
+   = note: to change something, take it by value and return it, or hold it in a reactor's `state`
+
+error: `held` would be a borrow
+  --> borrows.norn:29:17
+   |
+29 |             let held = &listener
+   |                 ^^^^ a borrow cannot be given a name
+   = note: `&` lasts for the call it is handed to, and a name outlives that
+   = note: pass it where it is needed — `f(&conn)` — or bind the value itself and take ownership of it
+
+error: this borrows the Connection rather than taking it
+  --> borrows.norn:41:26
+   |
+41 |     match await tcp_read(conn) {
+   |                          ^^^^ write `&` here
+   = note: the call only looks at it, so the value stays yours afterwards
+
+error: this takes the Connection
+  --> borrows.norn:45:21
+   |
+45 |     await tcp_close(&conn)
+   |                     ^^^^^ drop the `&`
+   = note: ownership moves into the call, and the value cannot be used here again
+
+error: `spawn` cannot be handed a borrow
+  --> borrows.norn:63:21
+   |
+63 |         spawn serve(&conn)
+   |                     ^^^^^ this is borrowed, and the task runs after this line
+   = note: the work is built here and started later, so it has to own its Connection
+   = note: drop the `&` to move the value in; `await f(&x)` is the form that may borrow, because the task is finished by the time that line is

@@ -211,8 +211,11 @@ impl Readiness {
         }
     }
 
-    /// Close a resource. `false` means it was already closed, which is not an error yet — M4 makes
-    /// double-close a compile error rather than a runtime shrug.
+    /// Close a resource. `false` means it was already closed, which the checker now rules out for
+    /// anything a program says twice: `tcp_close` consumes its connection, so reaching that name
+    /// again is a use after a move. `false` is still returned rather than trapped, because
+    /// `scope_exit` and `release` sweep whatever a scope has left and neither knows what the other
+    /// already took.
     pub fn close(&mut self, id: ResourceId) -> bool {
         let Some(slot) = self.entries.get_mut(id.index()) else {
             return false;

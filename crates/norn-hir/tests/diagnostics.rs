@@ -1,8 +1,9 @@
 //! Snapshots of what the checker says when a program is wrong.
 //!
-//! Every file in `examples/type-errors/` and `examples/reactor-errors/` must parse cleanly and then
-//! fail to check, so that each snapshot is a type diagnostic rather than a syntax one. The point is
-//! not that these programs are rejected — it is that the wording stays deliberate.
+//! Every file in `examples/type-errors/`, `examples/reactor-errors/`, and
+//! `examples/ownership-errors/` must parse cleanly and then fail to check, so that each snapshot is
+//! a type diagnostic rather than a syntax one. The point is not that these programs are rejected —
+//! it is that the wording stays deliberate.
 
 use std::path::{Path, PathBuf};
 
@@ -19,6 +20,14 @@ fn type_errors_are_reported() {
 #[test]
 fn reactor_errors_are_reported() {
     rejected("reactor-errors");
+}
+
+/// The ownership rules. `&` is one character, and getting it wrong in either direction is one
+/// character from correct, so these snapshots are mostly about whether the wording tells you which
+/// way the value was going.
+#[test]
+fn ownership_errors_are_reported() {
+    rejected("ownership-errors");
 }
 
 fn rejected(directory: &str) {

@@ -2,13 +2,16 @@
 //
 // `main` binds a listener and hands it to a child, which parks waiting for a connection that never
 // comes. The handle moves with the `spawn`, so the child is what owns it — and cancelling the child
-// closes the socket without anyone writing cleanup code. That is the whole of M2's resource story
-// until M4 makes ownership static.
+// closes the socket without anyone writing cleanup code.
+//
+// The move is now a static fact as well as a runtime one: `main` may not name `listener` after the
+// `spawn`, and `wait_for_client` borrows it with `&` because accepting looks at a listener rather
+// than taking it.
 
 task fn wait_for_client(listener: Listener) -> ()
     uses { net.io }
 {
-    match await tcp_accept(listener) {
+    match await tcp_accept(&listener) {
         #Ok(_) => print("a client arrived")
         #Err(_) => print("the listener failed")
     }

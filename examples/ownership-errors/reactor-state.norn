@@ -1,0 +1,32 @@
+// A reactor may not own an operating-system resource.
+//
+// Two reasons. A reactor's slots are the durable state projection `DESIGN.md` §14 asks for — a
+// value that could be written down at a quiescent point and restored later — and a descriptor is
+// not that. And an input discards messages by declaration: `overflow: drop_oldest` here would leak
+// a socket every time the mailbox filled, silently, with nobody left holding it.
+//
+// The working shape is `examples/reactors/server.norn`, where tasks own the sockets and tell the
+// reactor a count.
+
+record Session {
+    conn: Connection
+    since: I64
+}
+
+reactor Pool(seed: Connection) {
+    input arrived: Connection [capacity: 8, overflow: drop_oldest]
+    input departed: () [capacity: 8, overflow: reject]
+
+    state current: Session = #Session(conn: seed, since: 0)
+    state seen: I64 = 0
+
+    on arrived(conn) {
+        seen = seen + 1
+    }
+
+    on departed() {
+        seen = seen - 1
+    }
+
+    export signal depth = seen
+}

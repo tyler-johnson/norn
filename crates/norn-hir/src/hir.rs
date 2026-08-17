@@ -61,7 +61,8 @@ pub mod io_error {
     ];
 }
 
-/// An operating-system resource. Non-copyable from M4; owned dynamically until then.
+/// An operating-system resource: affine, so using one as a value moves it and using it twice is an
+/// error rather than a runtime shrug.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Resource {
     Listener,
@@ -127,7 +128,19 @@ pub enum Ty {
     /// it did not control the starting of.
     Task(Box<Ty>),
     Resource(Resource),
+    /// `&T`. A value the callee may look at but does not own, so passing one does not move it.
+    ///
+    /// Producible only in parameter position: `resolve_ty` refuses it everywhere else, which is
+    /// what makes "a reference may not escape" a fact about where it can be written down rather
+    /// than an analysis. The one place it could still escape is a task, which outlives the call
+    /// that built it — so `spawn` and `after` operands may not borrow, and `await f(&x)` is safe
+    /// because the awaiting task is parked and ownership is unique.
+    Ref(Box<Ty>),
     /// A handle to a running reactor. Spelled by its own name, exactly like a `Listener`.
+    ///
+    /// Not affine: a handle names something a scope owns, and neither `send` nor `latest` consumes
+    /// it — `examples/reactors/server.norn` hands the same `gate` to a spawn and to a recursive
+    /// call in consecutive lines.
     Reactor(ReactorId),
     /// One input of a running reactor, as a value `send` can be handed. The argument is the
     /// message type.
@@ -166,6 +179,19 @@ impl Ty {
     pub fn is_error(&self) -> bool {
         matches!(self, Ty::Error)
     }
+
+    /// What this type is when the borrow is stripped. `&T` and `T` are the same values, so every
+    /// question except "does using it move it" is asked of the pointee.
+    pub fn owned(&self) -> &Ty {
+        match self {
+            Ty::Ref(inner) => inner,
+            other => other,
+        }
+    }
+
+    pub fn is_ref(&self) -> bool {
+        matches!(self, Ty::Ref(_))
+    }
 }
 
 pub struct Program {
@@ -193,12 +219,64 @@ impl Program {
             }
             Ty::Task(inner) => format!("Task<{}>", self.ty_name(inner)),
             Ty::Resource(resource) => resource.name().into(),
+            Ty::Ref(inner) => format!("&{}", self.ty_name(inner)),
             Ty::Reactor(id) => self.reactors[id.index()].name.clone(),
             Ty::Input(inner) => format!("an input taking {}", self.ty_name(inner)),
             Ty::Signal(inner) => format!("a signal of {}", self.ty_name(inner)),
             Ty::Event(inner) => format!("an event of {}", self.ty_name(inner)),
             Ty::Never => "!".into(),
             Ty::Error => "?".into(),
+        }
+    }
+
+    /// Whether a value of this type is moved by being used, rather than copied.
+    ///
+    /// The affine set in v0 is deliberately small: operating-system resources, because a descriptor
+    /// has exactly one closer; a built-but-unstarted `Task<T>`, because starting one twice would run
+    /// its effects twice and because it may be carrying a resource; and any aggregate holding one of
+    /// those, because a record is no less an owner than a variable. Everything else is copied, which
+    /// is what an interpreter that clones values already does and what keeps `print(p); print(p)`
+    /// legal. Ordinary values become move-checked when M5 makes the copy cost something.
+    ///
+    /// A borrow is never affine: not owning it is the whole point.
+    pub fn affine(&self, ty: &Ty) -> bool {
+        self.affine_seen(ty, &mut Vec::new())
+    }
+
+    /// `visiting` guards against a record that reaches itself — `record Node { next: Option<Node> }`
+    /// is writable, and asking whether it is affine would otherwise not terminate.
+    fn affine_seen(&self, ty: &Ty, visiting: &mut Vec<Ty>) -> bool {
+        if visiting.contains(ty) {
+            return false;
+        }
+        match ty {
+            Ty::Resource(_) | Ty::Task(_) => true,
+            Ty::Ref(_) => false,
+            Ty::Option(inner) => self.affine_seen(inner, visiting),
+            Ty::Result(ok, err) => {
+                self.affine_seen(ok, visiting) || self.affine_seen(err, visiting)
+            }
+            Ty::Record(id) => {
+                visiting.push(ty.clone());
+                let found = self.records[id.index()]
+                    .fields
+                    .iter()
+                    .any(|field| self.affine_seen(&field.ty, visiting));
+                visiting.pop();
+                found
+            }
+            Ty::Enum(id) => {
+                visiting.push(ty.clone());
+                let found = self.enums[id.index()].variants.iter().any(|variant| {
+                    variant
+                        .fields
+                        .iter()
+                        .any(|field| self.affine_seen(&field.ty, visiting))
+                });
+                visiting.pop();
+                found
+            }
+            _ => false,
         }
     }
 }
@@ -665,21 +743,29 @@ impl Builtin {
     /// Parameter types and result type. `print`, `send`, and `latest` are the builtins whose types
     /// depend on what they are handed, spelled here as `Ty::Error` — which every type fits — and
     /// checked properly at the call site rather than pretended to have a type they do not.
+    ///
+    /// The socket builtins are where borrowing earns its keep: reading and writing look at a
+    /// descriptor, `tcp_close` takes it away, and the difference is spelled `&`. That is what makes
+    /// closing a connection and then reading from it the same error as any other use after a move.
     pub fn signature(self) -> (Vec<Ty>, Ty) {
-        let listener = Ty::Resource(Resource::Listener);
-        let connection = Ty::Resource(Resource::Connection);
+        let listener = || Ty::Resource(Resource::Listener);
+        let connection = || Ty::Resource(Resource::Connection);
+        let borrowed = |ty: Ty| Ty::Ref(Box::new(ty));
         let io_error = || Ty::Enum(EnumId::IO_ERROR);
         let task = |ty: Ty| Ty::Task(Box::new(ty));
         let fallible = |ok: Ty| Ty::Result(Box::new(ok), Box::new(io_error()));
         match self {
             Builtin::Print => (vec![Ty::Error], Ty::Unit),
-            Builtin::ListenerPort => (vec![listener], Ty::I64),
+            Builtin::ListenerPort => (vec![borrowed(listener())], Ty::I64),
             Builtin::Sleep => (vec![Ty::I64], task(Ty::Unit)),
-            Builtin::TcpListen => (vec![Ty::I64], task(fallible(listener))),
-            Builtin::TcpAccept => (vec![listener], task(fallible(connection))),
-            Builtin::TcpRead => (vec![connection], task(fallible(Ty::Str))),
-            Builtin::TcpWrite => (vec![connection, Ty::Str], task(fallible(Ty::Unit))),
-            Builtin::TcpClose => (vec![connection], task(Ty::Unit)),
+            Builtin::TcpListen => (vec![Ty::I64], task(fallible(listener()))),
+            Builtin::TcpAccept => (vec![borrowed(listener())], task(fallible(connection()))),
+            Builtin::TcpRead => (vec![borrowed(connection())], task(fallible(Ty::Str))),
+            Builtin::TcpWrite => (
+                vec![borrowed(connection()), Ty::Str],
+                task(fallible(Ty::Unit)),
+            ),
+            Builtin::TcpClose => (vec![connection()], task(Ty::Unit)),
             Builtin::Send => (vec![Ty::Error, Ty::Error], task(Ty::Unit)),
             Builtin::Latest => (vec![Ty::Error], Ty::Error),
         }

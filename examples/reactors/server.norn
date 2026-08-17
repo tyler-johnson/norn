@@ -39,8 +39,8 @@ task fn echo(conn: Connection, gate: Gate) -> ()
     uses { net.io }
 {
     await send(gate.opened, ())
-    match await tcp_read(conn) {
-        #Ok(text) => match await tcp_write(conn, text) {
+    match await tcp_read(&conn) {
+        #Ok(text) => match await tcp_write(&conn, text) {
             #Ok(_) => ()
             #Err(_) => ()
         }
@@ -53,7 +53,7 @@ task fn echo(conn: Connection, gate: Gate) -> ()
 task fn accept_loop(listener: Listener, gate: Gate) -> ()
     uses { net.io }
 {
-    match await tcp_accept(listener) {
+    match await tcp_accept(&listener) {
         #Ok(conn) => scope {
             spawn echo(conn, gate)
             await accept_loop(listener, gate)
@@ -66,7 +66,7 @@ task fn main() -> Result<(), IoError>
     uses { clock, net.listen, net.io }
 {
     let listener = await tcp_listen(0)?
-    print(listener_port(listener))
+    print(listener_port(&listener))
     scope {
         let gate = spawn reactor Gate(limit: 4)
         spawn accept_loop(listener, gate)

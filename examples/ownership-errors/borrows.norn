@@ -1,0 +1,65 @@
+// Where a borrow may and may not be written. Each function here is wrong in exactly one way.
+//
+// A reference is a parameter type and nothing else. That is not a rule the checker applies so much
+// as a shape of the grammar: there is no field, no return, no `let`, and no reactor member that can
+// hold one, so a borrow has nowhere to go when the call it was passed to ends. The one value that
+// outlives its call is a task, which is why `spawn` is the last case below.
+
+// A record cannot hold a borrow, because the record would outlive it.
+record Held {
+    conn: &Connection
+}
+
+// Neither can a return type: the caller would be handed something the callee no longer has.
+fn hands_it_back(conn: &Connection) -> &Connection {
+    conn
+}
+
+// `&mut` has no meaning yet. v0 borrows only to read.
+fn rewrite(conn: &mut Connection) -> () {
+    ()
+}
+
+// A name outlives the call a borrow belongs to, so a borrow cannot be given one.
+task fn names_a_borrow() -> ()
+    uses { net.listen, net.io }
+{
+    match await tcp_listen(0) {
+        #Ok(listener) => {
+            let held = &listener
+            print(listener_port(held))
+        }
+        #Err(_) => ()
+    }
+}
+
+// `tcp_read` looks at a connection and `tcp_close` takes it, so both of these are one character
+// from correct — in opposite directions.
+task fn wrong_way_round(conn: Connection) -> ()
+    uses { net.io }
+{
+    match await tcp_read(conn) {
+        #Ok(_) => ()
+        #Err(_) => ()
+    }
+    await tcp_close(&conn)
+}
+
+task fn serve(conn: &Connection) -> ()
+    uses { net.io }
+{
+    match await tcp_read(conn) {
+        #Ok(_) => ()
+        #Err(_) => ()
+    }
+}
+
+// A spawned task starts after this line and runs for as long as the scope lasts, so it has to own
+// what it was handed. `await serve(&conn)` would have been fine: the borrow ends when the call does.
+task fn spawns_a_borrow(conn: Connection) -> ()
+    uses { net.io }
+{
+    scope {
+        spawn serve(&conn)
+    }
+}

@@ -461,7 +461,7 @@ impl Checker {
             let params: Vec<(String, Ty)> = decl
                 .params
                 .iter()
-                .map(|p| (p.name.name.clone(), self.resolve_ty(&p.ty)))
+                .map(|p| (p.name.name.clone(), self.resolve_param_ty(&p.ty)))
                 .collect();
             let ret = decl.ret.as_ref().map_or(Ty::Unit, |ty| self.resolve_ty(ty));
             let uses = self.capabilities(&decl.uses);
@@ -541,7 +541,7 @@ impl Checker {
             self.uses = self.program.fns[id.index()].uses.clone();
             self.scope_depth = 0;
             for ((name, ty), param) in params.iter().zip(&decl.params) {
-                self.declare_local(name.clone(), ty.clone(), false, param.name.span);
+                self.declare_param(name.clone(), ty.clone(), param.name.span);
             }
             let body = self.check_block(&decl.body, Some(&ret), decl.body.span);
             let locals = std::mem::take(&mut self.locals);
@@ -639,6 +639,7 @@ impl Checker {
                     continue;
                 }
                 let ty = self.resolve_ty(&param.ty);
+                let ty = self.reactor_ty(ty, "parameter", &param.name.name, param.span);
                 let slot = slots.len();
                 slots.push(NodeId(nodes.len() as u32));
                 nodes.push(Node {
@@ -659,6 +660,7 @@ impl Checker {
                             continue;
                         }
                         let ty = self.resolve_ty(ty);
+                        let ty = self.reactor_ty(ty, "input", &name.name, member.span);
                         let capacity = self.capacity(&queue.capacity);
                         let overflow = self.overflow(&queue.overflow);
                         let handler = self.declare_lifted(
@@ -680,6 +682,7 @@ impl Checker {
                             continue;
                         }
                         let ty = self.resolve_ty(ty);
+                        let ty = self.reactor_ty(ty, "state cell", &name.name, member.span);
                         let init = self.declare_lifted(
                             format!("{}.{}.init", decl.name.name, name.name),
                             member.span,
@@ -951,9 +954,11 @@ impl Checker {
             else {
                 continue;
             };
-            let (body, annotation) = match &member.kind {
-                ast::MemberKind::State { ty, init, .. } => (init, Some(ty)),
-                ast::MemberKind::Signal { ty, body, .. } => (body, ty.as_ref()),
+            let (body, annotation, signal) = match &member.kind {
+                ast::MemberKind::State { ty, init, .. } => (init, Some(ty), None),
+                ast::MemberKind::Signal { name, ty, body, .. } => {
+                    (body, ty.as_ref(), Some(name.name.clone()))
+                }
                 _ => continue,
             };
 
@@ -967,8 +972,16 @@ impl Checker {
                 Ty::Never => Ty::Error,
                 ty => ty.clone(),
             });
+            // A signal's type is inferred rather than written, so the affinity rule has to be
+            // applied to what came out. Nothing in v0 can reach an affine value from inside a turn
+            // — the purity rules see to that — so this is a backstop rather than a diagnostic
+            // anyone is expected to meet, and it stays right as the turn vocabulary grows. `state`
+            // is not re-checked here; its written type was answered in `declare_reactors`.
+            let ty = match &signal {
+                Some(signal) => self.reactor_ty(ty, "signal", signal, node_span),
+                None => ty,
+            };
             self.finish_member(function, ty.clone(), checked);
-            let _ = node_span;
             self.program.reactors[id.index()].nodes[node].ty = ty;
         }
 
@@ -1247,6 +1260,32 @@ impl Checker {
         }
     }
 
+    /// Nothing a reactor holds may be affine.
+    ///
+    /// Two reasons, and the second settles it on its own. A reactor's slots are the durable state
+    /// projection `DESIGN.md` §14 asks for, and a descriptor is not part of any projection — it
+    /// cannot be written down, restored, or replayed. And an input declared `overflow: drop_oldest`
+    /// discards messages by design, so a mailbox carrying handles would leak one every time it
+    /// filled, silently, with nobody to blame. Keeping ownership out of the graph is what
+    /// `examples/reactors/server.norn` already does on purpose: the reactor counts sockets and
+    /// never holds one.
+    fn reactor_ty(&mut self, ty: Ty, what: &str, name: &str, span: Span) -> Ty {
+        if !self.program.affine(&ty) {
+            return ty;
+        }
+        let spelled = self.program.ty_name(&ty);
+        self.push(
+            Diagnostic::new(
+                span,
+                format!("a reactor's {what} cannot hold a `{spelled}`"),
+            )
+            .label(format!("`{name}` would own something the graph cannot close"))
+            .note("a reactor's state is a value that could be written down and restored, and an open descriptor is not")
+            .note("count what a task owns and send the reactor the count: see `examples/reactors/server.norn`"),
+        );
+        Ty::Error
+    }
+
     fn member_namespace(&self, id: ReactorId) -> HashMap<String, Sort> {
         let reactor = &self.program.reactors[id.index()];
         let mut members = HashMap::new();
@@ -1410,12 +1449,58 @@ impl Checker {
 
     // ---------------------------------------------------------------- types
 
+    /// A parameter is the one place a reference may be written, so it is the one caller that does
+    /// not go through `resolve_ty`.
+    fn resolve_param_ty(&mut self, ty: &ast::Type) -> Ty {
+        match &ty.kind {
+            ast::TypeKind::Ref { mutable: true, .. } => {
+                self.exclusive_borrow(ty.span);
+                Ty::Error
+            }
+            ast::TypeKind::Ref { inner, .. } => {
+                // `&&T` is `&T`: re-borrowing a borrowed parameter to pass it on is the ordinary
+                // thing to write, and it should not need a different spelling from the first borrow.
+                let inner = self.resolve_param_ty(inner);
+                match inner {
+                    Ty::Ref(_) | Ty::Error => inner,
+                    owned => Ty::Ref(Box::new(owned)),
+                }
+            }
+            _ => self.resolve_ty(ty),
+        }
+    }
+
+    /// The diagnostic `&mut` gets instead of a meaning. One exclusive-borrow rule is a borrow
+    /// checker, and v0 has nothing that needs one.
+    fn exclusive_borrow(&mut self, span: Span) {
+        self.push(
+            Diagnostic::new(span, "`&mut` has no meaning yet")
+                .label("exclusive borrows arrive with mutation through references")
+                .note("v0 borrows only to read: `&T` lets a call look at a value without taking it")
+                .note("to change something, take it by value and return it, or hold it in a reactor's `state`"),
+        );
+    }
+
     fn resolve_ty(&mut self, ty: &ast::Type) -> Ty {
         match &ty.kind {
             ast::TypeKind::Unit => Ty::Unit,
-            // A borrow is transparent in v0. The distinction becomes real in M4, when ownership
-            // arrives; until then `&T` and `T` denote the same values.
-            ast::TypeKind::Ref { inner, .. } => self.resolve_ty(inner),
+            // A reference is writable in exactly one position, which is what makes "a borrow may
+            // not escape" a fact about the grammar rather than an analysis: there is nowhere to
+            // store one. `Ty::Error` rather than the pointee, so that a return type nobody may
+            // write does not then disagree with the body that returns one.
+            ast::TypeKind::Ref { mutable, .. } => {
+                if *mutable {
+                    self.exclusive_borrow(ty.span);
+                } else {
+                    self.push(
+                        Diagnostic::new(ty.span, "a reference cannot be written here")
+                            .label("`&` is only a parameter type")
+                            .note("a borrow lasts for the call it is passed to, so there is nowhere else it could be kept")
+                            .note("to hold the value, name it by its own type and take ownership of it"),
+                    );
+                }
+                Ty::Error
+            }
             ast::TypeKind::Path { path, args } => {
                 if path.segments.len() != 1 {
                     self.error(path.span, format!("unknown type `{}`", path.text()));
@@ -1519,8 +1604,28 @@ impl Checker {
 
     // ---------------------------------------------------------------- locals
 
+    /// A `let`, or a name a pattern binds. A reference may not be given a name: `resolve_ty` keeps
+    /// one out of every written position, and this keeps one out of the inferred position that is
+    /// left, so `let held = &conn` is answered here rather than becoming the one way to smuggle a
+    /// borrow past the end of the call it belongs to.
     fn declare_local(&mut self, name: String, ty: Ty, mutable: bool, span: Span) -> LocalId {
+        let ty = if ty.is_ref() {
+            self.push(
+                Diagnostic::new(span, format!("`{name}` would be a borrow"))
+                    .label("a borrow cannot be given a name")
+                    .note("`&` lasts for the call it is handed to, and a name outlives that")
+                    .note("pass it where it is needed — `f(&conn)` — or bind the value itself and take ownership of it"),
+            );
+            Ty::Error
+        } else {
+            ty
+        };
         self.declare_role(name, ty, mutable, LocalRole::Ordinary, span)
+    }
+
+    /// A parameter, which is the one position where a reference may be written down.
+    fn declare_param(&mut self, name: String, ty: Ty, span: Span) -> LocalId {
+        self.declare_role(name, ty, false, LocalRole::Ordinary, span)
     }
 
     fn declare_role(
@@ -1569,6 +1674,12 @@ impl Checker {
                 && produced.fits(expected)
             {
                 self.discarded_task(span);
+                return self.error_expr(span);
+            }
+            // Owned where a borrow was wanted, or the reverse. The types alone would say what
+            // differs; what a reader needs is which of the two the call does to their value.
+            if found.ty.owned().fits(expected.owned()) && found.ty.is_ref() != expected.is_ref() {
+                self.borrow_mismatch(expected, span);
                 return self.error_expr(span);
             }
             let message = format!(
@@ -1673,6 +1784,49 @@ impl Checker {
     }
 
     // ---------------------------------------------------------------- tasks
+
+    /// A task built here and started later may not be holding a borrow.
+    ///
+    /// This is the whole of the escape analysis that is not already a fact about where a reference
+    /// can be written. A `Task<T>` is the one value in v0 that outlives the expression that made it,
+    /// so it is the one value that could carry a borrow past the call it belongs to. `await f(&x)`
+    /// is exempt for a reason worth stating: the awaiting task is parked for the duration, so it
+    /// cannot invalidate the borrow itself, and ownership is unique, so no one else can either.
+    fn no_borrowed_arguments(&mut self, task: &Expr, what: &str, when: &str) {
+        for arg in effect_arguments(task) {
+            if !arg.ty.is_ref() {
+                continue;
+            }
+            let name = self.program.ty_name(arg.ty.owned());
+            self.push(
+                Diagnostic::new(arg.span, format!("`{what}` cannot be handed a borrow"))
+                    .label(format!("this is borrowed, and the task {when}"))
+                    .note(format!(
+                        "the work is built here and started later, so it has to own its {name}"
+                    ))
+                    .note("drop the `&` to move the value in; `await f(&x)` is the form that may borrow, because the task is finished by the time that line is"),
+            );
+        }
+    }
+
+    /// `&` written where ownership was wanted, or left out where a borrow was. Both are one
+    /// character from correct, so the diagnostic's job is to say which way the value is going.
+    fn borrow_mismatch(&mut self, expected: &Ty, span: Span) {
+        let name = self.program.ty_name(expected.owned());
+        let diagnostic = if expected.is_ref() {
+            Diagnostic::new(
+                span,
+                format!("this borrows the {name} rather than taking it"),
+            )
+            .label("write `&` here")
+            .note("the call only looks at it, so the value stays yours afterwards")
+        } else {
+            Diagnostic::new(span, format!("this takes the {name}"))
+                .label("drop the `&`")
+                .note("ownership moves into the call, and the value cannot be used here again")
+        };
+        self.push(diagnostic);
+    }
 
     fn error_expr(&self, span: Span) -> Expr {
         Expr {
@@ -1833,6 +1987,7 @@ impl Checker {
         if task.ty.is_error() {
             return self.error_expr(span);
         }
+        self.no_borrowed_arguments(&task, "spawn", "runs after this line");
         match &task.ty {
             Ty::Task(produced) if **produced == Ty::Unit => {}
             Ty::Task(produced) => {
@@ -2044,9 +2199,23 @@ impl Checker {
     }
 
     fn check_unary(&mut self, op: ast::UnOp, inner: &ast::Expr, span: Span) -> Expr {
-        // `&` and `&mut` are transparent until M4 introduces ownership.
-        if matches!(op, ast::UnOp::Ref | ast::UnOp::RefMut) {
+        if matches!(op, ast::UnOp::RefMut) {
+            self.exclusive_borrow(span);
             return self.check_expr(inner, None);
+        }
+        // A borrow erases: the expression is the operand, wearing a type that says the call it is
+        // handed to will not take it away. Nothing downstream of the checker learns that `&` was
+        // written, which is why lowering and the runtime are untouched by ownership.
+        if matches!(op, ast::UnOp::Ref) {
+            let mut inner = self.check_expr(inner, None);
+            inner.ty = match inner.ty {
+                Ty::Ref(_) | Ty::Error | Ty::Never => inner.ty,
+                owned => Ty::Ref(Box::new(owned)),
+            };
+            // The `&` is part of what a diagnostic about this expression should underline, even
+            // though it is not part of what the expression evaluates to.
+            inner.span = span;
+            return inner;
         }
         let inner = self.check_expr(inner, None);
         if inner.ty.is_error() {
@@ -2940,6 +3109,10 @@ impl Checker {
         if task.ty.is_error() {
             return StmtKind::Expr(self.error_expr(span));
         }
+        // Unreachable in v0 — a turn has nothing borrowable in scope, because nothing a reactor
+        // holds may be affine and a reference cannot be a member. It is written anyway, because the
+        // rule belongs to `after` and not to what `after` can currently reach.
+        self.no_borrowed_arguments(&task, "after", "starts once the snapshot is published");
         let Ty::Task(produced) = task.ty.clone() else {
             let message = format!(
                 "`after` describes work to start later, and this is {}",
