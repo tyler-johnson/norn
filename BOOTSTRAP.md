@@ -66,7 +66,7 @@ norn-nir           lowered IR: no await, no reactors.
 norn-nir::interp            norn-codegen
     ↘                              ↙
               norn-rt
-     scheduler · epoll · timers · mailboxes
+     scheduler · poll(2) · timers · mailboxes
      turn loop · flows · affine resource table
 ```
 
@@ -204,7 +204,7 @@ in `examples/type-errors/` has a snapshot of what the checker says about it.
 
 ### M2 — Tasks and runtime
 
-`norn-rt` with a single-threaded epoll loop, timers, and TCP. `task fn`, `await`, `scope`,
+`norn-rt` with a single-threaded `poll(2)` loop, timers, and TCP. `task fn`, `await`, `scope`,
 cancellation — lowered to explicit state machines **in NIR**, executed as heap continuations by the
 interpreter. Work-stealing across threads is deferred; one thread is sufficient to be honest about
 suspension and cancellation.

@@ -16,7 +16,7 @@ usage:
     norn parse [options] <file>...    check syntax
     norn check <file>...              resolve names and check types
     norn nir <file>                   print the lowered IR
-    norn run <file>                   check, lower, and execute `main`
+    norn run [options] <file>         check, lower, and execute `main`
     norn fmt [--check] <file>...      rewrite files in canonical form
     norn --version
     norn --help
@@ -24,6 +24,11 @@ usage:
 parse options:
     --dump      print the abstract syntax tree as s-expressions
     --print     print the parsed program in canonical form
+
+run options:
+    --trace           write the runtime event trace to stderr
+    --virtual-clock   jump to the next deadline instead of sleeping, so a run
+                      that only waits on timers is instant and deterministic
 ";
 
 fn main() -> ExitCode {
@@ -137,7 +142,17 @@ fn cmd_nir(args: &[String]) -> Result<ExitCode, String> {
 }
 
 fn cmd_run(args: &[String]) -> Result<ExitCode, String> {
-    let paths = plain_paths(args)?;
+    let mut trace = false;
+    let mut virtual_clock = false;
+    let mut paths = Vec::new();
+    for arg in args {
+        match arg.as_str() {
+            "--trace" => trace = true,
+            "--virtual-clock" => virtual_clock = true,
+            flag if flag.starts_with('-') => return Err(format!("unknown option `{flag}`")),
+            path => paths.push(PathBuf::from(path)),
+        }
+    }
     let [path] = &paths[..] else {
         return Err("expected exactly one file".into());
     };
@@ -155,8 +170,21 @@ fn cmd_run(args: &[String]) -> Result<ExitCode, String> {
     }
 
     let program = norn_nir::lower(&hir);
+    // A `task fn main` runs as the root task of a runtime; a plain one is a task that never parks.
+    let config = norn_nir::Config {
+        clock: if virtual_clock {
+            norn_nir::Clock::simulated()
+        } else {
+            norn_nir::Clock::real()
+        },
+        trace,
+    };
     let mut out = norn_nir::Stdout;
-    match norn_nir::run(&program, main.index(), &mut out) {
+    let outcome = norn_nir::execute(&program, main.index(), &mut out, config);
+    if trace {
+        eprint!("{}", outcome.trace);
+    }
+    match outcome.value {
         Ok(value) => {
             // A `main` returning a `Result` reports rather than prints: `#Err` is a failed run,
             // and the `#Ok` wrapper is ceremony the reader does not need to see.

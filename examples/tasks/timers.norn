@@ -1,0 +1,24 @@
+// Two spawned tasks interleaving at timers, and a parent that outlives both.
+//
+// Under the virtual clock this is instant and its trace is a golden file: nothing is runnable
+// between the deadlines, so the runtime jumps straight to each one.
+
+task fn tick(name: String, every: I64) -> ()
+    uses { clock }
+{
+    await sleep(every)
+    print(name + " once")
+    await sleep(every)
+    print(name + " twice")
+}
+
+task fn main() -> ()
+    uses { clock }
+{
+    scope {
+        spawn tick("fast", 10)
+        spawn tick("slow", 25)
+        await sleep(100)
+    }
+    print("both children finished before the scope closed")
+}

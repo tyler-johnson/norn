@@ -8,6 +8,7 @@ publish.workspace = true
 
 [dependencies]
 norn-hir.workspace = true
+norn-rt.workspace = true
 norn-syntax.workspace = true
 
 [dev-dependencies]

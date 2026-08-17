@@ -26,15 +26,85 @@ id!(FnId, "Index into `Program::fns`.");
 id!(LocalId, "Index into the enclosing function's `locals`.");
 
 impl EnumId {
-    /// `Option` and `Result` occupy the first two slots of the enum table. They are ordinary
-    /// enums at runtime; only the type checker knows their arguments vary.
+    /// `Option`, `Result`, and `IoError` occupy the first three slots of the enum table. They are
+    /// ordinary enums at runtime; only the type checker knows that the first two take arguments.
     pub const OPTION: EnumId = EnumId(0);
     pub const RESULT: EnumId = EnumId(1);
+    pub const IO_ERROR: EnumId = EnumId(2);
 
     pub const NONE: usize = 0;
     pub const SOME: usize = 1;
     pub const OK: usize = 0;
     pub const ERR: usize = 1;
+}
+
+/// The built-in `IoError`. The tag order lives here because the checker seeds the enum from it and
+/// the runtime constructs values against it; two lists would drift.
+pub mod io_error {
+    pub const NOT_FOUND: usize = 0;
+    pub const DENIED: usize = 1;
+    pub const IN_USE: usize = 2;
+    pub const REFUSED: usize = 3;
+    pub const CLOSED: usize = 4;
+    pub const OTHER: usize = 5;
+
+    /// Each variant and how many fields it carries.
+    pub const VARIANTS: &[(&str, usize)] = &[
+        ("NotFound", 0),
+        ("Denied", 0),
+        ("InUse", 0),
+        ("Refused", 0),
+        ("Closed", 0),
+        ("Other", 1),
+    ];
+}
+
+/// An operating-system resource. Non-copyable from M4; owned dynamically until then.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Resource {
+    Listener,
+    Connection,
+}
+
+impl Resource {
+    pub fn name(self) -> &'static str {
+        match self {
+            Resource::Listener => "Listener",
+            Resource::Connection => "Connection",
+        }
+    }
+}
+
+/// Authority a task needs in order to touch the world. The v0 vocabulary is fixed and closed: an
+/// unknown name is an error rather than an extension point, because `uses` is checked and not
+/// inferred, and a typo that quietly widened authority would defeat the point of declaring it.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub enum Capability {
+    Clock,
+    NetListen,
+    NetIo,
+}
+
+impl Capability {
+    pub const ALL: &'static [Capability] =
+        &[Capability::Clock, Capability::NetListen, Capability::NetIo];
+
+    pub fn from_name(name: &str) -> Option<Capability> {
+        match name {
+            "clock" => Some(Capability::Clock),
+            "net.listen" => Some(Capability::NetListen),
+            "net.io" => Some(Capability::NetIo),
+            _ => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Capability::Clock => "clock",
+            Capability::NetListen => "net.listen",
+            Capability::NetIo => "net.io",
+        }
+    }
 }
 
 /// A monomorphic type. `Option` and `Result` are the only generic constructors in v0, and neither
@@ -50,6 +120,11 @@ pub enum Ty {
     Enum(EnumId),
     Option(Box<Ty>),
     Result(Box<Ty>, Box<Ty>),
+    /// A computation that has not run. Calling a `task fn` builds one; `await` and `spawn` are what
+    /// start it. Laziness is what lets a policy cancel obsolete work in M3 — it cannot cancel work
+    /// it did not control the starting of.
+    Task(Box<Ty>),
+    Resource(Resource),
     /// The type of an expression that never produces a value: `return`, or a block that always
     /// leaves early. Compatible with every expected type.
     Never,
@@ -94,6 +169,8 @@ impl Program {
             Ty::Result(ok, err) => {
                 format!("Result<{}, {}>", self.ty_name(ok), self.ty_name(err))
             }
+            Ty::Task(inner) => format!("Task<{}>", self.ty_name(inner)),
+            Ty::Resource(resource) => resource.name().into(),
             Ty::Never => "!".into(),
             Ty::Error => "?".into(),
         }
@@ -143,6 +220,10 @@ pub struct VariantDef {
 
 pub struct FnDef {
     pub name: String,
+    /// Whether calling this function builds a `Task<ret>` instead of running it.
+    pub is_task: bool,
+    /// The declared capability set, sorted and deduplicated. Checked, not inferred.
+    pub uses: Vec<Capability>,
     /// Parameters occupy the first `params` slots of `locals`.
     pub params: usize,
     pub locals: Vec<LocalDef>,
@@ -225,6 +306,20 @@ pub enum ExprKind {
         stmts: Vec<Stmt>,
         tail: Option<Box<Expr>>,
     },
+    /// Run a task and take its value. Legal only inside a `task fn`, and a suspension point: NIR
+    /// turns it into a terminator, which is what makes block ids state numbers.
+    Await {
+        expr: Box<Expr>,
+    },
+    /// `scope { … }`. Valued as its body; leaving it cancels and joins everything spawned inside.
+    Scope {
+        body: Box<Expr>,
+    },
+    /// `spawn e`, where `e: Task<()>`. Requiring `()` forces a spawned task to say what happens to
+    /// its own failures rather than having them silently dropped.
+    Spawn {
+        expr: Box<Expr>,
+    },
     /// Postfix `?`. `ok_variant` distinguishes unwrapping a `Result` from an `Option`.
     Try {
         expr: Box<Expr>,
@@ -264,17 +359,32 @@ pub enum BinOp {
     Ge,
 }
 
-/// Functions the compiler knows about directly. `print` is deliberately the only one: it is what
-/// makes `norn run` observable, and everything else can wait for a standard library.
+/// Functions the compiler knows about directly. There is no standard library yet, so the set is
+/// exactly what a milestone needs to be observable: `print` and `digits` to say something, and the
+/// timer and socket primitives M2 is about.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Builtin {
     Print,
+    ListenerPort,
+    Sleep,
+    TcpListen,
+    TcpAccept,
+    TcpRead,
+    TcpWrite,
+    TcpClose,
 }
 
 impl Builtin {
     pub fn from_name(name: &str) -> Option<Builtin> {
         match name {
             "print" => Some(Builtin::Print),
+            "listener_port" => Some(Builtin::ListenerPort),
+            "sleep" => Some(Builtin::Sleep),
+            "tcp_listen" => Some(Builtin::TcpListen),
+            "tcp_accept" => Some(Builtin::TcpAccept),
+            "tcp_read" => Some(Builtin::TcpRead),
+            "tcp_write" => Some(Builtin::TcpWrite),
+            "tcp_close" => Some(Builtin::TcpClose),
             _ => None,
         }
     }
@@ -282,6 +392,49 @@ impl Builtin {
     pub fn name(self) -> &'static str {
         match self {
             Builtin::Print => "print",
+            Builtin::ListenerPort => "listener_port",
+            Builtin::Sleep => "sleep",
+            Builtin::TcpListen => "tcp_listen",
+            Builtin::TcpAccept => "tcp_accept",
+            Builtin::TcpRead => "tcp_read",
+            Builtin::TcpWrite => "tcp_write",
+            Builtin::TcpClose => "tcp_close",
+        }
+    }
+
+    /// Whether calling it builds a task rather than producing a value on the spot.
+    pub fn is_task(self) -> bool {
+        matches!(self.signature().1, Ty::Task(_))
+    }
+
+    pub fn capabilities(self) -> &'static [Capability] {
+        match self {
+            Builtin::Print | Builtin::ListenerPort => &[],
+            Builtin::Sleep => &[Capability::Clock],
+            Builtin::TcpListen => &[Capability::NetListen],
+            Builtin::TcpAccept | Builtin::TcpRead | Builtin::TcpWrite | Builtin::TcpClose => {
+                &[Capability::NetIo]
+            }
+        }
+    }
+
+    /// Parameter types and result type. `print` is the one builtin whose parameter is any type at
+    /// all, and the checker special-cases it rather than pretending there is a type for that.
+    pub fn signature(self) -> (Vec<Ty>, Ty) {
+        let listener = Ty::Resource(Resource::Listener);
+        let connection = Ty::Resource(Resource::Connection);
+        let io_error = || Ty::Enum(EnumId::IO_ERROR);
+        let task = |ty: Ty| Ty::Task(Box::new(ty));
+        let fallible = |ok: Ty| Ty::Result(Box::new(ok), Box::new(io_error()));
+        match self {
+            Builtin::Print => (vec![Ty::Error], Ty::Unit),
+            Builtin::ListenerPort => (vec![listener], Ty::I64),
+            Builtin::Sleep => (vec![Ty::I64], task(Ty::Unit)),
+            Builtin::TcpListen => (vec![Ty::I64], task(fallible(listener))),
+            Builtin::TcpAccept => (vec![listener], task(fallible(connection))),
+            Builtin::TcpRead => (vec![connection], task(fallible(Ty::Str))),
+            Builtin::TcpWrite => (vec![connection, Ty::Str], task(fallible(Ty::Unit))),
+            Builtin::TcpClose => (vec![connection], task(Ty::Unit)),
         }
     }
 }

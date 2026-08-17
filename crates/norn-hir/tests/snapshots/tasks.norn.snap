@@ -1,0 +1,42 @@
+error: `spawn` must appear inside a `scope`
+  --> tasks.norn:20:5
+   |
+20 |     spawn work()
+   |     ^^^^^^^^^^^^ nothing here would cancel or join it
+   = note: wrap it in `scope { … }`: a spawned task may not outlive the scope that started it
+
+error: `spawn` needs a task that produces (), and this one produces I64
+  --> tasks.norn:28:9
+   |
+28 |         spawn counted()
+   |         ^^^^^^^^^^^^^^^ nothing would receive the value
+   = note: there are no task handles in v0, so a spawned task has to say what happens to its own result
+
+error: this builds a task and then discards it
+  --> tasks.norn:36:5
+   |
+36 |     work()
+   |     ^^^^^^ the task never runs
+   = note: `await` it to run it here, or `spawn` it to run it in a scope
+
+error: `undeclared` does not declare the capability `clock`
+  --> tasks.norn:41:11
+   |
+41 |     await work()
+   |           ^^^^^^ `work` uses it
+   = note: a task's `uses { … }` set must cover every task it creates
+   = note: add it: `uses { clock }`
+
+error: unknown capability `net.write`
+  --> tasks.norn:46:12
+   |
+46 |     uses { net.write }
+   |            ^^^^^^^^^ not a capability v0 knows
+   = note: the vocabulary is fixed: clock, net.listen, net.io
+
+error: `await` is only available inside a `task fn`
+  --> tasks.norn:53:5
+   |
+53 |     await work()
+   |     ^^^^^^^^^^^^ only a task may suspend
+   = note: mark the enclosing function `task fn`

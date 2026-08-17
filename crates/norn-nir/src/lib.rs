@@ -8,6 +8,6 @@ pub mod interp;
 pub mod lower;
 pub mod nir;
 
-pub use interp::{Captured, Output, Stdout, Trap, Value, run};
+pub use interp::{Captured, Clock, Config, Outcome, Output, Stdout, Trap, Value, execute, run};
 pub use lower::lower;
 pub use nir::{Program, print};

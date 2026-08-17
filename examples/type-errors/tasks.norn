@@ -1,0 +1,54 @@
+// Each function here is wrong in exactly one way, and each way is a rule M2 introduced.
+
+task fn work() -> ()
+    uses { clock }
+{
+    await sleep(1)
+}
+
+task fn counted() -> I64
+    uses { clock }
+{
+    await sleep(1)
+    7
+}
+
+// A spawned task needs a scope to belong to: something has to cancel and join it.
+task fn spawn_without_a_scope() -> ()
+    uses { clock }
+{
+    spawn work()
+}
+
+// There are no task handles, so a spawned task has nowhere to put a value.
+task fn spawn_of_a_value() -> ()
+    uses { clock }
+{
+    scope {
+        spawn counted()
+    }
+}
+
+// Building a task and dropping it is the obvious first bug laziness invites.
+task fn discarded() -> ()
+    uses { clock }
+{
+    work()
+}
+
+// Capabilities are checked where a task is built, and cover every task it builds.
+task fn undeclared() -> () {
+    await work()
+}
+
+// The vocabulary is closed.
+task fn misspelled() -> ()
+    uses { net.write }
+{
+    ()
+}
+
+// Suspension needs a task to suspend.
+fn ordinary() -> () {
+    await work()
+}

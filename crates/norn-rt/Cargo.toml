@@ -1,0 +1,9 @@
+[package]
+name = "norn-rt"
+description = "The Norn runtime: scheduler, clock, timers, reactor, scopes, and the event trace"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]

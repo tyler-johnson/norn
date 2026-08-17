@@ -2,7 +2,8 @@
 record Config #0 (port, host)
 enum Option #0 (None/0, Some/1)
 enum Result #1 (Ok/1, Err/1)
-enum ConfigError #2 (Missing/1, OutOfRange/2)
+enum IoError #2 (NotFound/0, Denied/0, InUse/0, Refused/0, Closed/0, Other/1)
+enum ConfigError #3 (Missing/1, OutOfRange/2)
 
 fn port_of #0(_0/raw)
     local _1

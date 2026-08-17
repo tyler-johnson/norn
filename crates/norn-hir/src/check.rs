@@ -32,8 +32,13 @@ pub fn check(module: &ast::Module) -> Checked {
     let mut checker = Checker::new();
     checker.run(module);
     let Checker {
-        program, errors, ..
+        program,
+        mut errors,
+        ..
     } = checker;
+    // Report in source order rather than stage order, as the parser does: signatures are resolved
+    // before any body is checked, and what that finds should not float to the top of the list.
+    errors.sort_by_key(|diagnostic| diagnostic.span.start);
     Checked { program, errors }
 }
 
@@ -55,6 +60,15 @@ struct Checker {
     locals: Vec<LocalDef>,
     scopes: Vec<Vec<(String, LocalId)>>,
     ret: Ty,
+    /// The function being checked: its name for diagnostics, whether it is a `task fn`, and what it
+    /// declared it uses. Capability checking happens where a task is *built*, because an awaiting
+    /// function cannot see a `Task<T>`'s provenance.
+    fn_name: String,
+    in_task: bool,
+    uses: Vec<Capability>,
+    /// How many `scope { … }` expressions enclose the expression being checked. Reset per function,
+    /// which is what makes "inside a scope in the same function" the rule `spawn` enforces.
+    scope_depth: usize,
 }
 
 impl Checker {
@@ -110,10 +124,31 @@ impl Checker {
             ],
             span,
         };
+        // `IoError` is seeded beside them: the socket builtins have to fail with something, and a
+        // failure type the language cannot name is not a failure type.
+        let io_error = EnumDef {
+            name: "IoError".into(),
+            variants: io_error::VARIANTS
+                .iter()
+                .map(|(name, fields)| VariantDef {
+                    name: (*name).into(),
+                    fields: (0..*fields)
+                        .map(|index| FieldDef {
+                            name: index.to_string(),
+                            ty: Ty::Str,
+                            span,
+                        })
+                        .collect(),
+                    positional: true,
+                    span,
+                })
+                .collect(),
+            span,
+        };
         Checker {
             program: Program {
                 records: Vec::new(),
-                enums: vec![option, result],
+                enums: vec![option, result, io_error],
                 fns: Vec::new(),
                 main: None,
             },
@@ -124,6 +159,10 @@ impl Checker {
             locals: Vec::new(),
             scopes: Vec::new(),
             ret: Ty::Unit,
+            fn_name: String::new(),
+            in_task: false,
+            uses: Vec::new(),
+            scope_depth: 0,
         }
     }
 
@@ -161,6 +200,16 @@ impl Checker {
             .insert("Bool".into(), TypeName::Builtin(Ty::Bool));
         self.types
             .insert("String".into(), TypeName::Builtin(Ty::Str));
+        self.types.insert(
+            "Listener".into(),
+            TypeName::Builtin(Ty::Resource(Resource::Listener)),
+        );
+        self.types.insert(
+            "Connection".into(),
+            TypeName::Builtin(Ty::Resource(Resource::Connection)),
+        );
+        self.types
+            .insert("IoError".into(), TypeName::Enum(EnumId::IO_ERROR));
 
         for item in &module.items {
             let (name, span) = match item {
@@ -303,11 +352,14 @@ impl Checker {
                 .map(|p| (p.name.name.clone(), self.resolve_ty(&p.ty)))
                 .collect();
             let ret = decl.ret.as_ref().map_or(Ty::Unit, |ty| self.resolve_ty(ty));
+            let uses = self.capabilities(decl);
             let id = FnId(self.program.fns.len() as u32);
             self.fns.insert(decl.name.name.clone(), id);
             self.signatures.push((params.clone(), ret.clone()));
             self.program.fns.push(FnDef {
                 name: decl.name.name.clone(),
+                is_task: decl.is_task,
+                uses,
                 params: params.len(),
                 locals: Vec::new(),
                 ret,
@@ -324,6 +376,32 @@ impl Checker {
         }
     }
 
+    /// Resolve a `uses { … }` list. The vocabulary is closed, so an unknown name is an error that
+    /// says what the three are rather than a capability nobody grants.
+    fn capabilities(&mut self, decl: &ast::FnDecl) -> Vec<Capability> {
+        let mut resolved = Vec::new();
+        for path in &decl.uses {
+            let name = path.text();
+            match Capability::from_name(&name) {
+                Some(capability) => {
+                    if !resolved.contains(&capability) {
+                        resolved.push(capability);
+                    }
+                }
+                None => {
+                    let known: Vec<&str> = Capability::ALL.iter().map(|c| c.name()).collect();
+                    self.push(
+                        Diagnostic::new(path.span, format!("unknown capability `{name}`"))
+                            .label("not a capability v0 knows")
+                            .note(format!("the vocabulary is fixed: {}", known.join(", "))),
+                    );
+                }
+            }
+        }
+        resolved.sort();
+        resolved
+    }
+
     fn check_fns(&mut self, module: &ast::Module) {
         for item in &module.items {
             let ast::Item::Fn(decl) = item else { continue };
@@ -333,15 +411,7 @@ impl Checker {
             if self.program.fns[id.index()].name != decl.name.name {
                 continue;
             }
-            if decl.is_task {
-                self.push(
-                    Diagnostic::new(decl.span, "`task fn` cannot be compiled yet")
-                        .label("tasks need the runtime")
-                        .note("structured tasks, `await`, and cancellation arrive in M2; see BOOTSTRAP.md §5"),
-                );
-                continue;
-            }
-            if !decl.uses.is_empty() {
+            if !decl.is_task && !decl.uses.is_empty() {
                 // The parser already rejects `uses` on a non-task function, so this is unreachable
                 // in practice; keeping it means the checker never silently ignores a capability.
                 self.error(decl.span, "capabilities are only meaningful on a `task fn`");
@@ -351,6 +421,10 @@ impl Checker {
             self.locals = Vec::new();
             self.scopes = vec![Vec::new()];
             self.ret = ret.clone();
+            self.fn_name = decl.name.name.clone();
+            self.in_task = decl.is_task;
+            self.uses = self.program.fns[id.index()].uses.clone();
+            self.scope_depth = 0;
             for ((name, ty), param) in params.iter().zip(&decl.params) {
                 self.declare_local(name.clone(), ty.clone(), false, param.name.span);
             }
@@ -392,6 +466,12 @@ impl Checker {
                             None => Ty::Error,
                         };
                     }
+                    "Task" => {
+                        return match self.type_args(name, args, 1, ty.span) {
+                            Some(mut args) => Ty::Task(Box::new(args.remove(0))),
+                            None => Ty::Error,
+                        };
+                    }
                     _ => {}
                 }
                 if !args.is_empty() {
@@ -428,10 +508,12 @@ impl Checker {
                     span,
                     format!("`{name}` takes {want} type {plural}, found {}", args.len()),
                 )
-                .note(if name == "Result" {
-                    "write both, as in `Result<Config, LoadError>` — there is no default error type"
-                } else {
-                    "write the element type, as in `Option<I64>`"
+                .note(match name {
+                    "Result" => {
+                        "write both, as in `Result<Config, LoadError>` — there is no default error type"
+                    }
+                    "Task" => "write the value the task produces, as in `Task<()>`",
+                    _ => "write the element type, as in `Option<I64>`",
                 }),
             );
             return None;
@@ -473,6 +555,14 @@ impl Checker {
         if let Some(expected) = expected
             && !found.ty.fits(expected)
         {
+            // A task where its own result was wanted is a missing `await`, and saying so is worth
+            // more than reporting the shapes that differ.
+            if let Ty::Task(produced) = &found.ty
+                && produced.fits(expected)
+            {
+                self.discarded_task(span);
+                return self.error_expr(span);
+            }
             let message = format!(
                 "expected {}, found {}",
                 self.program.ty_name(expected),
@@ -548,18 +638,9 @@ impl Checker {
                     span,
                 }
             }
-            ast::ExprKind::Await(_) => {
-                self.push(
-                    Diagnostic::new(span, "`await` cannot be compiled yet")
-                        .label("suspension needs the runtime")
-                        .note("tasks, scopes, and cancellation arrive in M2; see BOOTSTRAP.md §5"),
-                );
-                Expr {
-                    kind: ExprKind::Error,
-                    ty: Ty::Error,
-                    span,
-                }
-            }
+            ast::ExprKind::Await(inner) => self.check_await(inner, span),
+            ast::ExprKind::Scope(block) => self.check_scope(block, expected, span),
+            ast::ExprKind::Spawn(inner) => self.check_spawn(inner, span),
             ast::ExprKind::Lambda { .. } => {
                 self.push(
                     Diagnostic::new(span, "functions are not values yet")
@@ -578,6 +659,183 @@ impl Checker {
             return checked;
         }
         self.expect(checked, expected, span)
+    }
+
+    // ---------------------------------------------------------------- tasks
+
+    fn error_expr(&self, span: Span) -> Expr {
+        Expr {
+            kind: ExprKind::Error,
+            ty: Ty::Error,
+            span,
+        }
+    }
+
+    /// Whether the running function may create a task at all, and whether it declared the authority
+    /// the task it is creating needs. Both questions belong here, at the point of creation: once a
+    /// `Task<T>` is a value, nothing downstream can tell what it will do.
+    fn require_task_authority(&mut self, what: &str, needs: &[Capability], span: Span) -> bool {
+        if !self.in_task {
+            let message = format!(
+                "only a `task fn` can create a task, and `{}` is not one",
+                self.fn_name
+            );
+            self.push(
+                Diagnostic::new(span, message)
+                    .label(format!("`{what}` builds a task"))
+                    .note("mark the enclosing function `task fn`"),
+            );
+            return false;
+        }
+        let mut authorised = true;
+        for capability in needs {
+            if !self.uses.contains(capability) {
+                let message = format!(
+                    "`{}` does not declare the capability `{}`",
+                    self.fn_name,
+                    capability.name()
+                );
+                self.push(
+                    Diagnostic::new(span, message)
+                        .label(format!("`{what}` uses it"))
+                        .note("a task's `uses { … }` set must cover every task it creates")
+                        .note(format!(
+                            "add it: `uses {{ {} }}`",
+                            self.uses
+                                .iter()
+                                .chain(std::iter::once(capability))
+                                .map(|c| c.name())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        )),
+                );
+                authorised = false;
+            }
+        }
+        authorised
+    }
+
+    /// A task that is built and dropped does nothing at all, which is the obvious first bug
+    /// laziness invites. It is worth a diagnostic rather than a silent no-op.
+    fn discarded_task(&mut self, span: Span) {
+        self.push(
+            Diagnostic::new(span, "this builds a task and then discards it")
+                .label("the task never runs")
+                .note("`await` it to run it here, or `spawn` it to run it in a scope"),
+        );
+    }
+
+    fn check_await(&mut self, inner: &ast::Expr, span: Span) -> Expr {
+        if !self.in_task {
+            self.push(
+                Diagnostic::new(span, "`await` is only available inside a `task fn`")
+                    .label("only a task may suspend")
+                    .note("mark the enclosing function `task fn`"),
+            );
+            return self.error_expr(span);
+        }
+        // The operand synthesises rather than being checked against `Task<expected>`. Every task
+        // value in v0 comes from a call, which knows its own type, and synthesising lets `await`
+        // report what it was actually handed instead of a shape mismatch two layers down.
+        let task = self.check_expr(inner, None);
+        if task.ty.is_error() {
+            return self.error_expr(span);
+        }
+        let Ty::Task(produced) = &task.ty else {
+            let message = format!(
+                "`await` applies to a task, not {}",
+                self.program.ty_name(&task.ty)
+            );
+            self.push(
+                Diagnostic::new(span, message)
+                    .label("not a task")
+                    .note("a task comes from calling a `task fn`, and nothing else in v0"),
+            );
+            return self.error_expr(span);
+        };
+        let ty = (**produced).clone();
+        Expr {
+            kind: ExprKind::Await {
+                expr: Box::new(task),
+            },
+            ty,
+            span,
+        }
+    }
+
+    fn check_scope(&mut self, block: &ast::Block, expected: Option<&Ty>, span: Span) -> Expr {
+        if !self.in_task {
+            self.push(
+                Diagnostic::new(span, "a `scope` is only available inside a `task fn`")
+                    .label("only a task may start other tasks")
+                    .note("mark the enclosing function `task fn`"),
+            );
+            return self.error_expr(span);
+        }
+        self.scope_depth += 1;
+        let body = self.check_block(block, expected, block.span);
+        self.scope_depth -= 1;
+        let ty = body.ty.clone();
+        Expr {
+            kind: ExprKind::Scope {
+                body: Box::new(body),
+            },
+            ty,
+            span,
+        }
+    }
+
+    fn check_spawn(&mut self, inner: &ast::Expr, span: Span) -> Expr {
+        if !self.in_task {
+            self.push(
+                Diagnostic::new(span, "`spawn` is only available inside a `task fn`")
+                    .label("only a task may start other tasks")
+                    .note("mark the enclosing function `task fn`"),
+            );
+            return self.error_expr(span);
+        }
+        if self.scope_depth == 0 {
+            self.push(
+                Diagnostic::new(span, "`spawn` must appear inside a `scope`")
+                    .label("nothing here would cancel or join it")
+                    .note("wrap it in `scope { … }`: a spawned task may not outlive the scope that started it"),
+            );
+            return self.error_expr(span);
+        }
+        let task = self.check_expr(inner, None);
+        if task.ty.is_error() {
+            return self.error_expr(span);
+        }
+        match &task.ty {
+            Ty::Task(produced) if **produced == Ty::Unit => {}
+            Ty::Task(produced) => {
+                let message = format!(
+                    "`spawn` needs a task that produces (), and this one produces {}",
+                    self.program.ty_name(produced)
+                );
+                self.push(
+                    Diagnostic::new(span, message)
+                        .label("nothing would receive the value")
+                        .note("there are no task handles in v0, so a spawned task has to say what happens to its own result"),
+                );
+                return self.error_expr(span);
+            }
+            other => {
+                let message = format!(
+                    "`spawn` applies to a task, not {}",
+                    self.program.ty_name(other)
+                );
+                self.push(Diagnostic::new(span, message).label("not a task"));
+                return self.error_expr(span);
+            }
+        }
+        Expr {
+            kind: ExprKind::Spawn {
+                expr: Box::new(task),
+            },
+            ty: Ty::Unit,
+            span,
+        }
     }
 
     fn check_path(&mut self, path: &ast::Path) -> Expr {
@@ -876,37 +1134,56 @@ impl Checker {
             let arg = &args[order[index]];
             checked.push(self.check_expr(&arg.value, Some(ty)));
         }
+
+        // Calling a `task fn` builds a task; it does not run one. That is why the capability check
+        // happens here rather than at the `await`.
+        let ty = if self.program.fns[id.index()].is_task {
+            let needs = self.program.fns[id.index()].uses.clone();
+            self.require_task_authority(name, &needs, span);
+            Ty::Task(Box::new(ret))
+        } else {
+            ret
+        };
         Expr {
             kind: ExprKind::Call {
                 callee: id,
                 args: checked,
             },
-            ty: ret,
+            ty,
             span,
         }
     }
 
     fn check_builtin(&mut self, builtin: Builtin, args: &[ast::Arg], span: Span) -> Expr {
-        match builtin {
-            Builtin::Print => {
-                if args.len() != 1 || args[0].name.is_some() {
-                    self.error(span, "`print` takes one positional argument");
-                    return Expr {
-                        kind: ExprKind::Error,
-                        ty: Ty::Error,
-                        span,
-                    };
-                }
-                let arg = self.check_expr(&args[0].value, None);
-                Expr {
-                    kind: ExprKind::Builtin {
-                        builtin,
-                        args: vec![arg],
-                    },
-                    ty: Ty::Unit,
-                    span,
-                }
-            }
+        let (params, ret) = builtin.signature();
+        let name = builtin.name();
+        if args.len() != params.len() || args.iter().any(|arg| arg.name.is_some()) {
+            let message = format!(
+                "`{name}` takes {} positional argument{}",
+                params.len(),
+                if params.len() == 1 { "" } else { "s" }
+            );
+            self.error(span, message);
+            return self.error_expr(span);
+        }
+        if builtin.is_task() && !self.require_task_authority(name, builtin.capabilities(), span) {
+            return self.error_expr(span);
+        }
+
+        let mut checked = Vec::with_capacity(params.len());
+        for (arg, param) in args.iter().zip(&params) {
+            // `print` is the one builtin that takes a value of any type at all, spelled as an
+            // expectation of `Ty::Error`, which every type fits.
+            let wanted = if param.is_error() { None } else { Some(param) };
+            checked.push(self.check_expr(&arg.value, wanted));
+        }
+        Expr {
+            kind: ExprKind::Builtin {
+                builtin,
+                args: checked,
+            },
+            ty: ret,
+            span,
         }
     }
 
@@ -1283,6 +1560,11 @@ impl Checker {
                 && expr.ty == Ty::Never
             {
                 diverges = true;
+            }
+            if let StmtKind::Expr(expr) = &checked.kind
+                && matches!(expr.ty, Ty::Task(_))
+            {
+                self.discarded_task(stmt.span);
             }
             stmts.push(checked);
         }

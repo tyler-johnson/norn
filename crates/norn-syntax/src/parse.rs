@@ -787,6 +787,26 @@ impl Parser {
             }
             TokenKind::Kw(Kw::Match) => self.match_expr(),
             TokenKind::Kw(Kw::If) => self.if_expr(),
+            TokenKind::Kw(Kw::Scope) => {
+                self.advance();
+                let block = self.block()?;
+                let span = start.to(block.span);
+                Ok(Expr {
+                    kind: ExprKind::Scope(block),
+                    span,
+                })
+            }
+            TokenKind::Kw(Kw::Spawn) => {
+                self.advance();
+                // `spawn f(x)` takes a whole unary expression, so a spawned call reads as one
+                // thing. It is not a postfix chain: there is no result to go on projecting from.
+                let inner = self.unary()?;
+                let span = start.to(inner.span);
+                Ok(Expr {
+                    kind: ExprKind::Spawn(Box::new(inner)),
+                    span,
+                })
+            }
             TokenKind::LBrace => {
                 let block = self.block()?;
                 let span = block.span;

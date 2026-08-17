@@ -187,7 +187,7 @@ fn print_expr(expr: &Expr, indent: usize, min: u8) -> String {
 fn precedence(expr: &Expr) -> u8 {
     match &expr.kind {
         ExprKind::Binary { op, .. } => binding_power(*op),
-        ExprKind::Unary { .. } | ExprKind::Await(_) => UNARY,
+        ExprKind::Unary { .. } | ExprKind::Await(_) | ExprKind::Spawn(_) => UNARY,
         ExprKind::Lambda { .. } => LAMBDA,
         _ => ATOM,
     }
@@ -275,6 +275,8 @@ fn print_expr_bare(expr: &Expr, indent: usize) -> String {
             format!("#{}({})", path.text(), args.join(", "))
         }
         ExprKind::Await(inner) => format!("await {}", print_expr(inner, indent, UNARY)),
+        ExprKind::Scope(block) => format!("scope {}", print_block(block, indent)),
+        ExprKind::Spawn(inner) => format!("spawn {}", print_expr(inner, indent, UNARY)),
         // `await f()?` already parses as `(await f())?`, so the parentheses would be noise.
         ExprKind::Try(inner) if matches!(inner.kind, ExprKind::Await(_)) => {
             format!("{}?", print_expr_bare(inner, indent))

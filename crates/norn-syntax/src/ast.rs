@@ -199,6 +199,11 @@ pub enum ExprKind {
         args: Vec<Arg>,
     },
     Await(Box<Expr>),
+    /// `scope { … }` — structured concurrency. Valued as its body, and the point at which every
+    /// task spawned inside is cancelled and joined.
+    Scope(Block),
+    /// `spawn e` — start a task in the enclosing scope. It cannot outlive that scope.
+    Spawn(Box<Expr>),
     /// Postfix `?`: propagate the error case outward.
     Try(Box<Expr>),
     Match {

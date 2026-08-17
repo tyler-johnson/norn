@@ -2,7 +2,8 @@
 record Point #0 (x, y)
 enum Option #0 (None/0, Some/1)
 enum Result #1 (Ok/1, Err/1)
-enum Shape #2 (Empty/0, Dot/1, Segment/2, Circle/2)
+enum IoError #2 (NotFound/0, Denied/0, InUse/0, Refused/0, Closed/0, Other/1)
+enum Shape #3 (Empty/0, Dot/1, Segment/2, Circle/2)
 
 fn describe #0(_0/shape)
     local _1/point

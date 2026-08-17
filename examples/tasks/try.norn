@@ -1,0 +1,28 @@
+// `?` returning out of an open scope.
+//
+// The early return has to leave the scope before it leaves the function, so lowering emits the
+// scope exit first — which is what cancels the child that is still waiting.
+
+fn refuse() -> Result<(), IoError> {
+    #Err(#IoError.Refused)
+}
+
+task fn patient() -> ()
+    uses { clock }
+{
+    await sleep(1000)
+    print("this line is never reached")
+}
+
+task fn main() -> Result<(), IoError>
+    uses { clock }
+{
+    scope {
+        spawn patient()
+        await sleep(10)
+        refuse()?
+        print("nor is this one")
+    }
+    print("or this")
+    #Ok(())
+}

@@ -1,0 +1,27 @@
+// Cancellation closing a resource.
+//
+// `main` binds a listener and hands it to a child, which parks waiting for a connection that never
+// comes. The handle moves with the `spawn`, so the child is what owns it — and cancelling the child
+// closes the socket without anyone writing cleanup code. That is the whole of M2's resource story
+// until M4 makes ownership static.
+
+task fn wait_for_client(listener: Listener) -> ()
+    uses { net.io }
+{
+    match await tcp_accept(listener) {
+        #Ok(_) => print("a client arrived")
+        #Err(_) => print("the listener failed")
+    }
+}
+
+task fn main() -> Result<(), IoError>
+    uses { clock, net.listen, net.io }
+{
+    let listener = await tcp_listen(0)?
+    scope {
+        spawn wait_for_client(listener)
+        await sleep(50)
+    }
+    print("the scope closed the socket on its way out")
+    #Ok(())
+}

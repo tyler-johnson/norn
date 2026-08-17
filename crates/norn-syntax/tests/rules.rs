@@ -228,3 +228,31 @@ fn recovery_reaches_later_declarations() {
 fn an_empty_file_is_an_empty_module() {
     assert_eq!(ast("").trim(), "(module)");
 }
+
+#[test]
+fn spawn_takes_a_whole_call() {
+    // Not just the callee: `spawn f(x)` starts `f(x)`, and nothing else would be worth writing.
+    assert_eq!(
+        expr("spawn serve(listener)"),
+        "(spawn (call (path serve) (arg (path listener))))"
+    );
+}
+
+#[test]
+fn a_scope_is_an_expression() {
+    // It has a value — its body's — so it may sit anywhere an expression may, including as the
+    // body of a match arm.
+    let dumped = ast(
+        "task fn main() {\n    match x {\n        _ => scope {\n            spawn f()\n        }\n    }\n}\n",
+    );
+    assert!(dumped.contains("(arm _ (scope (block (spawn"), "{dumped}");
+}
+
+#[test]
+fn scope_and_spawn_round_trip() {
+    let source =
+        "task fn main() {\n    scope {\n        spawn worker()\n        await done()\n    }\n}\n";
+    let parsed = parse(source);
+    assert!(parsed.ok(), "{}", errors(source));
+    assert_eq!(print::module(&parsed.module), source);
+}

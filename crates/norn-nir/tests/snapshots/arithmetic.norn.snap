@@ -1,6 +1,7 @@
 === nir ===
 enum Option #0 (None/0, Some/1)
 enum Result #1 (Ok/1, Err/1)
+enum IoError #2 (NotFound/0, Denied/0, InUse/0, Refused/0, Closed/0, Other/1)
 
 fn factorial #0(_0/n)
     local _1

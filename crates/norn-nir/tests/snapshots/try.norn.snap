@@ -1,0 +1,75 @@
+=== nir ===
+enum Option #0 (None/0, Some/1)
+enum Result #1 (Ok/1, Err/1)
+enum IoError #2 (NotFound/0, Denied/0, InUse/0, Refused/0, Closed/0, Other/1)
+
+fn refuse #0()
+    local _0
+    local _1
+  b0:
+    _0 = #IoError.Refused()
+    _1 = #Result.Err(_0)
+    return _1
+
+task fn patient #1()
+    local _0
+    local _1
+    local _2
+  b0:
+    _0 = task builtin sleep(1000)
+    await _0 -> _1, resume b1
+  b1:
+    _2 = builtin print("this line is never reached")
+    return _2
+
+task fn main #2()
+    local _0
+    local _1
+    local _2
+    local _3
+    local _4
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+  b0:
+    scope enter
+    _1 = task patient#1()
+    spawn _1
+    _2 = task builtin sleep(10)
+    await _2 -> _3, resume b1
+  b1:
+    _4 = call refuse#0()
+    switch tag _4 [0 => b2] else b3
+  b2:
+    _5 = _4.0
+    _7 = builtin print("nor is this one")
+    _0 = _7
+    scope exit, resume b5
+  b3:
+    _6 = #Result.Err(_4.0)
+    scope exit, resume b4
+  b4:
+    return _6
+  b5:
+    _8 = builtin print("or this")
+    _9 = #Result.Ok(())
+    return _9
+
+=== output ===
+=== result ===
+#Err(#IoError.Refused)
+=== trace ===
+0ms t0 spawn main root
+0ms t0 resume
+0ms t0 scope enter 1
+0ms t1 spawn patient in t0
+0ms t0 park timer 10ms
+0ms t1 resume
+0ms t1 park timer 1000ms
+10ms -- clock
+10ms t0 resume
+10ms t1 cancel
+10ms t0 scope exit 1
+10ms t0 done

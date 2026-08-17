@@ -41,8 +41,18 @@ pub struct VariantLayout {
     pub positional: bool,
 }
 
+/// Whether calling this function runs it or builds a task. The distinction is all that separates
+/// the two in NIR: a task's body is ordinary blocks, and the suspension points in it are terminators
+/// like any other.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FnKind {
+    Plain,
+    Task,
+}
+
 pub struct Function {
     pub name: String,
+    pub kind: FnKind,
     pub params: usize,
     pub locals: Vec<String>,
     pub blocks: Vec<Block>,
@@ -56,6 +66,10 @@ pub struct Block {
 
 pub enum Instr {
     Assign(Place, Rvalue),
+    /// Open a scope. Everything spawned until the matching `Term::ScopeExit` belongs to it.
+    ScopeEnter,
+    /// Start a task in the innermost open scope. The operand is a `Task<()>`.
+    Spawn(Operand),
 }
 
 /// A local, optionally projected into: `x`, `x.2`, `x.0.1`.
@@ -104,6 +118,10 @@ pub enum Rvalue {
     Binary(BinOp, Operand, Operand),
     Call(FnId, Vec<Operand>),
     Builtin(Builtin, Vec<Operand>),
+    /// Build a task from a `task fn` and its arguments. Nothing runs: the arguments are evaluated
+    /// now, and the body only when something awaits or spawns it.
+    Task(FnId, Vec<Operand>),
+    BuiltinTask(Builtin, Vec<Operand>),
     Record(usize, Vec<Operand>),
     Variant(usize, usize, Vec<Operand>),
 }
@@ -122,6 +140,21 @@ pub enum Term {
         default: BlockId,
     },
     Return(Operand),
+    /// Run a task and resume with its value.
+    ///
+    /// A suspension point is a terminator, which is the load-bearing decision of M2: block ids
+    /// therefore *are* the state numbers, and the state machine `BOOTSTRAP.md` §1 promised is
+    /// explicit here rather than discovered by the backend. M5 emits `loop { match frame.state { … } }`
+    /// straight from the block list.
+    Await {
+        task: Operand,
+        dest: Place,
+        resume: BlockId,
+    },
+    /// Leave the innermost open scope: cancel and join its children, then resume.
+    ScopeExit {
+        resume: BlockId,
+    },
     /// A state the checker could not rule out and the program must not reach.
     Trap(&'static str),
 }
@@ -129,6 +162,43 @@ pub enum Term {
 impl Default for Term {
     fn default() -> Term {
         Term::Trap("block was never terminated")
+    }
+}
+
+impl Term {
+    /// Every block this one can transfer control to. Passes that walk the block graph ask here
+    /// rather than matching, so a new terminator joins them by answering this.
+    pub fn successors(&self) -> Vec<BlockId> {
+        match self {
+            Term::Goto(target) => vec![*target],
+            Term::Branch { then, els, .. } => vec![*then, *els],
+            Term::SwitchTag { cases, default, .. } => cases
+                .iter()
+                .map(|(_, block)| *block)
+                .chain([*default])
+                .collect(),
+            Term::Await { resume, .. } | Term::ScopeExit { resume } => vec![*resume],
+            Term::Return(_) | Term::Trap(_) => Vec::new(),
+        }
+    }
+
+    /// Rewrite the block ids this terminator names, given a map from old id to new.
+    pub fn retarget(&mut self, map: &[BlockId]) {
+        match self {
+            Term::Goto(target) => *target = map[*target],
+            Term::Branch { then, els, .. } => {
+                *then = map[*then];
+                *els = map[*els];
+            }
+            Term::SwitchTag { cases, default, .. } => {
+                for (_, block) in cases.iter_mut() {
+                    *block = map[*block];
+                }
+                *default = map[*default];
+            }
+            Term::Await { resume, .. } | Term::ScopeExit { resume } => *resume = map[*resume],
+            Term::Return(_) | Term::Trap(_) => {}
+        }
     }
 }
 
@@ -163,8 +233,12 @@ pub fn print(program: &Program) -> String {
         let params: Vec<String> = (0..function.params)
             .map(|i| local_name(function, i))
             .collect();
+        let task = match function.kind {
+            FnKind::Plain => "",
+            FnKind::Task => "task ",
+        };
         out.push_str(&format!(
-            "fn {} #{id}({})\n",
+            "{task}fn {} #{id}({})\n",
             function.name,
             params.join(", ")
         ));
@@ -174,12 +248,18 @@ pub fn print(program: &Program) -> String {
         for (index, block) in function.blocks.iter().enumerate() {
             out.push_str(&format!("  b{index}:\n"));
             for instr in &block.instrs {
-                let Instr::Assign(place, rvalue) = instr;
-                out.push_str(&format!(
-                    "    {} = {}\n",
-                    print_place(function, place),
-                    print_rvalue(program, function, rvalue)
-                ));
+                let text = match instr {
+                    Instr::Assign(place, rvalue) => format!(
+                        "{} = {}",
+                        print_place(function, place),
+                        print_rvalue(program, function, rvalue)
+                    ),
+                    Instr::ScopeEnter => "scope enter".into(),
+                    Instr::Spawn(operand) => {
+                        format!("spawn {}", print_operand(function, operand))
+                    }
+                };
+                out.push_str(&format!("    {text}\n"));
             }
             out.push_str(&format!("    {}\n", print_term(function, &block.term)));
         }
@@ -245,6 +325,12 @@ fn print_rvalue(program: &Program, function: &Function, rvalue: &Rvalue) -> Stri
         Rvalue::Builtin(builtin, operands) => {
             format!("builtin {}({})", builtin.name(), args(operands))
         }
+        Rvalue::Task(id, operands) => {
+            format!("task {}#{id}({})", program.fns[*id].name, args(operands))
+        }
+        Rvalue::BuiltinTask(builtin, operands) => {
+            format!("task builtin {}({})", builtin.name(), args(operands))
+        }
         Rvalue::Record(id, operands) => {
             format!("#{}({})", program.records[*id].name, args(operands))
         }
@@ -285,6 +371,12 @@ fn print_term(function: &Function, term: &Term) -> String {
             )
         }
         Term::Return(operand) => format!("return {}", print_operand(function, operand)),
+        Term::Await { task, dest, resume } => format!(
+            "await {} -> {}, resume b{resume}",
+            print_operand(function, task),
+            print_place(function, dest)
+        ),
+        Term::ScopeExit { resume } => format!("scope exit, resume b{resume}"),
         Term::Trap(message) => format!("trap {message:?}"),
     }
 }

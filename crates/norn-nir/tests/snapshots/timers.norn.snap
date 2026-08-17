@@ -1,0 +1,84 @@
+=== nir ===
+enum Option #0 (None/0, Some/1)
+enum Result #1 (Ok/1, Err/1)
+enum IoError #2 (NotFound/0, Denied/0, InUse/0, Refused/0, Closed/0, Other/1)
+
+task fn tick #0(_0/name, _1/every)
+    local _2
+    local _3
+    local _4
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+  b0:
+    _2 = task builtin sleep(_1/every)
+    await _2 -> _3, resume b1
+  b1:
+    _4 = _0/name concat " once"
+    _5 = builtin print(_4)
+    _6 = task builtin sleep(_1/every)
+    await _6 -> _7, resume b2
+  b2:
+    _8 = _0/name concat " twice"
+    _9 = builtin print(_8)
+    return _9
+
+task fn main #1()
+    local _0
+    local _1
+    local _2
+    local _3
+    local _4
+    local _5
+  b0:
+    scope enter
+    _1 = task tick#0("fast", 10)
+    spawn _1
+    _2 = task tick#0("slow", 25)
+    spawn _2
+    _3 = task builtin sleep(100)
+    await _3 -> _4, resume b1
+  b1:
+    _0 = _4
+    scope exit, resume b2
+  b2:
+    _5 = builtin print("both children finished before the scope closed")
+    return _5
+
+=== output ===
+fast once
+fast twice
+slow once
+slow twice
+both children finished before the scope closed
+=== result ===
+()
+=== trace ===
+0ms t0 spawn main root
+0ms t0 resume
+0ms t0 scope enter 1
+0ms t1 spawn tick in t0
+0ms t2 spawn tick in t0
+0ms t0 park timer 100ms
+0ms t1 resume
+0ms t1 park timer 10ms
+0ms t2 resume
+0ms t2 park timer 25ms
+10ms -- clock
+10ms t1 resume
+10ms t1 park timer 20ms
+20ms -- clock
+20ms t1 resume
+20ms t1 done
+25ms -- clock
+25ms t2 resume
+25ms t2 park timer 50ms
+50ms -- clock
+50ms t2 resume
+50ms t2 done
+100ms -- clock
+100ms t0 resume
+100ms t0 scope exit 1
+100ms t0 done

@@ -1,0 +1,73 @@
+// A TCP echo server, which is what M2 is asked to run.
+//
+// `main` binds a listener on a port the operating system chooses, prints it so a client can find
+// it, and starts an accept loop inside a scope. When the scope closes — here on a timer, in a real
+// service on a shutdown signal — the accept loop is cancelled, that cancellation cascades to every
+// connection it is serving, and every socket is closed on the way out. No cleanup is written
+// anywhere in this file.
+//
+// There is no `loop` in v0, so the accept loop recurses. Each connection therefore costs a frame
+// and a scope for as long as the server runs, which tail calls will fix and nothing else needs to.
+
+task fn echo(conn: Connection) -> ()
+    uses { net.io }
+{
+    match await tcp_read(conn) {
+        #Ok(text) => match await tcp_write(conn, text) {
+            #Ok(_) => ()
+            #Err(_) => ()
+        }
+        #Err(_) => ()
+    }
+    await tcp_close(conn)
+}
+
+task fn accept_loop(listener: Listener) -> ()
+    uses { net.io }
+{
+    match await tcp_accept(listener) {
+        // The connection moves into the child, which is then what owns and closes it. The scope
+        // wrapping the recursion is what that child may not outlive.
+        #Ok(conn) => scope {
+            spawn echo(conn)
+            await accept_loop(listener)
+        }
+        #Err(_) => ()
+    }
+}
+
+task fn main() -> Result<(), IoError>
+    uses { clock, net.listen, net.io }
+{
+    let listener = await tcp_listen(0)?
+    print(digits(listener_port(listener)))
+    scope {
+        spawn accept_loop(listener)
+        await sleep(200)
+    }
+    #Ok(())
+}
+
+fn digits(n: I64) -> String {
+    if n < 10 {
+        digit(n)
+    } else {
+        digits(n / 10) + digit(n % 10)
+    }
+}
+
+fn digit(n: I64) -> String {
+    match n {
+        0 => "0"
+        1 => "1"
+        2 => "2"
+        3 => "3"
+        4 => "4"
+        5 => "5"
+        6 => "6"
+        7 => "7"
+        8 => "8"
+        9 => "9"
+        _ => "?"
+    }
+}

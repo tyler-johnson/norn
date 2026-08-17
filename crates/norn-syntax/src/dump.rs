@@ -246,6 +246,8 @@ fn dump_expr(expr: &Expr) -> Node {
             list("construct", children)
         }
         ExprKind::Await(inner) => list("await", vec![dump_expr(inner)]),
+        ExprKind::Scope(block) => list("scope", vec![dump_block(block)]),
+        ExprKind::Spawn(inner) => list("spawn", vec![dump_expr(inner)]),
         ExprKind::Try(inner) => list("try", vec![dump_expr(inner)]),
         ExprKind::Block(block) => dump_block(block),
         ExprKind::If { cond, then, els } => {

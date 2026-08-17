@@ -39,7 +39,11 @@ pub fn lower(program: &hir::Program) -> Program {
         })
         .collect();
 
-    let fns = program.fns.iter().map(lower_fn).collect();
+    let fns = program
+        .fns
+        .iter()
+        .map(|def| lower_fn(program, def))
+        .collect();
     Program {
         records,
         enums,
@@ -48,11 +52,13 @@ pub fn lower(program: &hir::Program) -> Program {
     }
 }
 
-fn lower_fn(def: &hir::FnDef) -> Function {
+fn lower_fn(program: &hir::Program, def: &hir::FnDef) -> Function {
     let mut lowerer = Lowerer {
+        program,
         locals: def.locals.iter().map(|l| l.name.clone()).collect(),
         blocks: vec![Block::default()],
         current: 0,
+        open_scopes: 0,
     };
     let result = lowerer.expr(&def.body);
     // A body of type `!` has already returned on every path; the terminator here is unreachable,
@@ -61,6 +67,11 @@ fn lower_fn(def: &hir::FnDef) -> Function {
     let blocks = prune(lowerer.blocks);
     Function {
         name: def.name.clone(),
+        kind: if def.is_task {
+            FnKind::Task
+        } else {
+            FnKind::Plain
+        },
         params: def.params,
         locals: lowerer.locals,
         blocks,
@@ -78,15 +89,7 @@ fn prune(blocks: Vec<Block>) -> Vec<Block> {
         if std::mem::replace(&mut reachable[block], true) {
             continue;
         }
-        match &blocks[block].term {
-            Term::Goto(target) => queue.push(*target),
-            Term::Branch { then, els, .. } => queue.extend([*then, *els]),
-            Term::SwitchTag { cases, default, .. } => {
-                queue.extend(cases.iter().map(|(_, block)| *block));
-                queue.push(*default);
-            }
-            Term::Return(_) | Term::Trap(_) => {}
-        }
+        queue.extend(blocks[block].term.successors());
     }
 
     let mut renumbered = vec![usize::MAX; blocks.len()];
@@ -103,39 +106,23 @@ fn prune(blocks: Vec<Block>) -> Vec<Block> {
         .zip(&reachable)
         .filter(|(_, live)| **live)
         .map(|(mut block, _)| {
-            block.term = match block.term {
-                Term::Goto(target) => Term::Goto(renumbered[target]),
-                Term::Branch { cond, then, els } => Term::Branch {
-                    cond,
-                    then: renumbered[then],
-                    els: renumbered[els],
-                },
-                Term::SwitchTag {
-                    scrutinee,
-                    cases,
-                    default,
-                } => Term::SwitchTag {
-                    scrutinee,
-                    cases: cases
-                        .into_iter()
-                        .map(|(tag, block)| (tag, renumbered[block]))
-                        .collect(),
-                    default: renumbered[default],
-                },
-                term => term,
-            };
+            block.term.retarget(&renumbered);
             block
         })
         .collect()
 }
 
-struct Lowerer {
+struct Lowerer<'p> {
+    program: &'p hir::Program,
     locals: Vec<String>,
     blocks: Vec<Block>,
     current: BlockId,
+    /// Scopes open around the expression being lowered. A `return` or a `?` that crosses one has to
+    /// leave it, so the exits are emitted before the return.
+    open_scopes: usize,
 }
 
-impl Lowerer {
+impl Lowerer<'_> {
     fn temp(&mut self) -> LocalId {
         let id = self.locals.len();
         self.locals.push(String::new());
@@ -148,9 +135,22 @@ impl Lowerer {
     }
 
     fn emit(&mut self, place: Place, rvalue: Rvalue) {
-        self.blocks[self.current]
-            .instrs
-            .push(Instr::Assign(place, rvalue));
+        self.push_instr(Instr::Assign(place, rvalue));
+    }
+
+    fn push_instr(&mut self, instr: Instr) {
+        self.blocks[self.current].instrs.push(instr);
+    }
+
+    /// Return from the function, leaving every scope still open on the way out. Each exit is a
+    /// terminator, so a `return` from inside two scopes becomes two states and then the return.
+    fn return_from(&mut self, value: Operand) {
+        for _ in 0..self.open_scopes {
+            let resume = self.new_block();
+            self.terminate(Term::ScopeExit { resume });
+            self.switch_to(resume);
+        }
+        self.terminate(Term::Return(value));
     }
 
     /// Terminate the current block, unless a `return` already terminated it.
@@ -217,13 +217,25 @@ impl Lowerer {
             hir::ExprKind::Call { callee, args } => {
                 let args = args.iter().map(|arg| self.expr(arg)).collect();
                 let temp = Place::local(self.temp());
-                self.emit(temp.clone(), Rvalue::Call(callee.index(), args));
+                // A call to a `task fn` builds a task rather than pushing a frame. Nothing runs
+                // until something awaits or spawns it.
+                let rvalue = if self.program.fns[callee.index()].is_task {
+                    Rvalue::Task(callee.index(), args)
+                } else {
+                    Rvalue::Call(callee.index(), args)
+                };
+                self.emit(temp.clone(), rvalue);
                 Operand::Copy(temp)
             }
             hir::ExprKind::Builtin { builtin, args } => {
                 let args = args.iter().map(|arg| self.expr(arg)).collect();
                 let temp = Place::local(self.temp());
-                self.emit(temp.clone(), Rvalue::Builtin(*builtin, args));
+                let rvalue = if builtin.is_task() {
+                    Rvalue::BuiltinTask(*builtin, args)
+                } else {
+                    Rvalue::Builtin(*builtin, args)
+                };
+                self.emit(temp.clone(), rvalue);
                 Operand::Copy(temp)
             }
             hir::ExprKind::Construct { ctor, args } => {
@@ -248,12 +260,40 @@ impl Lowerer {
             hir::ExprKind::If { cond, then, els } => self.if_expr(cond, then, els.as_deref()),
             hir::ExprKind::Match { scrutinee, arms } => self.match_expr(scrutinee, arms),
             hir::ExprKind::Try { expr, enum_id } => self.try_expr(expr, enum_id.index()),
+            hir::ExprKind::Await { expr } => {
+                let task = self.expr(expr);
+                let dest = Place::local(self.temp());
+                let resume = self.new_block();
+                self.terminate(Term::Await {
+                    task,
+                    dest: dest.clone(),
+                    resume,
+                });
+                self.switch_to(resume);
+                Operand::Copy(dest)
+            }
+            hir::ExprKind::Scope { body } => {
+                let dest = Place::local(self.temp());
+                self.push_instr(Instr::ScopeEnter);
+                self.open_scopes += 1;
+                self.assign_to(&dest, body);
+                self.open_scopes -= 1;
+                let resume = self.new_block();
+                self.terminate(Term::ScopeExit { resume });
+                self.switch_to(resume);
+                Operand::Copy(dest)
+            }
+            hir::ExprKind::Spawn { expr } => {
+                let task = self.expr(expr);
+                self.push_instr(Instr::Spawn(task));
+                Operand::Const(Const::Unit)
+            }
             hir::ExprKind::Return { value } => {
                 let operand = match value {
                     Some(value) => self.expr(value),
                     None => Operand::Const(Const::Unit),
                 };
-                self.terminate(Term::Return(operand));
+                self.return_from(operand);
                 // Anything the source wrote after a `return` lands in a block nothing reaches.
                 let unreachable = self.new_block();
                 self.switch_to(unreachable);
@@ -510,14 +550,14 @@ impl Lowerer {
                     vec![Operand::Copy(error)],
                 ),
             );
-            self.terminate(Term::Return(Operand::Copy(rebuilt)));
+            self.return_from(Operand::Copy(rebuilt));
         } else {
             let rebuilt = Place::local(self.temp());
             self.emit(
                 rebuilt.clone(),
                 Rvalue::Variant(enum_id, norn_hir::hir::EnumId::NONE, Vec::new()),
             );
-            self.terminate(Term::Return(Operand::Copy(rebuilt)));
+            self.return_from(Operand::Copy(rebuilt));
         }
 
         self.switch_to(ok_block);

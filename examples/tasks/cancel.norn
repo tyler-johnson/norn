@@ -1,0 +1,22 @@
+// A scope cancelling a child that is parked forever.
+//
+// The child is waiting on a deadline no run will ever reach. Leaving the scope cancels it, and a
+// cancelled task runs no further user code — so the line after its `await` never happens.
+
+task fn wait_forever() -> ()
+    uses { clock }
+{
+    await sleep(1000000)
+    print("this line is never reached")
+}
+
+task fn main() -> ()
+    uses { clock }
+{
+    scope {
+        spawn wait_forever()
+        await sleep(50)
+        print("leaving the scope")
+    }
+    print("the child was cancelled on the way out")
+}

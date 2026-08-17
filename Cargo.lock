@@ -23,8 +23,13 @@ name = "norn-nir"
 version = "0.0.0"
 dependencies = [
  "norn-hir",
+ "norn-rt",
  "norn-syntax",
 ]
+
+[[package]]
+name = "norn-rt"
+version = "0.0.0"
 
 [[package]]
 name = "norn-syntax"

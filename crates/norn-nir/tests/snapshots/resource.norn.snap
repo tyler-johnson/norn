@@ -1,0 +1,93 @@
+=== nir ===
+enum Option #0 (None/0, Some/1)
+enum Result #1 (Ok/1, Err/1)
+enum IoError #2 (NotFound/0, Denied/0, InUse/0, Refused/0, Closed/0, Other/1)
+
+task fn wait_for_client #0(_0/listener)
+    local _1
+    local _2
+    local _3
+    local _4
+    local _5
+  b0:
+    _2 = task builtin tcp_accept(_0/listener)
+    await _2 -> _3, resume b1
+  b1:
+    goto b3
+  b2:
+    return _1
+  b3:
+    switch tag _3 [0 => b7] else b4
+  b4:
+    switch tag _3 [1 => b9] else b5
+  b5:
+    trap "no match arm applied"
+  b6:
+    _4 = builtin print("a client arrived")
+    _1 = _4
+    goto b2
+  b7:
+    goto b6
+  b8:
+    _5 = builtin print("the listener failed")
+    _1 = _5
+    goto b2
+  b9:
+    goto b8
+
+task fn main #1()
+    local _0/listener
+    local _1
+    local _2
+    local _3
+    local _4
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+    local _10
+  b0:
+    _1 = task builtin tcp_listen(0)
+    await _1 -> _2, resume b1
+  b1:
+    switch tag _2 [0 => b2] else b3
+  b2:
+    _3 = _2.0
+    _0/listener = _3
+    scope enter
+    _6 = task wait_for_client#0(_0/listener)
+    spawn _6
+    _7 = task builtin sleep(50)
+    await _7 -> _8, resume b4
+  b3:
+    _4 = #Result.Err(_2.0)
+    return _4
+  b4:
+    _5 = _8
+    scope exit, resume b5
+  b5:
+    _9 = builtin print("the scope closed the socket on its way out")
+    _10 = #Result.Ok(())
+    return _10
+
+=== output ===
+the scope closed the socket on its way out
+=== result ===
+#Ok(())
+=== trace ===
+0ms t0 spawn main root
+0ms t0 resume
+0ms t0 open r0 listener
+0ms t0 scope enter 1
+0ms t1 spawn wait_for_client in t0
+0ms t1 move r0 from t0
+0ms t0 park timer 50ms
+0ms t1 resume
+0ms t1 park read r0
+50ms -- clock
+50ms t0 resume
+50ms t1 cancel
+50ms t1 close r0
+50ms t0 scope exit 1
+50ms t0 done
