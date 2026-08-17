@@ -32,13 +32,26 @@ install: build
 	ln -sfn $(CURDIR)/target/dogfood/norn $(HOME)/.cargo/bin/norn
 	@echo "linked $(HOME)/.cargo/bin/norn -> $(CURDIR)/target/dogfood/norn"
 
-# Link the VS Code extension into place. A symlink rather than a copy, so editing the grammar and
-# reloading the window is the whole edit loop. See editors/vscode/README.md for other editor
-# layouts (~/.vscode-server over SSH, ~/.vscode-oss on VSCodium).
+# Link the VS Code extension into every extensions directory that exists. A symlink rather than a
+# copy, so editing the grammar and reloading the window is the whole edit loop. Both roots get it
+# because which one is live depends on how the window was opened: a local window reads ~/.vscode,
+# and a Remote-SSH window reads ~/.vscode-server on the machine it connected to.
+EDITOR_ROOTS = $(HOME)/.vscode $(HOME)/.vscode-server $(HOME)/.vscode-oss $(HOME)/.cursor-server
+
 editor-install:
-	@mkdir -p $(HOME)/.vscode/extensions
-	ln -sfn $(CURDIR)/editors/vscode $(HOME)/.vscode/extensions/norn-lang.norn
-	@echo "linked; run \"Developer: Reload Window\" to pick it up"
+	@found=0; \
+	for root in $(EDITOR_ROOTS); do \
+		[ -d "$$root" ] || continue; \
+		mkdir -p "$$root/extensions"; \
+		ln -sfn $(CURDIR)/editors/vscode "$$root/extensions/norn-lang.norn"; \
+		echo "linked $$root/extensions/norn-lang.norn"; \
+		found=1; \
+	done; \
+	if [ $$found -eq 0 ]; then \
+		echo "no editor directory found; link editors/vscode into yours by hand" >&2; \
+		exit 1; \
+	fi
+	@echo "run \"Developer: Reload Window\" to pick it up"
 
 # Build a .vsix. Needs npm, which nothing else here does.
 editor-package:

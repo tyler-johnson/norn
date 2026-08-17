@@ -10,13 +10,18 @@ matcher that turns `norn check` output into squiggles. No language server yet �
 make editor-install
 ```
 
-from the repository root. That symlinks this directory into `~/.vscode/extensions/norn-lang.norn`;
-reload the window (`Developer: Reload Window`) and any `.norn` file will be coloured. Rerun it after
-moving the checkout. If your editor keeps extensions elsewhere — `~/.vscode-server/extensions` over
-SSH, `~/.vscode-oss/extensions` on VSCodium — link it there instead:
+from the repository root, then reload the window (`Developer: Reload Window`). Any `.norn` file will
+be coloured. Rerun it after moving the checkout.
+
+It symlinks this directory into every extensions root it finds — `~/.vscode`, `~/.vscode-server`,
+`~/.vscode-oss`, `~/.cursor-server` — because which one is live depends on how the window was
+opened, not on which editor you installed. A local window reads `~/.vscode/extensions`; a Remote-SSH
+window reads `~/.vscode-server/extensions` on the machine it connected to, which is why installing
+into the obvious one and finding nothing coloured is the usual first surprise. If your editor keeps
+them somewhere else again, the whole install is one line:
 
 ```
-ln -sfn "$PWD/editors/vscode" ~/.vscode-server/extensions/norn-lang.norn
+ln -sfn "$PWD/editors/vscode" <that directory>/norn-lang.norn
 ```
 
 To build a `.vsix` instead, `make editor-package` (needs `npm`).
