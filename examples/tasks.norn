@@ -1,0 +1,57 @@
+module tasks
+
+use std.fs
+use std.http
+use std.json
+use std.time
+
+record Config {
+    greeting: String
+    upstream: Url
+}
+
+record Profile {
+    id: UserId
+    display_name: String
+}
+
+enum FetchError {
+    Timeout
+    Status(I64)
+    Decode(String)
+}
+
+task fn fetch_profile(base: Url, id: UserId) -> Result<Profile, FetchError>
+    uses { net.connect, clock }
+{
+    let response = await http.get(base / "profiles" / id).timeout(2.seconds)?
+    return await response.json<Profile>(limit: 2.mebibytes)?
+}
+
+task fn load_config(path: Path) -> Result<Config, LoadError>
+    uses { fs.read }
+{
+    let config = await fs.read_json<Config>(path)?
+    return Ok(config)
+}
+
+task fn greet(path: Path, id: UserId) -> Result<String>
+    uses { fs.read, net.connect, clock }
+{
+    let config = await load_config(path)?
+    let profile = await fetch_profile(config.upstream, id)?
+    return Ok(config.greeting + ", " + profile.display_name)
+}
+
+fn pipeline(samples: Event<Float>, count: USize) -> Signal<Float> {
+    return samples
+        .window(count)
+        .map(values => mean(values))
+        .hold(0.0)
+}
+
+fn policies(files: Event<Path>, changes: Event<Path>) -> Event<Config> {
+    let parsed = files.map_task(parallel(16), parse_file)
+    let reloaded = changes.map_task(latest, task _ => reload_config())
+    return parsed.merge(reloaded)
+}

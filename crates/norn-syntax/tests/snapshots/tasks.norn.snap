@@ -1,0 +1,147 @@
+=== ast ===
+(module
+  (module-name tasks)
+  (use std.fs)
+  (use std.http)
+  (use std.json)
+  (use std.time)
+  (record Config (field greeting String) (field upstream Url))
+  (record Profile (field id UserId) (field display_name String))
+  (enum FetchError
+    (variant Timeout)
+    (variant Status (tuple I64))
+    (variant Decode (tuple String)))
+  (fn fetch_profile task
+    (params (param base Url) (param id UserId))
+    (ret (ty Result Profile FetchError))
+    (uses net.connect clock)
+    (block
+      (let response
+        (try
+          (await
+            (call
+              (field
+                (call
+                  (path http.get)
+                  (arg (binary / (binary / (path base) (str "profiles")) (path id))))
+                timeout)
+              (arg (field (int 2) seconds))))))
+      (return
+        (try
+          (await
+            (call
+              (path response.json)
+              (type-args Profile)
+              (arg limit (field (int 2) mebibytes))))))))
+  (fn load_config task
+    (params (param path Path))
+    (ret (ty Result Config LoadError))
+    (uses fs.read)
+    (block
+      (let config
+        (try
+          (await (call (path fs.read_json) (type-args Config) (arg (path path))))))
+      (return (call (path Ok) (arg (path config))))))
+  (fn greet task
+    (params (param path Path) (param id UserId))
+    (ret (ty Result String))
+    (uses fs.read net.connect clock)
+    (block
+      (let config (try (await (call (path load_config) (arg (path path))))))
+      (let profile
+        (try
+          (await
+            (call (path fetch_profile) (arg (path config.upstream)) (arg (path id))))))
+      (return
+        (call
+          (path Ok)
+          (arg
+            (binary +
+              (binary + (path config.greeting) (str ", "))
+              (path profile.display_name)))))))
+  (fn pipeline
+    (params (param samples (ty Event Float)) (param count USize))
+    (ret (ty Signal Float))
+    (block
+      (return
+        (call
+          (field
+            (call
+              (field (call (path samples.window) (arg (path count))) map)
+              (arg
+                (lambda
+                  (params (bind values))
+                  (call (path mean) (arg (path values))))))
+            hold)
+          (arg (float 0.0))))))
+  (fn policies
+    (params (param files (ty Event Path)) (param changes (ty Event Path)))
+    (ret (ty Event Config))
+    (block
+      (let parsed
+        (call
+          (path files.map_task)
+          (arg (call (path parallel) (arg (int 16))))
+          (arg (path parse_file))))
+      (let reloaded
+        (call
+          (path changes.map_task)
+          (arg (path latest))
+          (arg (lambda task (params _) (call (path reload_config))))))
+      (return (call (path parsed.merge) (arg (path reloaded)))))))
+
+=== canonical ===
+module tasks
+
+use std.fs
+use std.http
+use std.json
+use std.time
+
+record Config {
+    greeting: String
+    upstream: Url
+}
+
+record Profile {
+    id: UserId
+    display_name: String
+}
+
+enum FetchError {
+    Timeout
+    Status(I64)
+    Decode(String)
+}
+
+task fn fetch_profile(base: Url, id: UserId) -> Result<Profile, FetchError>
+    uses { net.connect, clock }
+{
+    let response = await http.get(base / "profiles" / id).timeout(2.seconds)?
+    return await response.json<Profile>(limit: 2.mebibytes)?
+}
+
+task fn load_config(path: Path) -> Result<Config, LoadError>
+    uses { fs.read }
+{
+    let config = await fs.read_json<Config>(path)?
+    return Ok(config)
+}
+
+task fn greet(path: Path, id: UserId) -> Result<String>
+    uses { fs.read, net.connect, clock }
+{
+    let config = await load_config(path)?
+    let profile = await fetch_profile(config.upstream, id)?
+    return Ok(config.greeting + ", " + profile.display_name)
+}
+
+fn pipeline(samples: Event<Float>, count: USize) -> Signal<Float> {
+    return samples.window(count).map(values => mean(values)).hold(0.0)
+}
+
+fn policies(files: Event<Path>, changes: Event<Path>) -> Event<Config> {
+    let parsed = files.map_task(parallel(16), parse_file)
+    let reloaded = changes.map_task(latest, task _ => reload_config())
+    return parsed.merge(reloaded)
+}

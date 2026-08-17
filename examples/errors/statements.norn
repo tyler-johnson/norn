@@ -1,0 +1,16 @@
+module errors.statements
+
+fn two_on_one_line() -> I64 {
+    let a = 1 let b = 2
+    return a + b
+}
+
+fn semicolons() -> I64 {
+    let a = 1;
+    return a
+}
+
+fn reserved_name() -> I64 {
+    let state = 1
+    return state
+}

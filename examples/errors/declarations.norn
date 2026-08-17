@@ -1,0 +1,19 @@
+module errors.declarations
+
+record Missing {
+    name String
+}
+
+fn pure_capabilities() -> I64
+    uses { fs.read }
+{
+    return 0
+}
+
+fn unclosed(a: I64 -> I64 {
+    return a
+}
+
+fn recovers_after() -> I64 {
+    return 1
+}

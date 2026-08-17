@@ -1,0 +1,121 @@
+=== ast ===
+(module
+  (module-name values)
+  (record User (field id I64) (field name String) (field email String))
+  (record Profile
+    (field user User)
+    (field display_name String)
+    (field verified Bool))
+  (enum LoadError
+    (variant NotFound)
+    (variant Invalid (tuple String))
+    (variant Io (fields (field code I64) (field message String))))
+  (fn display_name
+    (params (param profile (ref Profile)))
+    (ret String)
+    (block (return (path profile.display_name))))
+  (fn describe
+    (params (param error LoadError))
+    (ret String)
+    (block
+      (match
+        (path error)
+        (arm (variant LoadError.NotFound) (str "not found"))
+        (arm (variant LoadError.Invalid (bind reason)) (path reason))
+        (arm
+          (variant-record LoadError.Io (field code) (field message))
+          (path message)))))
+  (fn classify
+    (params (param user User))
+    (ret String)
+    (block
+      (if
+        (binary == (path user.id) (int 0))
+        (block (return (str "root")))
+        (else
+          (if
+            (binary < (path user.id) (int 1000))
+            (block (return (str "system")))
+            (else (block (return (str "ordinary")))))))))
+  (fn arithmetic
+    (params (param a I64) (param b I64))
+    (ret I64)
+    (block
+      (let sum (binary - (binary + (path a) (binary * (path b) (int 2))) (int 1)))
+      (let scaled (binary * (binary + (path a) (path b)) (int 3)))
+      (let mixed
+        (binary ||
+          (binary &&
+            (binary < (path a) (path b))
+            (binary > (path sum) (path scaled)))
+          (unary ! (bool true))))
+      (return (binary + (path sum) (path scaled)))))
+  (fn build
+    (params (param name String))
+    (ret Profile)
+    (block
+      (let user
+        (record User
+          (field id (int 7))
+          (field name (path name))
+          (field email (str "nobody@example.com"))))
+      (return
+        (record Profile
+          (field user (path user))
+          (field display_name (str "seven"))
+          (field verified (bool false)))))))
+
+=== canonical ===
+module values
+
+record User {
+    id: I64
+    name: String
+    email: String
+}
+
+record Profile {
+    user: User
+    display_name: String
+    verified: Bool
+}
+
+enum LoadError {
+    NotFound
+    Invalid(String)
+    Io { code: I64, message: String }
+}
+
+fn display_name(profile: &Profile) -> String {
+    return profile.display_name
+}
+
+fn describe(error: LoadError) -> String {
+    match error {
+        LoadError.NotFound => "not found"
+        LoadError.Invalid(reason) => reason
+        LoadError.Io { code, message } => message
+    }
+}
+
+fn classify(user: User) -> String {
+    if user.id == 0 {
+        return "root"
+    } else if user.id < 1000 {
+        return "system"
+    } else {
+        return "ordinary"
+    }
+}
+
+fn arithmetic(a: I64, b: I64) -> I64 {
+    let sum = a + b * 2 - 1
+    let scaled = (a + b) * 3
+    let mixed = a < b && sum > scaled || !true
+    return sum + scaled
+}
+
+fn build(name: String) -> Profile {
+    let user = User { id: 7, name: name, email: "nobody@example.com" }
+    return Profile { user: user, display_name: "seven", verified: false }
+}

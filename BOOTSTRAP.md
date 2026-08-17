@@ -54,7 +54,7 @@ places (suspension, cancellation, reentry) where the language makes its most int
 ```
 source (.norn)
     ↓
-norn-syntax        lexer, parser, concrete syntax tree
+norn-syntax        lexer, parser, spanned AST
     ↓
 norn-hir           name resolution, type checking, typed AST
     ↓                  reactive analysis: dependency graph, causality,
@@ -127,10 +127,22 @@ the design rests on. `switch` arrives after the trace tooling exists to debug it
 
 ### M0 — Skeleton
 
-Cargo workspace, `norn` CLI, lexer, parser, concrete syntax tree, snapshot test harness. Parses the
-value subset (records, enums, functions, `let`, `match`, expressions). No semantics yet.
+Cargo workspace, `norn` CLI, lexer, parser, spanned AST, snapshot test harness. Parses the value
+subset (records, enums, functions, `let`, `match`, expressions). No semantics yet.
 
-*Done when:* `norn parse examples/*.norn` round-trips and every snapshot is committed.
+The AST does not retain comments or layout, so round-tripping means idempotence of the canonical
+printer rather than byte equality with the source: `print(parse(print(parse(s))))` must equal
+`print(parse(s))`, and the two parses must yield the same tree. That property fails loudly whenever
+the printer and the parser disagree about how a construct nests, which is the class of bug a
+hand-written recursive-descent parser produces most often.
+
+Two layout rules keep the grammar free of semicolons: statements within a block are separated by
+line breaks, and a postfix chain continues across a line break only for `.` — a `(`, `[`, or `?`
+opening a fresh line starts something new.
+
+*Done when:* `norn parse examples/*.norn` succeeds, every example is print-idempotent, and the
+snapshot corpus — ASTs, canonical renderings, and rendered diagnostics for the deliberately broken
+examples — is committed.
 
 ### M1 — Value core
 
@@ -203,7 +215,7 @@ norn/
 ├── BOOTSTRAP.md
 ├── Cargo.toml               workspace
 ├── crates/
-│   ├── norn-syntax/         lexer, parser, CST, spans, diagnostics
+│   ├── norn-syntax/         lexer, parser, spanned AST, diagnostics
 │   ├── norn-hir/            resolution, types, reactive analysis     (M1)
 │   ├── norn-nir/            lowered IR + interpreter                 (M1)
 │   ├── norn-rt/             scheduler, I/O, mailboxes, turn loop     (M2)

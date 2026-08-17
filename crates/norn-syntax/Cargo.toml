@@ -1,0 +1,9 @@
+[package]
+name = "norn-syntax"
+description = "Lexer, parser, and spanned AST for the Norn language"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]

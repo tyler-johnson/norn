@@ -1,0 +1,53 @@
+module values
+
+record User {
+    id: I64
+    name: String
+    email: String
+}
+
+record Profile {
+    user: User
+    display_name: String
+    verified: Bool
+}
+
+enum LoadError {
+    NotFound
+    Invalid(String)
+    Io { code: I64, message: String }
+}
+
+fn display_name(profile: &Profile) -> String {
+    return profile.display_name
+}
+
+fn describe(error: LoadError) -> String {
+    match error {
+        LoadError.NotFound => "not found"
+        LoadError.Invalid(reason) => reason
+        LoadError.Io { code, message } => message
+    }
+}
+
+fn classify(user: User) -> String {
+    if user.id == 0 {
+        return "root"
+    } else if user.id < 1000 {
+        return "system"
+    } else {
+        return "ordinary"
+    }
+}
+
+fn arithmetic(a: I64, b: I64) -> I64 {
+    let sum = a + b * 2 - 1
+    let scaled = (a + b) * 3
+    let mixed = a < b && sum > scaled || !true
+    return sum + scaled
+}
+
+fn build(name: String) -> Profile {
+    let user = User { id: 7, name: name, email: "nobody@example.com" }
+    return Profile { user: user, display_name: "seven", verified: false }
+}

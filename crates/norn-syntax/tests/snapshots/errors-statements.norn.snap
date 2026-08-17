@@ -1,0 +1,18 @@
+error: expected a line break between statements, found `let`
+ --> statements.norn:4:15
+  |
+4 |     let a = 1 let b = 2
+  |               ^^^
+
+error: statements are separated by line breaks, not `;`
+ --> statements.norn:9:14
+  |
+9 |     let a = 1;
+  |              ^
+
+error: `state` is reserved for a later milestone
+  --> statements.norn:14:9
+   |
+14 |     let state = 1
+   |         ^^^^^ reserved word
+   = note: it cannot be used as a name yet; see BOOTSTRAP.md §5 for when it becomes available

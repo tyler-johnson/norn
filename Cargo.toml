@@ -1,0 +1,15 @@
+[workspace]
+resolver = "3"
+members = ["crates/norn", "crates/norn-syntax"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.97"
+publish = false
+
+[workspace.dependencies]
+norn-syntax = { path = "crates/norn-syntax" }
+
+[profile.release]
+lto = "thin"
