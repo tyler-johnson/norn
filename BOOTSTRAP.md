@@ -318,8 +318,13 @@ Ordered roughly by when it becomes worth doing, not by importance:
    reactor-local arenas, subscription lifetimes. Closures arrive here too — nothing in M3's surface
    needed one, and dynamic switching is what real closures are for — and with them `event` nodes,
    `export event`, and the operators M3 deferred: `hold`, `scan`, `count`, `map`, `merge`, `delay`,
-   `keyed`, and `map_task` policies. The read side of an event also wants `for await`, which needs a
-   loop construct. Requires the trace tooling from M3.
+   `keyed`, and `map_task` policies. **Effect policies belong here too** — a per-request pending
+   queue on `after_commit`, and cancellation of obsolete work when a newer request supersedes an
+   in-flight one. M3 launches every request and lets the scope cancel what is outstanding, which is
+   correct but has no way to say "only the latest matters"; saying so needs a policy vocabulary on
+   `after_commit`, and that is the same scheduling question as `map_task`'s rather than a causality
+   one. The read side of an event also wants `for await`, which needs a loop construct. Requires the
+   trace tooling from M3.
 2. **Multi-threaded scheduler.** Work stealing, parallel reactors on separate workers. The
    single-threaded loop is a correctness baseline to differential-test against.
 3. **Language server.** `norn-lsp` over stdio: diagnostics first, which is `norn_hir::check`'s
