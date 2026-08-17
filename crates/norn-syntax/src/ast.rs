@@ -22,11 +22,17 @@ pub struct Path {
 
 impl Path {
     pub fn last(&self) -> &Ident {
-        self.segments.last().expect("a path has at least one segment")
+        self.segments
+            .last()
+            .expect("a path has at least one segment")
     }
 
     pub fn text(&self) -> String {
-        self.segments.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(".")
+        self.segments
+            .iter()
+            .map(|s| s.name.as_str())
+            .collect::<Vec<_>>()
+            .join(".")
     }
 }
 
@@ -135,8 +141,16 @@ pub struct Stmt {
 
 #[derive(Debug)]
 pub enum StmtKind {
-    Let { mutable: bool, name: Ident, ty: Option<Type>, value: Expr },
-    Assign { target: Expr, value: Expr },
+    Let {
+        mutable: bool,
+        name: Ident,
+        ty: Option<Type>,
+        value: Expr,
+    },
+    Assign {
+        target: Expr,
+        value: Expr,
+    },
     Return(Option<Expr>),
     Expr(Expr),
 }
@@ -155,22 +169,53 @@ pub enum ExprKind {
     Str(String),
     Bool(bool),
     Path(Path),
-    Unary { op: UnOp, expr: Box<Expr> },
-    Binary { op: BinOp, lhs: Box<Expr>, rhs: Box<Expr> },
-    Field { base: Box<Expr>, name: Ident },
-    Index { base: Box<Expr>, index: Box<Expr> },
-    Call { callee: Box<Expr>, type_args: Vec<Type>, args: Vec<Arg> },
+    Unary {
+        op: UnOp,
+        expr: Box<Expr>,
+    },
+    Binary {
+        op: BinOp,
+        lhs: Box<Expr>,
+        rhs: Box<Expr>,
+    },
+    Field {
+        base: Box<Expr>,
+        name: Ident,
+    },
+    Index {
+        base: Box<Expr>,
+        index: Box<Expr>,
+    },
+    Call {
+        callee: Box<Expr>,
+        type_args: Vec<Type>,
+        args: Vec<Arg>,
+    },
     /// A data constructor: `#User(id: 7)`, `#LoadError.Invalid("bad")`, `#LoadError.NotFound`.
     /// The `#` is what separates building a value from calling a function; without it the two
     /// forms would be spelled identically and told apart only by the case of a name.
-    Construct { path: Path, args: Vec<Arg> },
+    Construct {
+        path: Path,
+        args: Vec<Arg>,
+    },
     Await(Box<Expr>),
     /// Postfix `?`: propagate the error case outward.
     Try(Box<Expr>),
-    Match { scrutinee: Box<Expr>, arms: Vec<Arm> },
-    If { cond: Box<Expr>, then: Block, els: Option<Box<Expr>> },
+    Match {
+        scrutinee: Box<Expr>,
+        arms: Vec<Arm>,
+    },
+    If {
+        cond: Box<Expr>,
+        then: Block,
+        els: Option<Box<Expr>>,
+    },
     Block(Block),
-    Lambda { is_task: bool, params: Vec<Pat>, body: Box<Expr> },
+    Lambda {
+        is_task: bool,
+        params: Vec<Pat>,
+        body: Box<Expr>,
+    },
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -262,7 +307,11 @@ pub enum PatKind {
     Bool(bool),
     /// The mirror of `ExprKind::Construct`: `#LoadError.Io(code, message)`, `#LoadError.NotFound`.
     /// Arguments may be positional or named, and `..` ignores the rest.
-    Construct { path: Path, args: Vec<PatArg>, rest: bool },
+    Construct {
+        path: Path,
+        args: Vec<PatArg>,
+        rest: bool,
+    },
     Or(Vec<Pat>),
 }
 

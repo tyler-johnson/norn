@@ -32,7 +32,11 @@ impl Parsed {
 
 pub fn parse(text: &str) -> Parsed {
     let Lexed { tokens, errors } = lex(text);
-    let mut parser = Parser { tokens, pos: 0, errors };
+    let mut parser = Parser {
+        tokens,
+        pos: 0,
+        errors,
+    };
     let module = parser.module();
     let mut errors = parser.errors;
     // Lexer diagnostics are produced up front, so report in source order rather than stage order.
@@ -145,7 +149,12 @@ impl Parser {
         }
 
         let end = self.peek().span;
-        Module { name, uses, items, span: start.to(end) }
+        Module {
+            name,
+            uses,
+            items,
+            span: start.to(end),
+        }
     }
 
     fn top_level(&mut self, uses: &mut Vec<UseDecl>, items: &mut Vec<Item>) -> PResult<()> {
@@ -164,7 +173,9 @@ impl Parser {
             }
             TokenKind::Kw(Kw::Record) => items.push(Item::Record(self.record_decl()?)),
             TokenKind::Kw(Kw::Enum) => items.push(Item::Enum(self.enum_decl()?)),
-            TokenKind::Kw(Kw::Fn) | TokenKind::Kw(Kw::Task) => items.push(Item::Fn(self.fn_decl()?)),
+            TokenKind::Kw(Kw::Fn) | TokenKind::Kw(Kw::Task) => {
+                items.push(Item::Fn(self.fn_decl()?))
+            }
             TokenKind::Kw(Kw::Module) => {
                 let span = self.peek().span;
                 return Err(self.push(
@@ -191,7 +202,9 @@ impl Parser {
                         span,
                         format!("expected a declaration, found {}", other.describe()),
                     )
-                    .note("a file contains `use`, `record`, `enum`, `fn`, and `task fn` declarations"),
+                    .note(
+                        "a file contains `use`, `record`, `enum`, `fn`, and `task fn` declarations",
+                    ),
                 ));
             }
         }
@@ -232,7 +245,11 @@ impl Parser {
             self.separator(&TokenKind::RBrace, "field")?;
         }
         let end = self.expect(TokenKind::RBrace)?.span;
-        Ok(RecordDecl { name, fields, span: start.to(end) })
+        Ok(RecordDecl {
+            name,
+            fields,
+            span: start.to(end),
+        })
     }
 
     fn field_decl(&mut self) -> PResult<FieldDecl> {
@@ -274,11 +291,19 @@ impl Parser {
             } else {
                 VariantPayload::Unit
             };
-            variants.push(Variant { name: vname, payload, span });
+            variants.push(Variant {
+                name: vname,
+                payload,
+                span,
+            });
             self.separator(&TokenKind::RBrace, "variant")?;
         }
         let end = self.expect(TokenKind::RBrace)?.span;
-        Ok(EnumDecl { name, variants, span: start.to(end) })
+        Ok(EnumDecl {
+            name,
+            variants,
+            span: start.to(end),
+        })
     }
 
     fn fn_decl(&mut self) -> PResult<FnDecl> {
@@ -294,14 +319,22 @@ impl Parser {
             self.expect(TokenKind::Colon)?;
             let ty = self.ty()?;
             let span = pname.span.to(ty.span);
-            params.push(Param { name: pname, ty, span });
+            params.push(Param {
+                name: pname,
+                ty,
+                span,
+            });
             if !self.eat(&TokenKind::Comma) {
                 break;
             }
         }
         self.expect(TokenKind::RParen)?;
 
-        let ret = if self.eat(&TokenKind::ThinArrow) { Some(self.ty()?) } else { None };
+        let ret = if self.eat(&TokenKind::ThinArrow) {
+            Some(self.ty()?)
+        } else {
+            None
+        };
 
         let mut uses = Vec::new();
         if self.at(&TokenKind::Kw(Kw::Uses)) {
@@ -310,7 +343,9 @@ impl Parser {
                 self.errors.push(
                     Diagnostic::new(uses_span, "only a `task fn` may declare capabilities")
                         .label("`uses` on an ordinary function")
-                        .note("ordinary functions are pure; move the effectful work into a `task fn`"),
+                        .note(
+                            "ordinary functions are pure; move the effectful work into a `task fn`",
+                        ),
                 );
             }
             self.expect(TokenKind::LBrace)?;
@@ -323,7 +358,15 @@ impl Parser {
 
         let body = self.block()?;
         let span = start.to(body.span);
-        Ok(FnDecl { is_task, name, params, ret, uses, body, span })
+        Ok(FnDecl {
+            is_task,
+            name,
+            params,
+            ret,
+            uses,
+            body,
+            span,
+        })
     }
 
     /// Accept a comma, a line break, or the closing token as an item separator.
@@ -335,7 +378,9 @@ impl Parser {
             return Ok(());
         }
         let found = self.peek_kind().describe();
-        Err(self.error(format!("expected a line break or `,` between {what}s, found {found}")))
+        Err(self.error(format!(
+            "expected a line break or `,` between {what}s, found {found}"
+        )))
     }
 
     // ---------------------------------------------------------------- names and types
@@ -372,14 +417,23 @@ impl Parser {
         if self.at(&TokenKind::LParen) {
             self.advance();
             let end = self.expect(TokenKind::RParen)?.span;
-            return Ok(Type { kind: TypeKind::Unit, span: start.to(end) });
+            return Ok(Type {
+                kind: TypeKind::Unit,
+                span: start.to(end),
+            });
         }
         if self.at(&TokenKind::Amp) {
             self.advance();
             let mutable = self.eat(&TokenKind::Kw(Kw::Mut));
             let inner = self.ty()?;
             let span = start.to(inner.span);
-            return Ok(Type { kind: TypeKind::Ref { mutable, inner: Box::new(inner) }, span });
+            return Ok(Type {
+                kind: TypeKind::Ref {
+                    mutable,
+                    inner: Box::new(inner),
+                },
+                span,
+            });
         }
         let path = self.path()?;
         let mut span = path.span;
@@ -394,7 +448,10 @@ impl Parser {
             }
             span = span.to(self.expect(TokenKind::Gt)?.span);
         }
-        Ok(Type { kind: TypeKind::Path { path, args }, span })
+        Ok(Type {
+            kind: TypeKind::Path { path, args },
+            span,
+        })
     }
 
     // ---------------------------------------------------------------- statements
@@ -421,7 +478,10 @@ impl Parser {
             }
         }
         let end = self.expect(TokenKind::RBrace)?.span;
-        Ok(Block { stmts, span: start.to(end) })
+        Ok(Block {
+            stmts,
+            span: start.to(end),
+        })
     }
 
     fn stmt(&mut self) -> PResult<Stmt> {
@@ -431,20 +491,34 @@ impl Parser {
                 self.advance();
                 let mutable = self.eat(&TokenKind::Kw(Kw::Mut));
                 let name = self.ident()?;
-                let ty = if self.eat(&TokenKind::Colon) { Some(self.ty()?) } else { None };
+                let ty = if self.eat(&TokenKind::Colon) {
+                    Some(self.ty()?)
+                } else {
+                    None
+                };
                 self.expect(TokenKind::Eq)?;
                 let value = self.expr()?;
                 let span = start.to(value.span);
-                Ok(Stmt { kind: StmtKind::Let { mutable, name, ty, value }, span })
+                Ok(Stmt {
+                    kind: StmtKind::Let {
+                        mutable,
+                        name,
+                        ty,
+                        value,
+                    },
+                    span,
+                })
             }
             TokenKind::Kw(Kw::Return) => {
                 self.advance();
-                let has_value = !self.at(&TokenKind::RBrace)
-                    && !self.at_eof()
-                    && !self.peek().nl_before;
+                let has_value =
+                    !self.at(&TokenKind::RBrace) && !self.at_eof() && !self.peek().nl_before;
                 let value = if has_value { Some(self.expr()?) } else { None };
                 let span = value.as_ref().map_or(start, |v| start.to(v.span));
-                Ok(Stmt { kind: StmtKind::Return(value), span })
+                Ok(Stmt {
+                    kind: StmtKind::Return(value),
+                    span,
+                })
             }
             TokenKind::Reserved(word) => {
                 let span = self.peek().span;
@@ -456,10 +530,19 @@ impl Parser {
                     self.advance();
                     let value = self.expr()?;
                     let span = expr.span.to(value.span);
-                    return Ok(Stmt { kind: StmtKind::Assign { target: expr, value }, span });
+                    return Ok(Stmt {
+                        kind: StmtKind::Assign {
+                            target: expr,
+                            value,
+                        },
+                        span,
+                    });
                 }
                 let span = expr.span;
-                Ok(Stmt { kind: StmtKind::Expr(expr), span })
+                Ok(Stmt {
+                    kind: StmtKind::Expr(expr),
+                    span,
+                })
             }
         }
     }
@@ -473,7 +556,9 @@ impl Parser {
     fn expr_bp(&mut self, min_bp: u8) -> PResult<Expr> {
         let mut lhs = self.unary()?;
         loop {
-            let Some(op) = bin_op(self.peek_kind()) else { break };
+            let Some(op) = bin_op(self.peek_kind()) else {
+                break;
+            };
             let bp = binding_power(op);
             if bp < min_bp {
                 break;
@@ -482,7 +567,11 @@ impl Parser {
             let rhs = self.expr_bp(bp + 1)?;
             let span = lhs.span.to(rhs.span);
             lhs = Expr {
-                kind: ExprKind::Binary { op, lhs: Box::new(lhs), rhs: Box::new(rhs) },
+                kind: ExprKind::Binary {
+                    op,
+                    lhs: Box::new(lhs),
+                    rhs: Box::new(rhs),
+                },
                 span,
             };
         }
@@ -510,7 +599,13 @@ impl Parser {
             }
             let expr = self.unary()?;
             let span = start.to(expr.span);
-            return Ok(Expr { kind: ExprKind::Unary { op, expr: Box::new(expr) }, span });
+            return Ok(Expr {
+                kind: ExprKind::Unary {
+                    op,
+                    expr: Box::new(expr),
+                },
+                span,
+            });
         }
 
         if self.at(&TokenKind::Kw(Kw::Await)) {
@@ -520,7 +615,10 @@ impl Parser {
             let inner = self.primary()?;
             let inner = self.postfix_with(inner, false)?;
             let span = start.to(inner.span);
-            let awaited = Expr { kind: ExprKind::Await(Box::new(inner)), span };
+            let awaited = Expr {
+                kind: ExprKind::Await(Box::new(inner)),
+                span,
+            };
             return self.postfix(awaited);
         }
 
@@ -541,7 +639,13 @@ impl Parser {
                     self.advance();
                     let name = self.ident()?;
                     let span = expr.span.to(name.span);
-                    expr = Expr { kind: ExprKind::Field { base: Box::new(expr), name }, span };
+                    expr = Expr {
+                        kind: ExprKind::Field {
+                            base: Box::new(expr),
+                            name,
+                        },
+                        span,
+                    };
                 }
                 TokenKind::LParen if !nl => {
                     expr = self.call(expr, Vec::new())?;
@@ -567,14 +671,20 @@ impl Parser {
                     let end = self.expect(TokenKind::RBracket)?.span;
                     let span = expr.span.to(end);
                     expr = Expr {
-                        kind: ExprKind::Index { base: Box::new(expr), index: Box::new(index) },
+                        kind: ExprKind::Index {
+                            base: Box::new(expr),
+                            index: Box::new(index),
+                        },
                         span,
                     };
                 }
                 TokenKind::Question if !nl && allow_try => {
                     let end = self.advance().span;
                     let span = expr.span.to(end);
-                    expr = Expr { kind: ExprKind::Try(Box::new(expr)), span };
+                    expr = Expr {
+                        kind: ExprKind::Try(Box::new(expr)),
+                        span,
+                    };
                 }
                 _ => return Ok(expr),
             }
@@ -627,7 +737,14 @@ impl Parser {
         }
         let end = self.expect(TokenKind::RParen)?.span;
         let span = callee.span.to(end);
-        Ok(Expr { kind: ExprKind::Call { callee: Box::new(callee), type_args, args }, span })
+        Ok(Expr {
+            kind: ExprKind::Call {
+                callee: Box::new(callee),
+                type_args,
+                args,
+            },
+            span,
+        })
     }
 
     fn primary(&mut self) -> PResult<Expr> {
@@ -635,30 +752,48 @@ impl Parser {
         match self.peek_kind().clone() {
             TokenKind::Int(v) => {
                 self.advance();
-                Ok(Expr { kind: ExprKind::Int(v), span: start })
+                Ok(Expr {
+                    kind: ExprKind::Int(v),
+                    span: start,
+                })
             }
             TokenKind::Float(v) => {
                 self.advance();
-                Ok(Expr { kind: ExprKind::Float(v), span: start })
+                Ok(Expr {
+                    kind: ExprKind::Float(v),
+                    span: start,
+                })
             }
             TokenKind::Str(v) => {
                 self.advance();
-                Ok(Expr { kind: ExprKind::Str(v), span: start })
+                Ok(Expr {
+                    kind: ExprKind::Str(v),
+                    span: start,
+                })
             }
             TokenKind::Kw(Kw::True) => {
                 self.advance();
-                Ok(Expr { kind: ExprKind::Bool(true), span: start })
+                Ok(Expr {
+                    kind: ExprKind::Bool(true),
+                    span: start,
+                })
             }
             TokenKind::Kw(Kw::False) => {
                 self.advance();
-                Ok(Expr { kind: ExprKind::Bool(false), span: start })
+                Ok(Expr {
+                    kind: ExprKind::Bool(false),
+                    span: start,
+                })
             }
             TokenKind::Kw(Kw::Match) => self.match_expr(),
             TokenKind::Kw(Kw::If) => self.if_expr(),
             TokenKind::LBrace => {
                 let block = self.block()?;
                 let span = block.span;
-                Ok(Expr { kind: ExprKind::Block(block), span })
+                Ok(Expr {
+                    kind: ExprKind::Block(block),
+                    span,
+                })
             }
             TokenKind::Kw(Kw::Task) => {
                 // `task request => handle(request)` — a task-valued lambda.
@@ -668,7 +803,11 @@ impl Parser {
                 let body = self.expr()?;
                 let span = start.to(body.span);
                 Ok(Expr {
-                    kind: ExprKind::Lambda { is_task: true, params, body: Box::new(body) },
+                    kind: ExprKind::Lambda {
+                        is_task: true,
+                        params,
+                        body: Box::new(body),
+                    },
                     span,
                 })
             }
@@ -678,7 +817,11 @@ impl Parser {
                 let body = self.expr()?;
                 let span = start.to(body.span);
                 Ok(Expr {
-                    kind: ExprKind::Lambda { is_task: false, params, body: Box::new(body) },
+                    kind: ExprKind::Lambda {
+                        is_task: false,
+                        params,
+                        body: Box::new(body),
+                    },
                     span,
                 })
             }
@@ -690,23 +833,36 @@ impl Parser {
                     let body = self.expr()?;
                     let span = start.to(body.span);
                     return Ok(Expr {
-                        kind: ExprKind::Lambda { is_task: false, params, body: Box::new(body) },
+                        kind: ExprKind::Lambda {
+                            is_task: false,
+                            params,
+                            body: Box::new(body),
+                        },
                         span,
                     });
                 }
                 let path = self.path()?;
                 let span = path.span;
-                Ok(Expr { kind: ExprKind::Path(path), span })
+                Ok(Expr {
+                    kind: ExprKind::Path(path),
+                    span,
+                })
             }
             TokenKind::Hash => {
                 self.advance();
                 let path = self.path()?;
                 let (args, end) = self.construct_args()?;
                 let span = start.to(end.unwrap_or(path.span));
-                Ok(Expr { kind: ExprKind::Construct { path, args }, span })
+                Ok(Expr {
+                    kind: ExprKind::Construct { path, args },
+                    span,
+                })
             }
             TokenKind::Reserved(word) => Err(self.push(reserved_diagnostic(start, &word))),
-            other => Err(self.error(format!("expected an expression, found {}", other.describe()))),
+            other => Err(self.error(format!(
+                "expected an expression, found {}",
+                other.describe()
+            ))),
         }
     }
 
@@ -753,7 +909,11 @@ impl Parser {
             let body = self.expr()?;
             let span = start.to(body.span);
             return Ok(Expr {
-                kind: ExprKind::Lambda { is_task: false, params, body: Box::new(body) },
+                kind: ExprKind::Lambda {
+                    is_task: false,
+                    params,
+                    body: Box::new(body),
+                },
                 span,
             });
         }
@@ -763,7 +923,10 @@ impl Parser {
         self.advance(); // `(`
         if self.at(&TokenKind::RParen) {
             let end = self.advance().span;
-            return Ok(Expr { kind: ExprKind::Unit, span: start.to(end) });
+            return Ok(Expr {
+                kind: ExprKind::Unit,
+                span: start.to(end),
+            });
         }
         let mut inner = self.expr()?;
         let end = self.expect(TokenKind::RParen)?.span;
@@ -800,14 +963,24 @@ impl Parser {
             } else {
                 let block = self.block()?;
                 let span = block.span;
-                Expr { kind: ExprKind::Block(block), span }
+                Expr {
+                    kind: ExprKind::Block(block),
+                    span,
+                }
             };
             span = span.to(expr.span);
             Some(Box::new(expr))
         } else {
             None
         };
-        Ok(Expr { kind: ExprKind::If { cond: Box::new(cond), then, els }, span })
+        Ok(Expr {
+            kind: ExprKind::If {
+                cond: Box::new(cond),
+                then,
+                els,
+            },
+            span,
+        })
     }
 
     fn match_expr(&mut self) -> PResult<Expr> {
@@ -818,17 +991,31 @@ impl Parser {
         while !self.at(&TokenKind::RBrace) && !self.at_eof() {
             let arm_start = self.peek().span;
             let pat = self.pat()?;
-            let guard =
-                if self.eat(&TokenKind::Kw(Kw::If)) { Some(self.expr()?) } else { None };
+            let guard = if self.eat(&TokenKind::Kw(Kw::If)) {
+                Some(self.expr()?)
+            } else {
+                None
+            };
             self.expect(TokenKind::FatArrow)?;
             let body = self.expr()?;
             let span = arm_start.to(body.span);
-            arms.push(Arm { pat, guard, body, span });
+            arms.push(Arm {
+                pat,
+                guard,
+                body,
+                span,
+            });
             self.separator(&TokenKind::RBrace, "arm")?;
         }
         let end = self.expect(TokenKind::RBrace)?.span;
         let span = start.to(end);
-        Ok(Expr { kind: ExprKind::Match { scrutinee: Box::new(scrutinee), arms }, span })
+        Ok(Expr {
+            kind: ExprKind::Match {
+                scrutinee: Box::new(scrutinee),
+                arms,
+            },
+            span,
+        })
     }
 
     // ---------------------------------------------------------------- patterns
@@ -845,7 +1032,10 @@ impl Parser {
             span = span.to(alt.span);
             alts.push(alt);
         }
-        Ok(Pat { kind: PatKind::Or(alts), span })
+        Ok(Pat {
+            kind: PatKind::Or(alts),
+            span,
+        })
     }
 
     fn pat_single(&mut self) -> PResult<Pat> {
@@ -853,41 +1043,67 @@ impl Parser {
         match self.peek_kind().clone() {
             TokenKind::Underscore => {
                 self.advance();
-                Ok(Pat { kind: PatKind::Wild, span: start })
+                Ok(Pat {
+                    kind: PatKind::Wild,
+                    span: start,
+                })
             }
             TokenKind::Int(v) => {
                 self.advance();
-                Ok(Pat { kind: PatKind::Int(v), span: start })
+                Ok(Pat {
+                    kind: PatKind::Int(v),
+                    span: start,
+                })
             }
             TokenKind::Minus if matches!(self.peek_at(1).kind, TokenKind::Int(_)) => {
                 self.advance();
-                let TokenKind::Int(v) = self.peek_kind().clone() else { unreachable!() };
+                let TokenKind::Int(v) = self.peek_kind().clone() else {
+                    unreachable!()
+                };
                 let end = self.advance().span;
-                Ok(Pat { kind: PatKind::Int(-v), span: start.to(end) })
+                Ok(Pat {
+                    kind: PatKind::Int(-v),
+                    span: start.to(end),
+                })
             }
             TokenKind::Str(v) => {
                 self.advance();
-                Ok(Pat { kind: PatKind::Str(v), span: start })
+                Ok(Pat {
+                    kind: PatKind::Str(v),
+                    span: start,
+                })
             }
             TokenKind::Kw(Kw::True) => {
                 self.advance();
-                Ok(Pat { kind: PatKind::Bool(true), span: start })
+                Ok(Pat {
+                    kind: PatKind::Bool(true),
+                    span: start,
+                })
             }
             TokenKind::Kw(Kw::False) => {
                 self.advance();
-                Ok(Pat { kind: PatKind::Bool(false), span: start })
+                Ok(Pat {
+                    kind: PatKind::Bool(false),
+                    span: start,
+                })
             }
             // A bare name always binds. Nothing about how it is spelled changes that.
             TokenKind::Ident(name) => {
                 let span = self.advance().span;
                 if self.at(&TokenKind::Dot) {
                     return Err(self.push(
-                        Diagnostic::new(span.to(self.peek().span), "a bare name in a pattern binds")
-                            .label("this is a binding, not a constructor")
-                            .note("to match a constructor, mark it: `#LoadError.NotFound`"),
+                        Diagnostic::new(
+                            span.to(self.peek().span),
+                            "a bare name in a pattern binds",
+                        )
+                        .label("this is a binding, not a constructor")
+                        .note("to match a constructor, mark it: `#LoadError.NotFound`"),
                     ));
                 }
-                Ok(Pat { kind: PatKind::Binding(Ident { name, span }), span })
+                Ok(Pat {
+                    kind: PatKind::Binding(Ident { name, span }),
+                    span,
+                })
             }
             TokenKind::Hash => {
                 self.advance();
@@ -917,19 +1133,24 @@ impl Parser {
                         };
                         let pat = self.pat()?;
                         let arg_span = arg_start.to(pat.span);
-                        args.push(PatArg { name, pat, span: arg_span });
+                        args.push(PatArg {
+                            name,
+                            pat,
+                            span: arg_span,
+                        });
                         if !self.eat(&TokenKind::Comma) {
                             break;
                         }
                     }
                     span = span.to(self.expect(TokenKind::RParen)?.span);
                 }
-                Ok(Pat { kind: PatKind::Construct { path, args, rest }, span })
+                Ok(Pat {
+                    kind: PatKind::Construct { path, args, rest },
+                    span,
+                })
             }
             TokenKind::Reserved(word) => Err(self.push(reserved_diagnostic(start, &word))),
-            other => {
-                Err(self.error(format!("expected a pattern, found {}", other.describe())))
-            }
+            other => Err(self.error(format!("expected a pattern, found {}", other.describe()))),
         }
     }
 }

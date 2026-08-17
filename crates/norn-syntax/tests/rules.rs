@@ -34,7 +34,10 @@ fn expr(source: &str) -> String {
         panic!("expected a `let` statement");
     };
     // Collapse the dump's line wrapping: these tests are about structure, not layout.
-    dump::expr(value).split_whitespace().collect::<Vec<_>>().join(" ")
+    dump::expr(value)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn errors(source: &str) -> String {
@@ -102,10 +105,7 @@ fn a_semicolon_is_reported_as_a_separator_mistake() {
 
 #[test]
 fn a_constructor_is_marked_and_a_call_is_not() {
-    assert_eq!(
-        expr("#User(id: 7)"),
-        "(construct User (arg id (int 7)))"
-    );
+    assert_eq!(expr("#User(id: 7)"), "(construct User (arg id (int 7)))");
     assert_eq!(expr("user(id: 7)"), "(call (path user) (arg id (int 7)))");
 }
 
@@ -118,7 +118,10 @@ fn capitalization_carries_no_meaning() {
 
 #[test]
 fn a_unit_constructor_needs_no_parentheses() {
-    assert_eq!(expr("#LoadError.NotFound"), "(construct LoadError.NotFound)");
+    assert_eq!(
+        expr("#LoadError.NotFound"),
+        "(construct LoadError.NotFound)"
+    );
     // `#Foo()` means the same thing, and the printer settles on the shorter form.
     let parsed = parse("fn main() {\n    let x = #Foo()\n}\n");
     assert!(parsed.ok());
@@ -144,35 +147,51 @@ fn a_brace_always_opens_a_block() {
 fn a_brace_after_an_expression_explains_itself() {
     // What a Rust or Go reader writes first.
     let rendered = errors("fn main() {\n    let user = User { id: 7 }\n}\n");
-    assert!(rendered.contains("a brace always opens a block"), "{rendered}");
+    assert!(
+        rendered.contains("a brace always opens a block"),
+        "{rendered}"
+    );
     assert!(rendered.contains("#Name(field: value)"), "{rendered}");
 }
 
 #[test]
 fn a_bare_name_in_a_pattern_binds_whatever_its_case() {
-    let dumped = ast("fn main() {\n    match x {\n        NotFound => 1\n        other => 2\n    }\n}\n");
+    let dumped =
+        ast("fn main() {\n    match x {\n        NotFound => 1\n        other => 2\n    }\n}\n");
     assert!(dumped.contains("(bind NotFound)"), "{dumped}");
     assert!(dumped.contains("(bind other)"), "{dumped}");
 }
 
 #[test]
 fn a_dotted_pattern_must_be_marked() {
-    let rendered = errors("fn main() {\n    match x {\n        LoadError.NotFound => 1\n    }\n}\n");
-    assert!(rendered.contains("a bare name in a pattern binds"), "{rendered}");
+    let rendered =
+        errors("fn main() {\n    match x {\n        LoadError.NotFound => 1\n    }\n}\n");
+    assert!(
+        rendered.contains("a bare name in a pattern binds"),
+        "{rendered}"
+    );
     assert!(rendered.contains("#LoadError.NotFound"), "{rendered}");
 }
 
 #[test]
 fn patterns_mirror_construction() {
-    let dumped = ast("fn main() {\n    match e {\n        #E.Io(code: 404, msg) => msg\n        #E.Io(..) => \"x\"\n    }\n}\n");
-    assert!(dumped.contains("(construct E.Io (arg code (int 404)) (arg (bind msg)))"), "{dumped}");
+    let dumped = ast(
+        "fn main() {\n    match e {\n        #E.Io(code: 404, msg) => msg\n        #E.Io(..) => \"x\"\n    }\n}\n",
+    );
+    assert!(
+        dumped.contains("(construct E.Io (arg code (int 404)) (arg (bind msg)))"),
+        "{dumped}"
+    );
     assert!(dumped.contains("(construct E.Io ..)"), "{dumped}");
 }
 
 #[test]
 fn reserved_words_explain_themselves() {
     let rendered = errors("fn main() {\n    let reactor = 1\n}\n");
-    assert!(rendered.contains("reserved for a later milestone"), "{rendered}");
+    assert!(
+        rendered.contains("reserved for a later milestone"),
+        "{rendered}"
+    );
 }
 
 #[test]

@@ -39,7 +39,11 @@ impl SourceFile {
                 line_starts.push(i as u32 + 1);
             }
         }
-        SourceFile { name: name.into(), text, line_starts }
+        SourceFile {
+            name: name.into(),
+            text,
+            line_starts,
+        }
     }
 
     pub fn slice(&self, span: Span) -> &str {

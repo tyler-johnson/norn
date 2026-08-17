@@ -41,7 +41,10 @@ impl Node {
             return;
         };
         // Leading atoms are names — `(fn greet`, `(record User` — and stay on the head line.
-        let leading = children.iter().take_while(|c| matches!(c, Node::Atom(_))).count();
+        let leading = children
+            .iter()
+            .take_while(|c| matches!(c, Node::Atom(_)))
+            .count();
         out.push_str(&format!("({head}"));
         for child in &children[..leading] {
             out.push(' ');
@@ -115,9 +118,7 @@ fn dump_item(item: &Item) -> Node {
                             "fields",
                             fields
                                 .iter()
-                                .map(|f| {
-                                    list("field", vec![atom(&f.name.name), dump_type(&f.ty)])
-                                })
+                                .map(|f| list("field", vec![atom(&f.name.name), dump_type(&f.ty)]))
                                 .collect(),
                         ));
                     }
@@ -162,9 +163,10 @@ fn dump_type(ty: &Type) -> Node {
             children.extend(args.iter().map(dump_type));
             list("ty", children)
         }
-        TypeKind::Ref { mutable, inner } => {
-            list(if *mutable { "ref-mut" } else { "ref" }, vec![dump_type(inner)])
-        }
+        TypeKind::Ref { mutable, inner } => list(
+            if *mutable { "ref-mut" } else { "ref" },
+            vec![dump_type(inner)],
+        ),
     }
 }
 
@@ -174,7 +176,12 @@ fn dump_block(block: &Block) -> Node {
 
 fn dump_stmt(stmt: &Stmt) -> Node {
     match &stmt.kind {
-        StmtKind::Let { mutable, name, ty, value } => {
+        StmtKind::Let {
+            mutable,
+            name,
+            ty,
+            value,
+        } => {
             let mut children = vec![atom(&name.name)];
             if *mutable {
                 children.push(atom("mut"));
@@ -205,16 +212,17 @@ fn dump_expr(expr: &Expr) -> Node {
         ExprKind::Unary { op, expr } => {
             list("unary", vec![atom(op.text().trim()), dump_expr(expr)])
         }
-        ExprKind::Binary { op, lhs, rhs } => {
-            list("binary", vec![atom(op.text()), dump_expr(lhs), dump_expr(rhs)])
-        }
-        ExprKind::Field { base, name } => {
-            list("field", vec![dump_expr(base), atom(&name.name)])
-        }
-        ExprKind::Index { base, index } => {
-            list("index", vec![dump_expr(base), dump_expr(index)])
-        }
-        ExprKind::Call { callee, type_args, args } => {
+        ExprKind::Binary { op, lhs, rhs } => list(
+            "binary",
+            vec![atom(op.text()), dump_expr(lhs), dump_expr(rhs)],
+        ),
+        ExprKind::Field { base, name } => list("field", vec![dump_expr(base), atom(&name.name)]),
+        ExprKind::Index { base, index } => list("index", vec![dump_expr(base), dump_expr(index)]),
+        ExprKind::Call {
+            callee,
+            type_args,
+            args,
+        } => {
             let mut children = vec![dump_expr(callee)];
             if !type_args.is_empty() {
                 children.push(list("type-args", type_args.iter().map(dump_type).collect()));
@@ -259,7 +267,11 @@ fn dump_expr(expr: &Expr) -> Node {
             }
             list("match", children)
         }
-        ExprKind::Lambda { is_task, params, body } => {
+        ExprKind::Lambda {
+            is_task,
+            params,
+            body,
+        } => {
             let mut children = Vec::new();
             if *is_task {
                 children.push(atom("task"));

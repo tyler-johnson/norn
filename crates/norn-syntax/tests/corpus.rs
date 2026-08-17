@@ -65,8 +65,14 @@ fn error_examples_report_diagnostics() {
         let file = SourceFile::new(&name, text.clone());
         let parsed = parse(&text);
 
-        assert!(!parsed.ok(), "errors/{name} parsed cleanly but should not have");
-        check_snapshot(&format!("errors-{name}"), &render_all(&file, &parsed.errors));
+        assert!(
+            !parsed.ok(),
+            "errors/{name} parsed cleanly but should not have"
+        );
+        check_snapshot(
+            &format!("errors-{name}"),
+            &render_all(&file, &parsed.errors),
+        );
         checked += 1;
     }
     assert!(checked > 0, "no error examples found");

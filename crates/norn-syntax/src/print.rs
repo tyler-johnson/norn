@@ -41,7 +41,11 @@ fn print_item(item: &Item) -> String {
         Item::Record(decl) => {
             let mut out = format!("record {} {{\n", decl.name.name);
             for field in &decl.fields {
-                out.push_str(&format!("{INDENT}{}: {}\n", field.name.name, print_type(&field.ty)));
+                out.push_str(&format!(
+                    "{INDENT}{}: {}\n",
+                    field.name.name,
+                    print_type(&field.ty)
+                ));
             }
             out.push_str("}\n");
             out
@@ -109,7 +113,11 @@ pub fn print_type(ty: &Type) -> String {
             }
         }
         TypeKind::Ref { mutable, inner } => {
-            format!("&{}{}", if *mutable { "mut " } else { "" }, print_type(inner))
+            format!(
+                "&{}{}",
+                if *mutable { "mut " } else { "" },
+                print_type(inner)
+            )
         }
     }
 }
@@ -133,7 +141,12 @@ fn print_block(block: &Block, indent: usize) -> String {
 
 fn print_stmt(stmt: &Stmt, indent: usize) -> String {
     match &stmt.kind {
-        StmtKind::Let { mutable, name, ty, value } => {
+        StmtKind::Let {
+            mutable,
+            name,
+            ty,
+            value,
+        } => {
             let mut out = String::from("let ");
             if *mutable {
                 out.push_str("mut ");
@@ -164,7 +177,11 @@ fn print_stmt(stmt: &Stmt, indent: usize) -> String {
 /// syntactic position requires.
 fn print_expr(expr: &Expr, indent: usize, min: u8) -> String {
     let text = print_expr_bare(expr, indent);
-    if precedence(expr) < min { format!("({text})") } else { text }
+    if precedence(expr) < min {
+        format!("({text})")
+    } else {
+        text
+    }
 }
 
 fn precedence(expr: &Expr) -> u8 {
@@ -210,9 +227,17 @@ fn print_expr_bare(expr: &Expr, indent: usize) -> String {
             format!("{}.{}", print_expr(base, indent, ATOM), name.name)
         }
         ExprKind::Index { base, index } => {
-            format!("{}[{}]", print_expr(base, indent, ATOM), print_expr(index, indent, LAMBDA))
+            format!(
+                "{}[{}]",
+                print_expr(base, indent, ATOM),
+                print_expr(index, indent, LAMBDA)
+            )
         }
-        ExprKind::Call { callee, type_args, args } => {
+        ExprKind::Call {
+            callee,
+            type_args,
+            args,
+        } => {
             let type_args = if type_args.is_empty() {
                 String::new()
             } else {
@@ -228,7 +253,11 @@ fn print_expr_bare(expr: &Expr, indent: usize) -> String {
                     None => print_expr(&arg.value, indent, LAMBDA),
                 })
                 .collect();
-            format!("{}{type_args}({})", print_expr(callee, indent, ATOM), args.join(", "))
+            format!(
+                "{}{type_args}({})",
+                print_expr(callee, indent, ATOM),
+                args.join(", ")
+            )
         }
         ExprKind::Construct { path, args } => {
             if args.is_empty() {
@@ -253,8 +282,11 @@ fn print_expr_bare(expr: &Expr, indent: usize) -> String {
         ExprKind::Try(inner) => format!("{}?", print_expr(inner, indent, ATOM)),
         ExprKind::Block(block) => print_block(block, indent),
         ExprKind::If { cond, then, els } => {
-            let mut out =
-                format!("if {} {}", print_expr(cond, indent, LAMBDA), print_block(then, indent));
+            let mut out = format!(
+                "if {} {}",
+                print_expr(cond, indent, LAMBDA),
+                print_block(then, indent)
+            );
             if let Some(els) = els {
                 match &els.kind {
                     ExprKind::Block(block) => {
@@ -275,13 +307,20 @@ fn print_expr_bare(expr: &Expr, indent: usize) -> String {
                 if let Some(guard) = &arm.guard {
                     out.push_str(&format!(" if {}", print_expr(guard, indent + 1, LAMBDA)));
                 }
-                out.push_str(&format!(" => {}\n", print_expr(&arm.body, indent + 1, LAMBDA)));
+                out.push_str(&format!(
+                    " => {}\n",
+                    print_expr(&arm.body, indent + 1, LAMBDA)
+                ));
             }
             out.push_str(&pad);
             out.push('}');
             out
         }
-        ExprKind::Lambda { is_task, params, body } => {
+        ExprKind::Lambda {
+            is_task,
+            params,
+            body,
+        } => {
             let params: Vec<_> = params.iter().map(print_pat).collect();
             let head = if params.len() == 1 && !params[0].contains(',') {
                 params.into_iter().next().unwrap()
@@ -341,5 +380,9 @@ fn print_string(value: &str) -> String {
 /// Always render a fraction so the value reparses as a float rather than an integer.
 fn print_float(value: f64) -> String {
     let text = format!("{value}");
-    if text.contains(['.', 'e', 'E', 'n', 'i']) { text } else { format!("{text}.0") }
+    if text.contains(['.', 'e', 'E', 'n', 'i']) {
+        text
+    } else {
+        format!("{text}.0")
+    }
 }

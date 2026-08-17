@@ -17,7 +17,12 @@ pub struct Diagnostic {
 
 impl Diagnostic {
     pub fn new(span: Span, message: impl Into<String>) -> Diagnostic {
-        Diagnostic { span, message: message.into(), label: None, notes: Vec::new() }
+        Diagnostic {
+            span,
+            message: message.into(),
+            label: None,
+            notes: Vec::new(),
+        }
     }
 
     pub fn label(mut self, label: impl Into<String>) -> Diagnostic {
@@ -49,7 +54,11 @@ pub fn render(file: &SourceFile, d: &Diagnostic) -> String {
     out.push_str(&format!("{pad}--> {}:{line}:{col}\n", file.name));
     out.push_str(&format!("{pad} |\n"));
     out.push_str(&format!("{gutter} | {text}\n"));
-    out.push_str(&format!("{pad} | {}{}", " ".repeat(visual_col), "^".repeat(width)));
+    out.push_str(&format!(
+        "{pad} | {}{}",
+        " ".repeat(visual_col),
+        "^".repeat(width)
+    ));
     match &d.label {
         Some(label) => out.push_str(&format!(" {label}\n")),
         None => out.push('\n'),
@@ -61,5 +70,9 @@ pub fn render(file: &SourceFile, d: &Diagnostic) -> String {
 }
 
 pub fn render_all(file: &SourceFile, diagnostics: &[Diagnostic]) -> String {
-    diagnostics.iter().map(|d| render(file, d)).collect::<Vec<_>>().join("\n")
+    diagnostics
+        .iter()
+        .map(|d| render(file, d))
+        .collect::<Vec<_>>()
+        .join("\n")
 }

@@ -202,7 +202,14 @@ pub struct Lexed {
 }
 
 pub fn lex(text: &str) -> Lexed {
-    Lexer { bytes: text.as_bytes(), text, pos: 0, tokens: Vec::new(), errors: Vec::new() }.run()
+    Lexer {
+        bytes: text.as_bytes(),
+        text,
+        pos: 0,
+        tokens: Vec::new(),
+        errors: Vec::new(),
+    }
+    .run()
 }
 
 struct Lexer<'a> {
@@ -229,14 +236,21 @@ impl<'a> Lexer<'a> {
             match self.token() {
                 Some(kind) => {
                     let span = Span::new(start as u32, self.pos as u32);
-                    self.tokens.push(Token { kind, span, nl_before: nl });
+                    self.tokens.push(Token {
+                        kind,
+                        span,
+                        nl_before: nl,
+                    });
                 }
                 None => {
                     // `token` already recorded a diagnostic and consumed at least one byte.
                 }
             }
         }
-        Lexed { tokens: self.tokens, errors: self.errors }
+        Lexed {
+            tokens: self.tokens,
+            errors: self.errors,
+        }
     }
 
     /// Consume whitespace and comments; report whether a line break was crossed.
@@ -336,14 +350,23 @@ impl<'a> Lexer<'a> {
     fn number(&mut self) -> TokenKind {
         let start = self.pos;
         if self.peek() == Some(b'0') && matches!(self.peek_at(1), Some(b'x' | b'X' | b'b' | b'B')) {
-            let radix = if matches!(self.peek_at(1), Some(b'x' | b'X')) { 16 } else { 2 };
+            let radix = if matches!(self.peek_at(1), Some(b'x' | b'X')) {
+                16
+            } else {
+                2
+            };
             self.pos += 2;
             let digits_start = self.pos;
-            while self.peek().is_some_and(|c| c.is_ascii_alphanumeric() || c == b'_') {
+            while self
+                .peek()
+                .is_some_and(|c| c.is_ascii_alphanumeric() || c == b'_')
+            {
                 self.pos += 1;
             }
-            let digits: String =
-                self.text[digits_start..self.pos].chars().filter(|c| *c != '_').collect();
+            let digits: String = self.text[digits_start..self.pos]
+                .chars()
+                .filter(|c| *c != '_')
+                .collect();
             return match i64::from_str_radix(&digits, radix) {
                 Ok(v) => TokenKind::Int(v),
                 Err(_) => {
@@ -382,7 +405,10 @@ impl<'a> Lexer<'a> {
         }
 
         let span = Span::new(start as u32, self.pos as u32);
-        let digits: String = self.text[start..self.pos].chars().filter(|c| *c != '_').collect();
+        let digits: String = self.text[start..self.pos]
+            .chars()
+            .filter(|c| *c != '_')
+            .collect();
         if is_float {
             match digits.parse::<f64>() {
                 Ok(v) => TokenKind::Float(v),
@@ -409,7 +435,10 @@ impl<'a> Lexer<'a> {
         loop {
             match self.peek() {
                 None | Some(b'\n') => {
-                    self.error(Span::new(start as u32, self.pos as u32), "unterminated string literal");
+                    self.error(
+                        Span::new(start as u32, self.pos as u32),
+                        "unterminated string literal",
+                    );
                     break;
                 }
                 Some(b'"') => {
