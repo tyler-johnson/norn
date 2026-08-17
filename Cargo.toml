@@ -12,4 +12,16 @@ publish = false
 norn-syntax = { path = "crates/norn-syntax" }
 
 [profile.release]
-lto = "thin"
+lto = "fat"
+codegen-units = 1
+strip = true
+
+# Local dogfood builds: release semantics without the LTO link cost. A separate
+# target dir (target/dogfood), so it never thrashes the pristine fat-LTO
+# target/release. `make install` symlinks the driver here.
+[profile.dogfood]
+inherits = "release"
+lto = "off"
+codegen-units = 16
+incremental = true
+strip = false
