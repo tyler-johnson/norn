@@ -119,8 +119,18 @@ Alternatives considered:
   `latest` and `send` are ordinary functions over a *closed handle table*: `reactor.input` and
   `reactor.export` are the only members a handle has. The language has no method resolution, so
   `.latest()` and `.send()` cannot be spelled as methods until it does.
-- **Memory** — move checking, affine operating-system resources released on scope exit *and* on
-  cancellation, `Shared<T>` immutable reference counting.
+- **Memory** — move checking for affine values, and affine operating-system resources released on
+  scope exit *and* on cancellation.
+
+  The affine set is small and named: operating-system resources, a built-but-unstarted `Task<T>`,
+  and any record or enum that reaches one. Ordinary values stay copyable, because nothing in v0 can
+  observe the difference — the interpreter clones, and the native backend that would make a copy
+  cost something is M5. Move checking for ordinary values arrives with it, and until then
+  `print(p); print(p)` is legal.
+
+  `Shared<T>` is deferred for the same reason: with ordinary values copyable it is a representation
+  choice with no observable effect, and an inert type in the language is worse than an absent one.
+  `Bytes` is deferred to M6, where `Flow<Bytes>` gives it work to do.
 - **Effects** — `uses { ... }` as a checked annotation.
 - **I/O** — TCP, timers, files, HTTP/1.1, `Flow<Bytes>` with genuine demand signalling.
 
@@ -129,6 +139,15 @@ Alternatives considered:
 Generics; traits; a borrow checker (`&T` is permitted only as a non-escaping parameter, enforced
 syntactically); dynamic subgraphs (`switch`); macros and derives; modules beyond a single file; a
 multi-threaded work-stealing scheduler; capability *inference*.
+
+"Enforced syntactically" turned out to mean something sharper than a rule: `resolve_ty` produces a
+reference type only in parameter position and `declare_local` refuses to name one, so there is no
+field, return, payload, `let`, or reactor member that could hold a borrow. The one value in v0 that
+outlives the expression building it is a `Task<T>`, so `spawn` and `after` reject a borrowed
+argument and that is the whole of the escape analysis. `await f(&x)` is exempt because the awaiting
+task is parked for the duration and ownership is unique: it cannot invalidate the borrow itself, and
+nobody else holds the value. `&mut` is left with a diagnostic rather than a meaning, since one
+exclusive-borrow rule is a borrow checker.
 
 The cut worth defending is **static reactor graphs**. Dynamic switching is where graph arenas,
 region reclamation, and subscription lifetimes all become load-bearing — it is the majority of
@@ -209,8 +228,8 @@ suspension in M2 does, and retrofitting it later would mean rewriting every path
 
 Two known gaps, both deliberate. Exhaustiveness checking covers top-level variants only, so a gap
 hidden inside a nested pattern traps at runtime rather than failing to compile; a full usefulness
-algorithm can arrive with the rest of the pattern work. And `&T` is transparent — it resolves to
-`T` — until M4 gives ownership meaning.
+algorithm can arrive with the rest of the pattern work. And `&T` was transparent — it resolved to
+`T` — until M4 gave ownership meaning.
 
 *Done when:* `norn run examples/run/hello.norn` executes ordinary computation end to end, every
 program in `examples/run/` has a snapshot pairing its lowered IR with its output, and every program
@@ -249,8 +268,20 @@ example reproduces its trace exactly under `--virtual-clock`.
 
 ### M4 — Ownership
 
-Move checking, affine resource tracking, `Shared<T>`. Resources close deterministically on scope
-exit, on error propagation, and on cancellation.
+Move checking over the affine set — operating-system resources, a built-but-unstarted `Task<T>`, and
+any aggregate reaching one — with `&T` as a real type in parameter position. Resources close
+deterministically on scope exit, on error propagation, and on cancellation.
+
+Two of those three already held when the milestone opened; the first did not. Resources were owned
+by the task rather than by the scope, so a descriptor opened inside a `scope { … }` stayed open until
+the whole surrounding task ended. `Scope` owns them now, and because lowering already unwinds every
+open scope on every path out of a function, closing on the way out of a scope is also what delivers
+closing on error propagation.
+
+Nothing a reactor holds may be affine — a slot is the durable state projection §14 asks for and a
+descriptor cannot be written down and restored, and an input declared `overflow: drop_oldest` would
+leak a socket every time its mailbox filled. `Shared<T>` and ordinary-value moves are deferred to
+M5; see §4.
 
 *Done when:* use-after-move and double-close are compile errors, and a cancelled request is
 observably leak-free.
@@ -304,6 +335,7 @@ norn/
 │   ├── tcp/                 the echo server                                   (M2)
 │   ├── reactors/            programs whose graph and turn trace are golden    (M3)
 │   ├── reactor-errors/      reactors that must not check                      (M3)
+│   ├── ownership-errors/    programs that must not check, about ownership     (M4)
 │   └── type-errors/         programs that must not check
 ├── editors/
 │   └── vscode/              grammar, snippets, and a `norn check` matcher
@@ -333,8 +365,12 @@ Ordered roughly by when it becomes worth doing, not by importance:
    semantic tokens are what replace that guess with the checker's answer.
 4. **Cranelift backend.** Replaces the Rust emitter once NIR has stopped churning; removes `rustc`
    from the deployment path.
-5. **Borrow checking.** Until then, `&T` as a non-escaping parameter only.
-6. **Generics and traits.** Required before a real standard library.
-7. **Capability inference, test handlers.** `uses { ... }` is checked but not inferred in v0.
-8. **Derives and constrained attributes.** `@derive(Json)`, `@http_api` — `DESIGN.md` §8 stage 2.
-9. **Durable state projections, supervision policy.**
+5. **Borrow checking.** Until then, `&T` as a non-escaping parameter only, and no `&mut` at all.
+   Partial moves wait here too: M4 rejects moving out of a field rather than tracking it, because a
+   half-moved record has no name in this language and `match` already takes one apart.
+6. **Move checking for ordinary values, and `Shared<T>`.** Both wait on M5, which is where copying
+   a value first costs something an implementation can measure.
+7. **Generics and traits.** Required before a real standard library.
+8. **Capability inference, test handlers.** `uses { ... }` is checked but not inferred in v0.
+9. **Derives and constrained attributes.** `@derive(Json)`, `@http_api` — `DESIGN.md` §8 stage 2.
+10. **Durable state projections, supervision policy.**

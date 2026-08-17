@@ -528,6 +528,8 @@ scope {
 }
 ```
 
+> **v0 answers this positionally rather than by analysis.** A reference is producible only in parameter position and cannot be given a name, so there is no field, return, payload, `let`, or reactor member that could hold one. The single value that outlives the expression building it is a `Task<T>`, so `spawn` and an effect request reject a borrowed argument — and `await f(&x)` is left alone, because the awaiting task is parked for the duration and ownership is unique, so it cannot invalidate the borrow itself and nobody else holds the value. That is a lifetime boundary enforced by where a thing can be written rather than by inference, and it holds only while there are no loops and no aliasing. `&mut`, scoped borrowing of a parent's values, and explicit lifetimes all wait for the real borrow checker; see `BOOTSTRAP.md` §8.
+
 ### Cross-reactor transfer
 
 Mutable references never cross reactor boundaries. A message is either moved, deeply immutable and shared, or encoded into a bounded flow. This links memory safety to concurrency safety.
@@ -570,6 +572,9 @@ let payload = packet.slice(32, packet.len)
 ```
 
 There is no general-purpose `Shared<Mutable<T>>`. Shared mutation requires a reactor, an explicitly atomic type, or an opt-in lock from a low-level concurrency package.
+
+> **Neither `Shared<T>` nor `Bytes` is in v0.** Sharing is an answer to the cost of copying, and v0's ordinary values are copied freely by an interpreter that clones — there is nothing yet that could tell a share from a copy. Both arrive with the native backend, which is the first thing that makes the difference measurable. Affine ownership of operating-system resources, described above, is implemented in full.
+
 
 ### Reactive graphs: reactor-local arenas
 
