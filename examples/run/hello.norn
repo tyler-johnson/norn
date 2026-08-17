@@ -1,0 +1,15 @@
+module hello
+
+record Greeting {
+    salutation: String
+    subject: String
+}
+
+fn render(greeting: Greeting) -> String {
+    return greeting.salutation + ", " + greeting.subject + "!"
+}
+
+fn main() {
+    let greeting = #Greeting(salutation: "Hello", subject: "world")
+    print(render(greeting))
+}

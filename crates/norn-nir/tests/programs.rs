@@ -1,0 +1,179 @@
+//! The M1 execution corpus.
+//!
+//! Every file in `examples/run/` must check, lower, and execute. The snapshot holds both the
+//! lowered IR and the program's output, so a change to lowering and a change to behaviour are
+//! visible in the same diff — which is the pairing M5 will need when a native backend has to
+//! produce the same output from the same blocks.
+//!
+//! Set `NORN_BLESS=1` to rewrite the snapshots, then read the diff before committing it.
+
+use std::path::{Path, PathBuf};
+
+use norn_nir::{Captured, lower, print, run};
+use norn_syntax::{SourceFile, parse, render_all};
+
+#[test]
+fn programs_lower_and_run() {
+    let mut checked = 0;
+    for path in norn_files(&run_dir()) {
+        let name = path.file_name().unwrap().to_string_lossy().to_string();
+        let text = std::fs::read_to_string(&path).unwrap();
+        let file = SourceFile::new(&name, text.clone());
+
+        let parsed = parse(&text);
+        assert!(
+            parsed.ok(),
+            "{name} failed to parse:\n{}",
+            render_all(&file, &parsed.errors)
+        );
+        let program = norn_hir::check(&parsed.module);
+        assert!(
+            program.ok(),
+            "{name} failed to check:\n{}",
+            render_all(&file, &program.errors)
+        );
+
+        let main = program
+            .program
+            .main
+            .unwrap_or_else(|| panic!("{name} has no `main`"));
+        let nir = lower(&program.program);
+        let mut out = Captured::default();
+        let value = run(&nir, main.index(), &mut out)
+            .unwrap_or_else(|trap| panic!("{name} trapped: {trap}"));
+
+        let mut snapshot = format!("=== nir ===\n{}", print(&nir));
+        snapshot.push_str("=== output ===\n");
+        for line in &out.lines {
+            snapshot.push_str(line);
+            snapshot.push('\n');
+        }
+        snapshot.push_str(&format!(
+            "=== result ===\n{}\n",
+            norn_nir::interp::render(&nir, &value)
+        ));
+        check_snapshot(&name, &snapshot);
+        checked += 1;
+    }
+    assert!(checked > 0, "no runnable examples found");
+}
+
+/// Lowering must be a function of the HIR alone: running the same program twice, and lowering it
+/// twice, must give the same blocks and the same output. This is the property the M5 differential
+/// test extends across two execution engines rather than two runs of one.
+#[test]
+fn lowering_and_execution_are_deterministic() {
+    for path in norn_files(&run_dir()) {
+        let text = std::fs::read_to_string(&path).unwrap();
+        let parsed = parse(&text);
+        let program = norn_hir::check(&parsed.module).program;
+        let main = program.main.expect("a runnable example has a `main`");
+
+        let first = lower(&program);
+        let second = lower(&program);
+        assert_eq!(
+            print(&first),
+            print(&second),
+            "{} lowered differently",
+            path.display()
+        );
+
+        let mut a = Captured::default();
+        let mut b = Captured::default();
+        let one = run(&first, main.index(), &mut a).expect("runs");
+        let two = run(&second, main.index(), &mut b).expect("runs");
+        assert_eq!(
+            a.lines,
+            b.lines,
+            "{} produced different output",
+            path.display()
+        );
+        assert_eq!(one, two, "{} produced a different result", path.display());
+    }
+}
+
+/// A gap a pattern leaves inside a constructor is not caught by the top-level exhaustiveness
+/// check, so the program must trap rather than fall through silently.
+#[test]
+fn an_unmatched_value_traps() {
+    let source = "\
+enum Inner {
+    A
+    B
+}
+
+enum Outer {
+    Wrap(Inner)
+}
+
+fn pick(value: Outer) -> I64 {
+    match value {
+        #Outer.Wrap(#Inner.A) => 1
+    }
+}
+
+fn main() -> I64 {
+    pick(#Outer.Wrap(#Inner.B))
+}
+";
+    let parsed = parse(source);
+    assert!(parsed.ok());
+    let checked = norn_hir::check(&parsed.module);
+    assert!(checked.ok(), "the nested gap is not a compile error yet");
+    let nir = lower(&checked.program);
+    let main = checked.program.main.unwrap();
+    let mut out = Captured::default();
+    let trap = run(&nir, main.index(), &mut out).expect_err("should trap");
+    assert_eq!(trap.message, "no match arm applied");
+    assert_eq!(trap.function, "pick");
+}
+
+#[test]
+fn division_by_zero_traps() {
+    let source = "fn main() -> I64 {\n    let zero = 0\n    10 / zero\n}\n";
+    let parsed = parse(source);
+    let checked = norn_hir::check(&parsed.module);
+    assert!(checked.ok());
+    let nir = lower(&checked.program);
+    let mut out = Captured::default();
+    let trap = run(&nir, checked.program.main.unwrap().index(), &mut out).expect_err("should trap");
+    assert_eq!(trap.message, "divide by zero");
+}
+
+fn run_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/run")
+}
+
+fn norn_files(dir: &Path) -> Vec<PathBuf> {
+    let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
+        .unwrap_or_else(|err| panic!("reading {}: {err}", dir.display()))
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "norn"))
+        .collect();
+    files.sort();
+    files
+}
+
+fn check_snapshot(name: &str, actual: &str) {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(format!("{name}.snap"));
+
+    if std::env::var("NORN_BLESS").is_ok() {
+        std::fs::write(&path, actual).unwrap();
+        return;
+    }
+    let expected = std::fs::read_to_string(&path).unwrap_or_else(|_| {
+        panic!(
+            "missing snapshot {}\nrerun with NORN_BLESS=1 to create it\n\n{actual}",
+            path.display()
+        )
+    });
+    if expected != actual {
+        panic!(
+            "snapshot {} does not match\nrerun with NORN_BLESS=1 to update it\n\n--- expected ---\n{expected}\n--- actual ---\n{actual}",
+            path.display()
+        );
+    }
+}

@@ -1,16 +1,15 @@
 [package]
-name = "norn"
-description = "The Norn compiler driver"
+name = "norn-nir"
+description = "The lowered Norn IR and its interpreter"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
-[[bin]]
-name = "norn"
-path = "src/main.rs"
-
 [dependencies]
 norn-hir.workspace = true
-norn-nir.workspace = true
+norn-syntax.workspace = true
+
+[dev-dependencies]
+norn-hir.workspace = true
 norn-syntax.workspace = true

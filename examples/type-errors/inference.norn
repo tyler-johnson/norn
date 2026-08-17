@@ -1,0 +1,38 @@
+module errors.inference
+
+enum Failure {
+    Broken
+    Missing(String)
+}
+
+fn no_expectation() -> I64 {
+    let value = #None
+    return 1
+}
+
+fn wrong_error_type() -> Result<I64, Failure> {
+    let value = fails()?
+    return #Ok(value)
+}
+
+fn fails() -> Result<I64, String> {
+    return #Err("no")
+}
+
+fn not_a_result() -> I64 {
+    let value = 1?
+    return value
+}
+
+fn missing_arm(failure: Failure) -> I64 {
+    match failure {
+        #Failure.Broken => 1
+    }
+}
+
+fn open_match(n: I64) -> String {
+    match n {
+        0 => "zero"
+        1 => "one"
+    }
+}

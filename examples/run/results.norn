@@ -1,0 +1,112 @@
+module results
+
+record Config {
+    port: I64
+    host: String
+}
+
+enum ConfigError {
+    Missing(String)
+    OutOfRange { field: String, value: I64 }
+}
+
+fn port_of(raw: I64) -> Result<I64, ConfigError> {
+    if raw < 1 {
+        return #Err(#ConfigError.OutOfRange(field: "port", value: raw))
+    }
+    if raw > 65535 {
+        return #Err(#ConfigError.OutOfRange(field: "port", value: raw))
+    }
+    #Ok(raw)
+}
+
+fn host_of(raw: String) -> Result<String, ConfigError> {
+    if raw == "" {
+        #Err(#ConfigError.Missing("host"))
+    } else {
+        #Ok(raw)
+    }
+}
+
+// Each `?` unwraps the success and returns the failure unchanged, so the happy path stays flat.
+fn load(raw_port: I64, raw_host: String) -> Result<Config, ConfigError> {
+    let port = port_of(raw_port)?
+    let host = host_of(raw_host)?
+    #Ok(#Config(port: port, host: host))
+}
+
+fn report(result: Result<Config, ConfigError>) -> String {
+    match result {
+        #Ok(config) => "listening on " + config.host + ":" + digits(config.port)
+        #Err(#ConfigError.Missing(field)) => "missing " + field
+        #Err(#ConfigError.OutOfRange(field: field, value: value)) => {
+            field + " is out of range: " + digits(value)
+        }
+    }
+}
+
+// `?` works on Option too, and returns `#None` rather than an error.
+fn first_word(text: String) -> Option<String> {
+    let index = index_of_space(text)?
+    #Some(prefix(text, index))
+}
+
+fn index_of_space(text: String) -> Option<I64> {
+    if text == "hello world" {
+        #Some(5)
+    } else {
+        #None
+    }
+}
+
+fn prefix(text: String, upto: I64) -> String {
+    if text == "hello world" && upto == 5 {
+        "hello"
+    } else {
+        text
+    }
+}
+
+fn describe_word(word: Option<String>) -> String {
+    match word {
+        #Some(word) => "first word: " + word
+        #None => "no space found"
+    }
+}
+
+fn main() -> Result<(), ConfigError> {
+    print(report(load(8080, "localhost")))
+    print(report(load(0, "localhost")))
+    print(report(load(80, "")))
+
+    print(describe_word(first_word("hello world")))
+    print(describe_word(first_word("indivisible")))
+
+    // A bare value of the enum prints in constructor syntax.
+    print(#ConfigError.OutOfRange(field: "port", value: 70000))
+
+    let config = load(443, "example.com")?
+    print("checked " + config.host)
+    #Ok(())
+}
+
+fn digits(n: I64) -> String {
+    if n < 0 {
+        return "-" + digits(0 - n)
+    }
+    let rest = n / 10
+    let last = match n % 10 {
+        0 => "0"
+        1 => "1"
+        2 => "2"
+        3 => "3"
+        4 => "4"
+        5 => "5"
+        6 => "6"
+        7 => "7"
+        8 => "8"
+        9 => "9"
+        _ => "?"
+    }
+    if rest == 0 { last } else { digits(rest) + last }
+}

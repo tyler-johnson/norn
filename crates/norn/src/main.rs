@@ -1,7 +1,8 @@
 //! The `norn` compiler driver.
 //!
-//! At M0 the only stage that exists is parsing, so the only verbs are `parse` and `fmt`. Later
-//! milestones add `run`, `build`, `graph`, and `trace` (see `BOOTSTRAP.md` §5).
+//! The verbs follow the pipeline: `parse` stops after syntax, `check` after types, `nir` after
+//! lowering, and `run` executes. Later milestones add `build`, `graph`, and `trace` (see
+//! `BOOTSTRAP.md` §5).
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -13,6 +14,9 @@ norn — the Norn compiler
 
 usage:
     norn parse [options] <file>...    check syntax
+    norn check <file>...              resolve names and check types
+    norn nir <file>                   print the lowered IR
+    norn run <file>                   check, lower, and execute `main`
     norn fmt [--check] <file>...      rewrite files in canonical form
     norn --version
     norn --help
@@ -25,7 +29,7 @@ parse options:
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match run(&args) {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(code) => code,
         Err(message) => {
             if !message.is_empty() {
                 eprintln!("norn: {message}");
@@ -35,28 +39,31 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(args: &[String]) -> Result<(), String> {
+fn run(args: &[String]) -> Result<ExitCode, String> {
     let Some(first) = args.first() else {
         print!("{USAGE}");
-        return Ok(());
+        return Ok(ExitCode::SUCCESS);
     };
 
     match first.as_str() {
         "--help" | "-h" | "help" => {
             print!("{USAGE}");
-            Ok(())
+            Ok(ExitCode::SUCCESS)
         }
         "--version" | "-V" => {
             println!("norn {}", env!("CARGO_PKG_VERSION"));
-            Ok(())
+            Ok(ExitCode::SUCCESS)
         }
         "parse" => cmd_parse(&args[1..]),
+        "check" => cmd_check(&args[1..]),
+        "nir" => cmd_nir(&args[1..]),
+        "run" => cmd_run(&args[1..]),
         "fmt" => cmd_fmt(&args[1..]),
         other => Err(format!("unknown command `{other}`\n\n{USAGE}")),
     }
 }
 
-fn cmd_parse(args: &[String]) -> Result<(), String> {
+fn cmd_parse(args: &[String]) -> Result<ExitCode, String> {
     let mut dump_ast = false;
     let mut print_canonical = false;
     let mut paths = Vec::new();
@@ -91,10 +98,108 @@ fn cmd_parse(args: &[String]) -> Result<(), String> {
             println!("{}: ok", file.name);
         }
     }
-    if failed { Err(String::new()) } else { Ok(()) }
+    Ok(if failed {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    })
 }
 
-fn cmd_fmt(args: &[String]) -> Result<(), String> {
+fn cmd_check(args: &[String]) -> Result<ExitCode, String> {
+    let paths = plain_paths(args)?;
+    let mut failed = false;
+    for path in &paths {
+        let file = read(path)?;
+        if front_end(&file).is_none() {
+            failed = true;
+        } else if paths.len() > 1 {
+            println!("{}: ok", file.name);
+        }
+    }
+    Ok(if failed {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    })
+}
+
+fn cmd_nir(args: &[String]) -> Result<ExitCode, String> {
+    let paths = plain_paths(args)?;
+    let [path] = &paths[..] else {
+        return Err("expected exactly one file".into());
+    };
+    let file = read(path)?;
+    let Some(program) = front_end(&file) else {
+        return Ok(ExitCode::FAILURE);
+    };
+    print!("{}", norn_nir::print(&norn_nir::lower(&program)));
+    Ok(ExitCode::SUCCESS)
+}
+
+fn cmd_run(args: &[String]) -> Result<ExitCode, String> {
+    let paths = plain_paths(args)?;
+    let [path] = &paths[..] else {
+        return Err("expected exactly one file".into());
+    };
+    let file = read(path)?;
+    let Some(hir) = front_end(&file) else {
+        return Ok(ExitCode::FAILURE);
+    };
+
+    let Some(main) = hir.main else {
+        return Err(format!("{}: no `main` function to run", file.name));
+    };
+    let entry = &hir.fns[main.index()];
+    if entry.params != 0 {
+        return Err(format!("{}: `main` cannot take parameters", file.name));
+    }
+
+    let program = norn_nir::lower(&hir);
+    let mut out = norn_nir::Stdout;
+    match norn_nir::run(&program, main.index(), &mut out) {
+        Ok(value) => {
+            // A `main` returning a `Result` reports rather than prints: `#Err` is a failed run,
+            // and the `#Ok` wrapper is ceremony the reader does not need to see.
+            let result = match &value {
+                norn_nir::Value::Variant(enum_id, tag, fields)
+                    if *enum_id == norn_hir::hir::EnumId::RESULT.index() =>
+                {
+                    if *tag == norn_hir::hir::EnumId::ERR {
+                        eprintln!("error: {}", norn_nir::interp::render(&program, &fields[0]));
+                        return Ok(ExitCode::FAILURE);
+                    }
+                    fields[0].clone()
+                }
+                value => value.clone(),
+            };
+            if !matches!(result, norn_nir::Value::Unit) {
+                println!("{}", norn_nir::interp::render(&program, &result));
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        Err(trap) => {
+            eprintln!("norn: trapped: {trap}");
+            Ok(ExitCode::FAILURE)
+        }
+    }
+}
+
+/// Parse and check one file, printing any diagnostics. `None` means it did not get through.
+fn front_end(file: &SourceFile) -> Option<norn_hir::Program> {
+    let parsed = parse(&file.text);
+    if !parsed.errors.is_empty() {
+        eprint!("{}", render_all(file, &parsed.errors));
+        return None;
+    }
+    let checked = norn_hir::check(&parsed.module);
+    if !checked.errors.is_empty() {
+        eprint!("{}", render_all(file, &checked.errors));
+        return None;
+    }
+    Some(checked.program)
+}
+
+fn cmd_fmt(args: &[String]) -> Result<ExitCode, String> {
     let mut check = false;
     let mut paths = Vec::new();
     for arg in args {
@@ -128,7 +233,25 @@ fn cmd_fmt(args: &[String]) -> Result<(), String> {
             return Err(format!("{}: {err}", path.display()));
         }
     }
-    if failed { Err(String::new()) } else { Ok(()) }
+    Ok(if failed {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    })
+}
+
+fn plain_paths(args: &[String]) -> Result<Vec<PathBuf>, String> {
+    let mut paths = Vec::new();
+    for arg in args {
+        if arg.starts_with('-') {
+            return Err(format!("unknown option `{arg}`"));
+        }
+        paths.push(PathBuf::from(arg));
+    }
+    if paths.is_empty() {
+        return Err("expected at least one file".into());
+    }
+    Ok(paths)
 }
 
 fn read(path: &Path) -> Result<SourceFile, String> {

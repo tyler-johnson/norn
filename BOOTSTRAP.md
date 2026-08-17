@@ -174,7 +174,33 @@ examples — is committed.
 Monomorphic type checker, HIR, lowering to NIR, NIR interpreter. Records, enums, `match`, `Result`,
 `Option`, `?`.
 
-*Done when:* `norn run hello.norn` executes ordinary computation end to end.
+The checker is **bidirectional**: an expression is checked against the type its position demands
+when there is one, and synthesises a type when there is not. That is what lets `#None` and `#Err(e)`
+work with no inference variables anywhere — the expectation supplies the argument the expression
+cannot know on its own — and where no expectation exists the checker says so rather than guessing.
+`Option` and `Result` are seeded as ordinary enums in the first two slots of the enum table, so
+construction, matching, and lowering treat them exactly like a user enum; only their type arguments
+are special.
+
+**NIR is flat from the start.** Each function is a list of basic blocks, each a straight run of
+assignments ending in one terminator. `match` lowers to a chain of tag switches and equality tests,
+`&&` and `||` to branches, `?` to a switch with an early return. Nothing nests. That is the whole
+reason to have a separate IR at this milestone: M2 splits a block at each suspension point to build
+a state machine, and M5 walks these blocks to emit code, and neither step should have to understand
+`match`.
+
+The interpreter manages calls with an **explicit frame stack** rather than the host call stack.
+Nothing in M1 needs that — pure functions would recurse on Rust's stack quite happily — but
+suspension in M2 does, and retrofitting it later would mean rewriting every path that can call.
+
+Two known gaps, both deliberate. Exhaustiveness checking covers top-level variants only, so a gap
+hidden inside a nested pattern traps at runtime rather than failing to compile; a full usefulness
+algorithm can arrive with the rest of the pattern work. And `&T` is transparent — it resolves to
+`T` — until M4 gives ownership meaning.
+
+*Done when:* `norn run examples/run/hello.norn` executes ordinary computation end to end, every
+program in `examples/run/` has a snapshot pairing its lowered IR with its output, and every program
+in `examples/type-errors/` has a snapshot of what the checker says about it.
 
 ### M2 — Tasks and runtime
 
@@ -246,8 +272,11 @@ norn/
 │   ├── norn-rt/             scheduler, I/O, mailboxes, turn loop     (M2)
 │   ├── norn-codegen/        NIR → restricted Rust                    (M5)
 │   └── norn/                CLI: parse · run · build · graph · trace
-├── examples/
-└── tests/                   snapshot and golden-trace corpora
+├── examples/                parse corpus
+│   ├── errors/              programs that must not parse
+│   ├── run/                 programs that must check, lower, and run
+│   └── type-errors/         programs that must not check
+└── crates/*/tests/          snapshot and golden-trace corpora
 ```
 
 ## 8 · Deferred work

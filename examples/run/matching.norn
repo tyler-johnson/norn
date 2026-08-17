@@ -1,0 +1,83 @@
+module matching
+
+record Point {
+    x: I64
+    y: I64
+}
+
+enum Shape {
+    Empty
+    Dot(Point)
+    Segment(Point, Point)
+    Circle { centre: Point, radius: I64 }
+}
+
+fn describe(shape: Shape) -> String {
+    match shape {
+        #Shape.Empty => "empty"
+        #Shape.Dot(#Point(x: 0, y: 0)) => "dot at the origin"
+        #Shape.Dot(point) => "dot at " + show(point)
+        #Shape.Segment(from, to) => "segment " + show(from) + " to " + show(to)
+        #Shape.Circle(radius: 0, ..) => "degenerate circle"
+        #Shape.Circle(centre: centre, radius: radius) => {
+            "circle of radius " + digits(radius) + " at " + show(centre)
+        }
+    }
+}
+
+// A guard runs after the pattern binds, and a failed guard falls through to the next arm.
+fn size(shape: Shape) -> String {
+    match shape {
+        #Shape.Circle(radius: r, ..) if r > 100 => "huge"
+        #Shape.Circle(radius: r, ..) if r > 10 => "large"
+        #Shape.Circle(..) => "small"
+        #Shape.Empty | #Shape.Dot(_) => "none"
+        _ => "some"
+    }
+}
+
+fn show(point: Point) -> String {
+    "(" + digits(point.x) + ", " + digits(point.y) + ")"
+}
+
+fn main() {
+    let origin = #Point(x: 0, y: 0)
+    let corner = #Point(x: 3, y: 4)
+
+    print(describe(#Shape.Empty))
+    print(describe(#Shape.Dot(origin)))
+    print(describe(#Shape.Dot(corner)))
+    print(describe(#Shape.Segment(origin, corner)))
+    print(describe(#Shape.Circle(centre: corner, radius: 0)))
+    print(describe(#Shape.Circle(centre: origin, radius: 12)))
+
+    print(size(#Shape.Circle(centre: origin, radius: 500)))
+    print(size(#Shape.Circle(centre: origin, radius: 50)))
+    print(size(#Shape.Circle(centre: origin, radius: 5)))
+    print(size(#Shape.Dot(corner)))
+    print(size(#Shape.Segment(origin, corner)))
+
+    // Values print in the syntax that builds them.
+    print(#Shape.Circle(centre: corner, radius: 7))
+}
+
+fn digits(n: I64) -> String {
+    if n < 0 {
+        return "-" + digits(0 - n)
+    }
+    let rest = n / 10
+    let last = match n % 10 {
+        0 => "0"
+        1 => "1"
+        2 => "2"
+        3 => "3"
+        4 => "4"
+        5 => "5"
+        6 => "6"
+        7 => "7"
+        8 => "8"
+        9 => "9"
+        _ => "?"
+    }
+    if rest == 0 { last } else { digits(rest) + last }
+}

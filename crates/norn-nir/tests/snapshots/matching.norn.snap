@@ -1,0 +1,401 @@
+=== nir ===
+record Point #0 (x, y)
+enum Option #0 (None/0, Some/1)
+enum Result #1 (Ok/1, Err/1)
+enum Shape #2 (Empty/0, Dot/1, Segment/2, Circle/2)
+
+fn describe #0(_0/shape)
+    local _1/point
+    local _2/from
+    local _3/to
+    local _4/centre
+    local _5/radius
+    local _6
+    local _7
+    local _8
+    local _9
+    local _10
+    local _11
+    local _12
+    local _13
+    local _14
+    local _15
+    local _16
+    local _17
+    local _18
+    local _19
+    local _20
+    local _21
+  b0:
+    goto b2
+  b1:
+    return _6
+  b2:
+    switch tag _0/shape [0 => b10] else b3
+  b3:
+    switch tag _0/shape [1 => b12] else b4
+  b4:
+    switch tag _0/shape [1 => b15] else b5
+  b5:
+    switch tag _0/shape [2 => b17] else b6
+  b6:
+    switch tag _0/shape [3 => b20] else b7
+  b7:
+    switch tag _0/shape [3 => b23] else b8
+  b8:
+    trap "no match arm applied"
+  b9:
+    _6 = "empty"
+    goto b1
+  b10:
+    goto b9
+  b11:
+    _6 = "dot at the origin"
+    goto b1
+  b12:
+    _7 = _0/shape.0.0 eq 0
+    branch _7 ? b13 : b4
+  b13:
+    _8 = _0/shape.0.1 eq 0
+    branch _8 ? b11 : b4
+  b14:
+    _9 = call show#2(_1/point)
+    _10 = "dot at " concat _9
+    _6 = _10
+    goto b1
+  b15:
+    _1/point = _0/shape.0
+    goto b14
+  b16:
+    _11 = call show#2(_2/from)
+    _12 = "segment " concat _11
+    _13 = _12 concat " to "
+    _14 = call show#2(_3/to)
+    _15 = _13 concat _14
+    _6 = _15
+    goto b1
+  b17:
+    _2/from = _0/shape.0
+    goto b18
+  b18:
+    _3/to = _0/shape.1
+    goto b16
+  b19:
+    _6 = "degenerate circle"
+    goto b1
+  b20:
+    goto b21
+  b21:
+    _16 = _0/shape.1 eq 0
+    branch _16 ? b19 : b7
+  b22:
+    _17 = call digits#4(_5/radius)
+    _18 = "circle of radius " concat _17
+    _19 = _18 concat " at "
+    _20 = call show#2(_4/centre)
+    _21 = _19 concat _20
+    _6 = _21
+    goto b1
+  b23:
+    _4/centre = _0/shape.0
+    goto b24
+  b24:
+    _5/radius = _0/shape.1
+    goto b22
+
+fn size #1(_0/shape)
+    local _1/r
+    local _2/r
+    local _3
+    local _4
+    local _5
+  b0:
+    goto b2
+  b1:
+    return _3
+  b2:
+    switch tag _0/shape [3 => b8] else b3
+  b3:
+    switch tag _0/shape [3 => b12] else b4
+  b4:
+    switch tag _0/shape [3 => b16] else b5
+  b5:
+    switch tag _0/shape [0 => b20] else b19
+  b6:
+    goto b22
+  b7:
+    _4 = _1/r gt 100
+    branch _4 ? b10 : b3
+  b8:
+    goto b9
+  b9:
+    _1/r = _0/shape.1
+    goto b7
+  b10:
+    _3 = "huge"
+    goto b1
+  b11:
+    _5 = _2/r gt 10
+    branch _5 ? b14 : b4
+  b12:
+    goto b13
+  b13:
+    _2/r = _0/shape.1
+    goto b11
+  b14:
+    _3 = "large"
+    goto b1
+  b15:
+    _3 = "small"
+    goto b1
+  b16:
+    goto b17
+  b17:
+    goto b15
+  b18:
+    _3 = "none"
+    goto b1
+  b19:
+    switch tag _0/shape [1 => b21] else b6
+  b20:
+    goto b18
+  b21:
+    goto b18
+  b22:
+    _3 = "some"
+    goto b1
+
+fn show #2(_0/point)
+    local _1
+    local _2
+    local _3
+    local _4
+    local _5
+    local _6
+  b0:
+    _1 = call digits#4(_0/point.0)
+    _2 = "(" concat _1
+    _3 = _2 concat ", "
+    _4 = call digits#4(_0/point.1)
+    _5 = _3 concat _4
+    _6 = _5 concat ")"
+    return _6
+
+fn main #3()
+    local _0/origin
+    local _1/corner
+    local _2
+    local _3
+    local _4
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+    local _10
+    local _11
+    local _12
+    local _13
+    local _14
+    local _15
+    local _16
+    local _17
+    local _18
+    local _19
+    local _20
+    local _21
+    local _22
+    local _23
+    local _24
+    local _25
+    local _26
+    local _27
+    local _28
+    local _29
+    local _30
+    local _31
+    local _32
+    local _33
+    local _34
+    local _35
+    local _36
+    local _37
+    local _38
+  b0:
+    _2 = #Point(0, 0)
+    _0/origin = _2
+    _3 = #Point(3, 4)
+    _1/corner = _3
+    _4 = #Shape.Empty()
+    _5 = call describe#0(_4)
+    _6 = builtin print(_5)
+    _7 = #Shape.Dot(_0/origin)
+    _8 = call describe#0(_7)
+    _9 = builtin print(_8)
+    _10 = #Shape.Dot(_1/corner)
+    _11 = call describe#0(_10)
+    _12 = builtin print(_11)
+    _13 = #Shape.Segment(_0/origin, _1/corner)
+    _14 = call describe#0(_13)
+    _15 = builtin print(_14)
+    _16 = #Shape.Circle(_1/corner, 0)
+    _17 = call describe#0(_16)
+    _18 = builtin print(_17)
+    _19 = #Shape.Circle(_0/origin, 12)
+    _20 = call describe#0(_19)
+    _21 = builtin print(_20)
+    _22 = #Shape.Circle(_0/origin, 500)
+    _23 = call size#1(_22)
+    _24 = builtin print(_23)
+    _25 = #Shape.Circle(_0/origin, 50)
+    _26 = call size#1(_25)
+    _27 = builtin print(_26)
+    _28 = #Shape.Circle(_0/origin, 5)
+    _29 = call size#1(_28)
+    _30 = builtin print(_29)
+    _31 = #Shape.Dot(_1/corner)
+    _32 = call size#1(_31)
+    _33 = builtin print(_32)
+    _34 = #Shape.Segment(_0/origin, _1/corner)
+    _35 = call size#1(_34)
+    _36 = builtin print(_35)
+    _37 = #Shape.Circle(_1/corner, 7)
+    _38 = builtin print(_37)
+    return _38
+
+fn digits #4(_0/n)
+    local _1/rest
+    local _2/last
+    local _3
+    local _4
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+    local _10
+    local _11
+    local _12
+    local _13
+    local _14
+    local _15
+    local _16
+    local _17
+    local _18
+    local _19
+    local _20
+    local _21
+    local _22
+    local _23
+    local _24
+  b0:
+    _4 = _0/n lt 0
+    branch _4 ? b1 : b2
+  b1:
+    _5 = 0 sub.i _0/n
+    _6 = call digits#4(_5)
+    _7 = "-" concat _6
+    return _7
+  b2:
+    _3 = ()
+    goto b3
+  b3:
+    _8 = _0/n div.i 10
+    _1/rest = _8
+    _10 = _0/n rem.i 10
+    goto b5
+  b4:
+    _2/last = _9
+    _22 = _1/rest eq 0
+    branch _22 ? b27 : b28
+  b5:
+    _11 = _10 eq 0
+    branch _11 ? b16 : b6
+  b6:
+    _12 = _10 eq 1
+    branch _12 ? b17 : b7
+  b7:
+    _13 = _10 eq 2
+    branch _13 ? b18 : b8
+  b8:
+    _14 = _10 eq 3
+    branch _14 ? b19 : b9
+  b9:
+    _15 = _10 eq 4
+    branch _15 ? b20 : b10
+  b10:
+    _16 = _10 eq 5
+    branch _16 ? b21 : b11
+  b11:
+    _17 = _10 eq 6
+    branch _17 ? b22 : b12
+  b12:
+    _18 = _10 eq 7
+    branch _18 ? b23 : b13
+  b13:
+    _19 = _10 eq 8
+    branch _19 ? b24 : b14
+  b14:
+    _20 = _10 eq 9
+    branch _20 ? b25 : b15
+  b15:
+    goto b26
+  b16:
+    _9 = "0"
+    goto b4
+  b17:
+    _9 = "1"
+    goto b4
+  b18:
+    _9 = "2"
+    goto b4
+  b19:
+    _9 = "3"
+    goto b4
+  b20:
+    _9 = "4"
+    goto b4
+  b21:
+    _9 = "5"
+    goto b4
+  b22:
+    _9 = "6"
+    goto b4
+  b23:
+    _9 = "7"
+    goto b4
+  b24:
+    _9 = "8"
+    goto b4
+  b25:
+    _9 = "9"
+    goto b4
+  b26:
+    _9 = "?"
+    goto b4
+  b27:
+    _21 = _2/last
+    goto b29
+  b28:
+    _23 = call digits#4(_1/rest)
+    _24 = _23 concat _2/last
+    _21 = _24
+    goto b29
+  b29:
+    return _21
+
+=== output ===
+empty
+dot at the origin
+dot at (3, 4)
+segment (0, 0) to (3, 4)
+degenerate circle
+circle of radius 12 at (0, 0)
+huge
+large
+small
+none
+some
+#Shape.Circle(centre: #Point(x: 3, y: 4), radius: 7)
+=== result ===
+()

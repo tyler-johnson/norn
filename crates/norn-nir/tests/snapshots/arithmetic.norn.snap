@@ -1,0 +1,379 @@
+=== nir ===
+enum Option #0 (None/0, Some/1)
+enum Result #1 (Ok/1, Err/1)
+
+fn factorial #0(_0/n)
+    local _1
+    local _2
+    local _3
+    local _4
+    local _5
+  b0:
+    _2 = _0/n le 1
+    branch _2 ? b1 : b2
+  b1:
+    return 1
+  b2:
+    _1 = ()
+    goto b3
+  b3:
+    _3 = _0/n sub.i 1
+    _4 = call factorial#0(_3)
+    _5 = _0/n mul.i _4
+    return _5
+
+fn fib #1(_0/n)
+    local _1
+    local _2
+    local _3
+    local _4
+    local _5
+    local _6
+    local _7
+  b0:
+    _2 = _0/n lt 2
+    branch _2 ? b1 : b2
+  b1:
+    _1 = _0/n
+    goto b3
+  b2:
+    _3 = _0/n sub.i 1
+    _4 = call fib#1(_3)
+    _5 = _0/n sub.i 2
+    _6 = call fib#1(_5)
+    _7 = _4 add.i _6
+    _1 = _7
+    goto b3
+  b3:
+    return _1
+
+fn classify #2(_0/n)
+    local _1
+    local _2
+    local _3
+    local _4
+  b0:
+    _2 = _0/n lt 0
+    branch _2 ? b1 : b2
+  b1:
+    _1 = "negative"
+    goto b3
+  b2:
+    _4 = _0/n eq 0
+    branch _4 ? b4 : b5
+  b3:
+    return _1
+  b4:
+    _3 = "zero"
+    goto b6
+  b5:
+    _3 = "positive"
+    goto b6
+  b6:
+    _1 = _3
+    goto b3
+
+fn trace #3(_0/label, _1/value)
+    local _2
+    local _3
+  b0:
+    _2 = "  evaluated " concat _0/label
+    _3 = builtin print(_2)
+    return _1/value
+
+fn main #4()
+    local _0/precedence
+    local _1/grouped
+    local _2/and_result
+    local _3/or_result
+    local _4/half
+    local _5/total
+    local _6
+    local _7
+    local _8
+    local _9
+    local _10
+    local _11
+    local _12
+    local _13
+    local _14
+    local _15
+    local _16
+    local _17
+    local _18
+    local _19
+    local _20
+    local _21
+    local _22
+    local _23
+    local _24
+    local _25
+    local _26
+    local _27
+    local _28
+    local _29
+    local _30
+    local _31
+    local _32
+    local _33
+    local _34
+    local _35
+    local _36
+    local _37
+    local _38
+    local _39
+    local _40
+    local _41
+    local _42
+    local _43
+    local _44
+    local _45
+    local _46
+    local _47
+    local _48
+    local _49
+    local _50
+    local _51
+    local _52
+    local _53
+    local _54
+    local _55
+    local _56
+    local _57
+    local _58
+  b0:
+    _6 = call factorial#0(10)
+    _7 = call describe#5(_6)
+    _8 = "factorial(10) = " concat _7
+    _9 = builtin print(_8)
+    _10 = call fib#1(15)
+    _11 = call describe#5(_10)
+    _12 = "fib(15) = " concat _11
+    _13 = builtin print(_12)
+    _14 = neg 3
+    _15 = call classify#2(_14)
+    _16 = _15 concat " "
+    _17 = call classify#2(0)
+    _18 = _16 concat _17
+    _19 = _18 concat " "
+    _20 = call classify#2(9)
+    _21 = _19 concat _20
+    _22 = builtin print(_21)
+    _23 = 3 mul.i 4
+    _24 = 2 add.i _23
+    _25 = 6 div.i 2
+    _26 = _24 sub.i _25
+    _0/precedence = _26
+    _27 = call describe#5(_0/precedence)
+    _28 = "2 + 3 * 4 - 6 / 2 = " concat _27
+    _29 = builtin print(_28)
+    _30 = 2 add.i 3
+    _31 = 4 sub.i 6
+    _32 = _30 mul.i _31
+    _33 = _32 div.i 2
+    _1/grouped = _33
+    _34 = call describe#5(_1/grouped)
+    _35 = "(2 + 3) * (4 - 6) / 2 = " concat _34
+    _36 = builtin print(_35)
+    _37 = builtin print("short circuit &&:")
+    _39 = call trace#3("left", false)
+    _38 = _39
+    branch _38 ? b1 : b2
+  b1:
+    _40 = call trace#3("right", true)
+    _38 = _40
+    goto b2
+  b2:
+    _2/and_result = _38
+    _41 = builtin print("short circuit ||:")
+    _43 = call trace#3("left", true)
+    _42 = _43
+    branch _42 ? b4 : b3
+  b3:
+    _44 = call trace#3("right", true)
+    _42 = _44
+    goto b4
+  b4:
+    _3/or_result = _42
+    _45 = call describe_bool#8(_2/and_result)
+    _46 = _45 concat " "
+    _47 = call describe_bool#8(_3/or_result)
+    _48 = _46 concat _47
+    _49 = builtin print(_48)
+    _50 = 7.5 div.f 2.0
+    _4/half = _50
+    _51 = builtin print(_4/half)
+    _5/total = 0
+    _52 = call factorial#0(5)
+    _53 = _5/total add.i _52
+    _5/total = _53
+    _54 = call fib#1(10)
+    _55 = _5/total add.i _54
+    _5/total = _55
+    _56 = call describe#5(_5/total)
+    _57 = "mutated total = " concat _56
+    _58 = builtin print(_57)
+    return _58
+
+fn describe #5(_0/n)
+    local _1
+    local _2
+    local _3
+    local _4
+    local _5
+    local _6
+  b0:
+    _2 = _0/n lt 0
+    branch _2 ? b1 : b2
+  b1:
+    _3 = 0 sub.i _0/n
+    _4 = call digits#6(_3)
+    _5 = "-" concat _4
+    _1 = _5
+    goto b3
+  b2:
+    _6 = call digits#6(_0/n)
+    _1 = _6
+    goto b3
+  b3:
+    return _1
+
+fn digits #6(_0/n)
+    local _1/rest
+    local _2/last
+    local _3
+    local _4
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+  b0:
+    _3 = _0/n div.i 10
+    _1/rest = _3
+    _4 = _0/n rem.i 10
+    _5 = call digit#7(_4)
+    _2/last = _5
+    _7 = _1/rest eq 0
+    branch _7 ? b1 : b2
+  b1:
+    _6 = _2/last
+    goto b3
+  b2:
+    _8 = call digits#6(_1/rest)
+    _9 = _8 concat _2/last
+    _6 = _9
+    goto b3
+  b3:
+    return _6
+
+fn digit #7(_0/n)
+    local _1
+    local _2
+    local _3
+    local _4
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+    local _10
+    local _11
+  b0:
+    goto b2
+  b1:
+    return _1
+  b2:
+    _2 = _0/n eq 0
+    branch _2 ? b13 : b3
+  b3:
+    _3 = _0/n eq 1
+    branch _3 ? b14 : b4
+  b4:
+    _4 = _0/n eq 2
+    branch _4 ? b15 : b5
+  b5:
+    _5 = _0/n eq 3
+    branch _5 ? b16 : b6
+  b6:
+    _6 = _0/n eq 4
+    branch _6 ? b17 : b7
+  b7:
+    _7 = _0/n eq 5
+    branch _7 ? b18 : b8
+  b8:
+    _8 = _0/n eq 6
+    branch _8 ? b19 : b9
+  b9:
+    _9 = _0/n eq 7
+    branch _9 ? b20 : b10
+  b10:
+    _10 = _0/n eq 8
+    branch _10 ? b21 : b11
+  b11:
+    _11 = _0/n eq 9
+    branch _11 ? b22 : b12
+  b12:
+    goto b23
+  b13:
+    _1 = "0"
+    goto b1
+  b14:
+    _1 = "1"
+    goto b1
+  b15:
+    _1 = "2"
+    goto b1
+  b16:
+    _1 = "3"
+    goto b1
+  b17:
+    _1 = "4"
+    goto b1
+  b18:
+    _1 = "5"
+    goto b1
+  b19:
+    _1 = "6"
+    goto b1
+  b20:
+    _1 = "7"
+    goto b1
+  b21:
+    _1 = "8"
+    goto b1
+  b22:
+    _1 = "9"
+    goto b1
+  b23:
+    _1 = "?"
+    goto b1
+
+fn describe_bool #8(_0/value)
+    local _1
+  b0:
+    branch _0/value ? b1 : b2
+  b1:
+    _1 = "true"
+    goto b3
+  b2:
+    _1 = "false"
+    goto b3
+  b3:
+    return _1
+
+=== output ===
+factorial(10) = 3628800
+fib(15) = 610
+negative zero positive
+2 + 3 * 4 - 6 / 2 = 11
+(2 + 3) * (4 - 6) / 2 = -5
+short circuit &&:
+  evaluated left
+short circuit ||:
+  evaluated left
+false true
+3.75
+mutated total = 175
+=== result ===
+()

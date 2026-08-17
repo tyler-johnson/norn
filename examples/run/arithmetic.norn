@@ -1,0 +1,97 @@
+module arithmetic
+
+fn factorial(n: I64) -> I64 {
+    if n <= 1 {
+        return 1
+    }
+    return n * factorial(n - 1)
+}
+
+fn fib(n: I64) -> I64 {
+    if n < 2 {
+        n
+    } else {
+        fib(n - 1) + fib(n - 2)
+    }
+}
+
+fn classify(n: I64) -> String {
+    if n < 0 {
+        "negative"
+    } else if n == 0 {
+        "zero"
+    } else {
+        "positive"
+    }
+}
+
+// `&&` and `||` must not evaluate their right side when the left already decides the answer;
+// `trace` records what actually ran.
+fn trace(label: String, value: Bool) -> Bool {
+    print("  evaluated " + label)
+    value
+}
+
+fn main() {
+    print("factorial(10) = " + describe(factorial(10)))
+    print("fib(15) = " + describe(fib(15)))
+    print(classify(-3) + " " + classify(0) + " " + classify(9))
+
+    let precedence = 2 + 3 * 4 - 6 / 2
+    print("2 + 3 * 4 - 6 / 2 = " + describe(precedence))
+
+    let grouped = (2 + 3) * (4 - 6) / 2
+    print("(2 + 3) * (4 - 6) / 2 = " + describe(grouped))
+
+    print("short circuit &&:")
+    let and_result = trace("left", false) && trace("right", true)
+    print("short circuit ||:")
+    let or_result = trace("left", true) || trace("right", true)
+    print(describe_bool(and_result) + " " + describe_bool(or_result))
+
+    let half = 7.5 / 2.0
+    print(half)
+
+    let mut total = 0
+    total = total + factorial(5)
+    total = total + fib(10)
+    print("mutated total = " + describe(total))
+}
+
+fn describe(n: I64) -> String {
+    if n < 0 {
+        "-" + digits(0 - n)
+    } else {
+        digits(n)
+    }
+}
+
+fn digits(n: I64) -> String {
+    let rest = n / 10
+    let last = digit(n % 10)
+    if rest == 0 {
+        last
+    } else {
+        digits(rest) + last
+    }
+}
+
+fn digit(n: I64) -> String {
+    match n {
+        0 => "0"
+        1 => "1"
+        2 => "2"
+        3 => "3"
+        4 => "4"
+        5 => "5"
+        6 => "6"
+        7 => "7"
+        8 => "8"
+        9 => "9"
+        _ => "?"
+    }
+}
+
+fn describe_bool(value: Bool) -> String {
+    if value { "true" } else { "false" }
+}

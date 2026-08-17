@@ -1,0 +1,43 @@
+error: expected String, found I64
+ --> mismatches.norn:9:12
+  |
+9 |     return 1
+  |            ^
+
+error: `User` has no field `nickname`
+  --> mismatches.norn:14:17
+   |
+14 |     return user.nickname
+   |                 ^^^^^^^^ unknown field
+
+error: missing field: name
+  --> mismatches.norn:18:12
+   |
+18 |     return #User(id: 1)
+   |            ^^^^^^^^^^^^
+
+error: `-` does not apply to String
+  --> mismatches.norn:22:12
+   |
+22 |     return "a" - "b"
+   |            ^^^^^^^^^
+
+error: unknown name `elsewhere`
+  --> mismatches.norn:26:12
+   |
+26 |     return elsewhere
+   |            ^^^^^^^^^
+
+error: arguments are either all named or all positional
+  --> mismatches.norn:30:12
+   |
+30 |     return #User(1, name: "a")
+   |            ^^^^^^^^^^^^^^^^^^^
+   = note: mixing the two forms would need a precedence rule nobody should have to learn
+
+error: `total` is not declared `mut`
+  --> mismatches.norn:35:5
+   |
+35 |     total = 2
+   |     ^^^^^ cannot assign
+   = note: declare it as `let mut total = …`

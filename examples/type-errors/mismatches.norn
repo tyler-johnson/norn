@@ -1,0 +1,37 @@
+module errors.mismatches
+
+record User {
+    id: I64
+    name: String
+}
+
+fn wrong_return() -> String {
+    return 1
+}
+
+fn wrong_field() -> I64 {
+    let user = #User(id: 1, name: "a")
+    return user.nickname
+}
+
+fn missing_field() -> User {
+    return #User(id: 1)
+}
+
+fn wrong_operand() -> I64 {
+    return "a" - "b"
+}
+
+fn unknown_name() -> I64 {
+    return elsewhere
+}
+
+fn mixed_arguments() -> User {
+    return #User(1, name: "a")
+}
+
+fn not_mutable() -> I64 {
+    let total = 1
+    total = 2
+    return total
+}

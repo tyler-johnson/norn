@@ -1,0 +1,31 @@
+=== nir ===
+record Greeting #0 (salutation, subject)
+enum Option #0 (None/0, Some/1)
+enum Result #1 (Ok/1, Err/1)
+
+fn render #0(_0/greeting)
+    local _1
+    local _2
+    local _3
+  b0:
+    _1 = _0/greeting.0 concat ", "
+    _2 = _1 concat _0/greeting.1
+    _3 = _2 concat "!"
+    return _3
+
+fn main #1()
+    local _0/greeting
+    local _1
+    local _2
+    local _3
+  b0:
+    _1 = #Greeting("Hello", "world")
+    _0/greeting = _1
+    _2 = call render#0(_0/greeting)
+    _3 = builtin print(_2)
+    return _3
+
+=== output ===
+Hello, world!
+=== result ===
+()

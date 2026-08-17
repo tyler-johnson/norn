@@ -1,0 +1,430 @@
+=== nir ===
+record Config #0 (port, host)
+enum Option #0 (None/0, Some/1)
+enum Result #1 (Ok/1, Err/1)
+enum ConfigError #2 (Missing/1, OutOfRange/2)
+
+fn port_of #0(_0/raw)
+    local _1
+    local _2
+    local _3
+    local _4
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+  b0:
+    _2 = _0/raw lt 1
+    branch _2 ? b1 : b2
+  b1:
+    _3 = #ConfigError.OutOfRange("port", _0/raw)
+    _4 = #Result.Err(_3)
+    return _4
+  b2:
+    _1 = ()
+    goto b3
+  b3:
+    _6 = _0/raw gt 65535
+    branch _6 ? b4 : b5
+  b4:
+    _7 = #ConfigError.OutOfRange("port", _0/raw)
+    _8 = #Result.Err(_7)
+    return _8
+  b5:
+    _5 = ()
+    goto b6
+  b6:
+    _9 = #Result.Ok(_0/raw)
+    return _9
+
+fn host_of #1(_0/raw)
+    local _1
+    local _2
+    local _3
+    local _4
+    local _5
+  b0:
+    _2 = _0/raw eq ""
+    branch _2 ? b1 : b2
+  b1:
+    _3 = #ConfigError.Missing("host")
+    _4 = #Result.Err(_3)
+    _1 = _4
+    goto b3
+  b2:
+    _5 = #Result.Ok(_0/raw)
+    _1 = _5
+    goto b3
+  b3:
+    return _1
+
+fn load #2(_0/raw_port, _1/raw_host)
+    local _2/port
+    local _3/host
+    local _4
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+    local _10
+    local _11
+  b0:
+    _4 = call port_of#0(_0/raw_port)
+    switch tag _4 [0 => b1] else b2
+  b1:
+    _5 = _4.0
+    _2/port = _5
+    _7 = call host_of#1(_1/raw_host)
+    switch tag _7 [0 => b3] else b4
+  b2:
+    _6 = #Result.Err(_4.0)
+    return _6
+  b3:
+    _8 = _7.0
+    _3/host = _8
+    _10 = #Config(_2/port, _3/host)
+    _11 = #Result.Ok(_10)
+    return _11
+  b4:
+    _9 = #Result.Err(_7.0)
+    return _9
+
+fn report #3(_0/result)
+    local _1/config
+    local _2/field
+    local _3/field
+    local _4/value
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+    local _10
+    local _11
+    local _12
+    local _13
+  b0:
+    goto b2
+  b1:
+    return _5
+  b2:
+    switch tag _0/result [0 => b7] else b3
+  b3:
+    switch tag _0/result [1 => b9] else b4
+  b4:
+    switch tag _0/result [1 => b12] else b5
+  b5:
+    trap "no match arm applied"
+  b6:
+    _6 = "listening on " concat _1/config.1
+    _7 = _6 concat ":"
+    _8 = call digits#9(_1/config.0)
+    _9 = _7 concat _8
+    _5 = _9
+    goto b1
+  b7:
+    _1/config = _0/result.0
+    goto b6
+  b8:
+    _10 = "missing " concat _2/field
+    _5 = _10
+    goto b1
+  b9:
+    switch tag _0/result.0 [0 => b10] else b4
+  b10:
+    _2/field = _0/result.0.0
+    goto b8
+  b11:
+    _11 = _3/field concat " is out of range: "
+    _12 = call digits#9(_4/value)
+    _13 = _11 concat _12
+    _5 = _13
+    goto b1
+  b12:
+    switch tag _0/result.0 [1 => b13] else b5
+  b13:
+    _3/field = _0/result.0.0
+    goto b14
+  b14:
+    _4/value = _0/result.0.1
+    goto b11
+
+fn first_word #4(_0/text)
+    local _1/index
+    local _2
+    local _3
+    local _4
+    local _5
+    local _6
+  b0:
+    _2 = call index_of_space#5(_0/text)
+    switch tag _2 [1 => b1] else b2
+  b1:
+    _3 = _2.0
+    _1/index = _3
+    _5 = call prefix#6(_0/text, _1/index)
+    _6 = #Option.Some(_5)
+    return _6
+  b2:
+    _4 = #Option.None()
+    return _4
+
+fn index_of_space #5(_0/text)
+    local _1
+    local _2
+    local _3
+    local _4
+  b0:
+    _2 = _0/text eq "hello world"
+    branch _2 ? b1 : b2
+  b1:
+    _3 = #Option.Some(5)
+    _1 = _3
+    goto b3
+  b2:
+    _4 = #Option.None()
+    _1 = _4
+    goto b3
+  b3:
+    return _1
+
+fn prefix #6(_0/text, _1/upto)
+    local _2
+    local _3
+    local _4
+    local _5
+  b0:
+    _4 = _0/text eq "hello world"
+    _3 = _4
+    branch _3 ? b1 : b2
+  b1:
+    _5 = _1/upto eq 5
+    _3 = _5
+    goto b2
+  b2:
+    branch _3 ? b3 : b4
+  b3:
+    _2 = "hello"
+    goto b5
+  b4:
+    _2 = _0/text
+    goto b5
+  b5:
+    return _2
+
+fn describe_word #7(_0/word)
+    local _1/word
+    local _2
+    local _3
+  b0:
+    goto b2
+  b1:
+    return _2
+  b2:
+    switch tag _0/word [1 => b6] else b3
+  b3:
+    switch tag _0/word [0 => b8] else b4
+  b4:
+    trap "no match arm applied"
+  b5:
+    _3 = "first word: " concat _1/word
+    _2 = _3
+    goto b1
+  b6:
+    _1/word = _0/word.0
+    goto b5
+  b7:
+    _2 = "no space found"
+    goto b1
+  b8:
+    goto b7
+
+fn main #8()
+    local _0/config
+    local _1
+    local _2
+    local _3
+    local _4
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+    local _10
+    local _11
+    local _12
+    local _13
+    local _14
+    local _15
+    local _16
+    local _17
+    local _18
+    local _19
+    local _20
+    local _21
+    local _22
+    local _23
+  b0:
+    _1 = call load#2(8080, "localhost")
+    _2 = call report#3(_1)
+    _3 = builtin print(_2)
+    _4 = call load#2(0, "localhost")
+    _5 = call report#3(_4)
+    _6 = builtin print(_5)
+    _7 = call load#2(80, "")
+    _8 = call report#3(_7)
+    _9 = builtin print(_8)
+    _10 = call first_word#4("hello world")
+    _11 = call describe_word#7(_10)
+    _12 = builtin print(_11)
+    _13 = call first_word#4("indivisible")
+    _14 = call describe_word#7(_13)
+    _15 = builtin print(_14)
+    _16 = #ConfigError.OutOfRange("port", 70000)
+    _17 = builtin print(_16)
+    _18 = call load#2(443, "example.com")
+    switch tag _18 [0 => b1] else b2
+  b1:
+    _19 = _18.0
+    _0/config = _19
+    _21 = "checked " concat _0/config.1
+    _22 = builtin print(_21)
+    _23 = #Result.Ok(())
+    return _23
+  b2:
+    _20 = #Result.Err(_18.0)
+    return _20
+
+fn digits #9(_0/n)
+    local _1/rest
+    local _2/last
+    local _3
+    local _4
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+    local _10
+    local _11
+    local _12
+    local _13
+    local _14
+    local _15
+    local _16
+    local _17
+    local _18
+    local _19
+    local _20
+    local _21
+    local _22
+    local _23
+    local _24
+  b0:
+    _4 = _0/n lt 0
+    branch _4 ? b1 : b2
+  b1:
+    _5 = 0 sub.i _0/n
+    _6 = call digits#9(_5)
+    _7 = "-" concat _6
+    return _7
+  b2:
+    _3 = ()
+    goto b3
+  b3:
+    _8 = _0/n div.i 10
+    _1/rest = _8
+    _10 = _0/n rem.i 10
+    goto b5
+  b4:
+    _2/last = _9
+    _22 = _1/rest eq 0
+    branch _22 ? b27 : b28
+  b5:
+    _11 = _10 eq 0
+    branch _11 ? b16 : b6
+  b6:
+    _12 = _10 eq 1
+    branch _12 ? b17 : b7
+  b7:
+    _13 = _10 eq 2
+    branch _13 ? b18 : b8
+  b8:
+    _14 = _10 eq 3
+    branch _14 ? b19 : b9
+  b9:
+    _15 = _10 eq 4
+    branch _15 ? b20 : b10
+  b10:
+    _16 = _10 eq 5
+    branch _16 ? b21 : b11
+  b11:
+    _17 = _10 eq 6
+    branch _17 ? b22 : b12
+  b12:
+    _18 = _10 eq 7
+    branch _18 ? b23 : b13
+  b13:
+    _19 = _10 eq 8
+    branch _19 ? b24 : b14
+  b14:
+    _20 = _10 eq 9
+    branch _20 ? b25 : b15
+  b15:
+    goto b26
+  b16:
+    _9 = "0"
+    goto b4
+  b17:
+    _9 = "1"
+    goto b4
+  b18:
+    _9 = "2"
+    goto b4
+  b19:
+    _9 = "3"
+    goto b4
+  b20:
+    _9 = "4"
+    goto b4
+  b21:
+    _9 = "5"
+    goto b4
+  b22:
+    _9 = "6"
+    goto b4
+  b23:
+    _9 = "7"
+    goto b4
+  b24:
+    _9 = "8"
+    goto b4
+  b25:
+    _9 = "9"
+    goto b4
+  b26:
+    _9 = "?"
+    goto b4
+  b27:
+    _21 = _2/last
+    goto b29
+  b28:
+    _23 = call digits#9(_1/rest)
+    _24 = _23 concat _2/last
+    _21 = _24
+    goto b29
+  b29:
+    return _21
+
+=== output ===
+listening on localhost:8080
+port is out of range: 0
+missing host
+first word: hello
+no space found
+#ConfigError.OutOfRange(field: "port", value: 70000)
+checked example.com
+=== result ===
+#Ok(())

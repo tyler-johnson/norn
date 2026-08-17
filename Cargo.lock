@@ -6,6 +6,23 @@ version = 4
 name = "norn"
 version = "0.0.0"
 dependencies = [
+ "norn-hir",
+ "norn-nir",
+ "norn-syntax",
+]
+
+[[package]]
+name = "norn-hir"
+version = "0.0.0"
+dependencies = [
+ "norn-syntax",
+]
+
+[[package]]
+name = "norn-nir"
+version = "0.0.0"
+dependencies = [
+ "norn-hir",
  "norn-syntax",
 ]
 
