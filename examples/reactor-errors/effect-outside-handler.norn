@@ -10,7 +10,7 @@ reactor Watcher(threshold: I64) {
     }
 
     signal alarm: Bool = {
-        after_commit notify(level)
+        after notify(level)
         level > threshold
     }
 }

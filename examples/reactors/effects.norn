@@ -40,7 +40,7 @@ reactor Mailbox()
 
     on queued(id) {
         pending = pending + 1
-        after_commit deliver(id) -> settled
+        after deliver(id) -> settled
     }
 
     on settled(outcome) {

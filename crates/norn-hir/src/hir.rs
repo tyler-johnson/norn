@@ -741,10 +741,10 @@ pub enum StmtKind {
         place: Expr,
         value: Expr,
     },
-    /// `after_commit deliver(m) -> delivered`. The operand is *built* here and started only after
-    /// the snapshot is published — which is what M2's laziness was for. `returns` is the index of
-    /// the input the effect's value comes back on, making a completion a later input.
-    AfterCommit {
+    /// `after deliver(m) -> delivered`. The operand is *built* here and started only after the
+    /// snapshot is published — which is what M2's laziness was for. `returns` is the index of the
+    /// input the effect's value comes back on, making a completion a later input.
+    After {
         task: Expr,
         returns: Option<usize>,
     },

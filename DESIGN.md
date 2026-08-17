@@ -452,7 +452,7 @@ reactor Mailbox() {
     on send(message) {
         pending = pending.insert(message.id, Queued)
 
-        after_commit deliver(message) -> delivery_finished
+        after deliver(message) -> delivery_finished
     }
 
     on delivery_finished(id, result) {

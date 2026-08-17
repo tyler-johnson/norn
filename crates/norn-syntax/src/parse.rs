@@ -681,7 +681,7 @@ impl Parser {
                     span,
                 })
             }
-            TokenKind::Kw(Kw::AfterCommit) => {
+            TokenKind::Kw(Kw::After) => {
                 self.advance();
                 let task = self.expr()?;
                 let mut span = start.to(task.span);
@@ -693,7 +693,7 @@ impl Parser {
                     None
                 };
                 Ok(Stmt {
-                    kind: StmtKind::AfterCommit { task, returns },
+                    kind: StmtKind::After { task, returns },
                     span,
                 })
             }

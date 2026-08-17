@@ -3,7 +3,7 @@ error: `print` cannot appear in a reactor, because it is something the world can
    |
 10 |         print(prefix + text)
    |         ^^^^^^^^^^^^^^^^^^^^ a turn is pure
-   = note: a turn runs to a fixed point with nothing able to observe it part-way; effects leave it through `after_commit`
+   = note: a turn runs to a fixed point with nothing able to observe it part-way; effects leave it through `after`
 
 error: this reaches `greet`, which calls `print`
   --> impure.norn:14:5
@@ -15,4 +15,4 @@ error: this reaches `greet`, which calls `print`
 18 |     print("counting")
    |     ^^^^^^^^^^^^^^^^^ `print` is something the world can see happen
    = note: purity is not the same question as authority: `print` needs no capability and is still observable
-   = note: effects leave a turn through `after_commit`, which starts them once the snapshot is published
+   = note: effects leave a turn through `after`, which starts them once the snapshot is published

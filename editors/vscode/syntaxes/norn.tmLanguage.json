@@ -354,7 +354,7 @@
         {
           "comment": "Reactor members: declarations, not statements — none of them runs where it is written.",
           "name": "keyword.control.reactive.norn",
-          "match": "\\b(?:input|state|signal|on|after_commit)\\b"
+          "match": "\\b(?:input|state|signal|on|after)\\b"
         },
         {
           "name": "storage.type.norn",

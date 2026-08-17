@@ -107,7 +107,7 @@ Alternatives considered:
   built-in `Result<T, E>` and `Option<T>` with `?`.
 - **Tasks** — `task fn`, `await`, `scope { spawn ... }`, cancellation, structured join on scope exit.
 - **Reactors** — static graphs only: `input` with declared capacity and overflow policy, `state`,
-  `signal`, `on` handlers, `after_commit` effect requests, `export`, `latest`, and `send`.
+  `signal`, `on` handlers, `after` effect requests, `export`, `latest`, and `send`.
   `uses { … }` applies to a reactor as well as to a task: it is the authority the reactor's effects
   need, and the spawner's set must cover it.
 
@@ -319,12 +319,12 @@ Ordered roughly by when it becomes worth doing, not by importance:
    needed one, and dynamic switching is what real closures are for — and with them `event` nodes,
    `export event`, and the operators M3 deferred: `hold`, `scan`, `count`, `map`, `merge`, `delay`,
    `keyed`, and `map_task` policies. **Effect policies belong here too** — a per-request pending
-   queue on `after_commit`, and cancellation of obsolete work when a newer request supersedes an
-   in-flight one. M3 launches every request and lets the scope cancel what is outstanding, which is
-   correct but has no way to say "only the latest matters"; saying so needs a policy vocabulary on
-   `after_commit`, and that is the same scheduling question as `map_task`'s rather than a causality
-   one. The read side of an event also wants `for await`, which needs a loop construct. Requires the
-   trace tooling from M3.
+   queue on `after`, and cancellation of obsolete work when a newer request supersedes an in-flight
+   one. M3 launches every request and lets the scope cancel what is outstanding, which is correct
+   but has no way to say "only the latest matters"; saying so needs a policy vocabulary on `after`,
+   and that is the same scheduling question as `map_task`'s rather than a causality one. The read
+   side of an event also wants `for await`, which needs a loop construct. Requires the trace tooling
+   from M3.
 2. **Multi-threaded scheduler.** Work stealing, parallel reactors on separate workers. The
    single-threaded loop is a correctness baseline to differential-test against.
 3. **Language server.** `norn-lsp` over stdio: diagnostics first, which is `norn_hir::check`'s

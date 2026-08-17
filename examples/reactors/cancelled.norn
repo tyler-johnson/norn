@@ -29,7 +29,7 @@ reactor Slow()
 
     on start(id) {
         started = started + 1
-        after_commit slow(id) -> settled
+        after slow(id) -> settled
     }
 
     on settled(id) {

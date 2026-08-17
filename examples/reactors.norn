@@ -44,7 +44,7 @@ reactor Mailbox(retries: I64)
 
     on send(message) {
         pending = pending + 1
-        after_commit deliver(message) -> delivered
+        after deliver(message) -> delivered
     }
 
     on delivered(result) {

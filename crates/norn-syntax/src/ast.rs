@@ -203,9 +203,13 @@ pub enum StmtKind {
         value: Expr,
     },
     Return(Option<Expr>),
-    /// `after_commit deliver(message) -> delivery_finished` — request an effect, and optionally
-    /// name the input its result comes back on. Legal only inside an `on` handler.
-    AfterCommit {
+    /// `after deliver(message) -> delivery_finished` — request an effect, and optionally name the
+    /// input its result comes back on. Legal only inside an `on` handler.
+    ///
+    /// After *what* is not spelled, because within a turn there is only one boundary to be after:
+    /// the commit that publishes the snapshot. `await` names what it waits for no more than this
+    /// names what it follows.
+    After {
         task: Expr,
         returns: Option<Ident>,
     },

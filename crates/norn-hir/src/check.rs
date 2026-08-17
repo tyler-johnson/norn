@@ -53,7 +53,7 @@ enum TypeName {
 /// What kind of expression is being checked, and therefore what it is allowed to do.
 ///
 /// This was a `bool` while the only question was "are we in a `task fn`". A turn adds a second,
-/// stricter answer — a node body may not even build a task — and the `after_commit` operand adds a
+/// stricter answer — a node body may not even build a task — and the `after` operand adds a
 /// third that sits between them: it must build a task, and must still not run one.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Ctx {
@@ -63,13 +63,13 @@ enum Ctx {
     Task,
     /// A signal body, a state initialiser, or an `on` handler.
     Turn,
-    /// The operand of `after_commit`: evaluated during the turn, started after it.
+    /// The operand of `after`: evaluated during the turn, started after it.
     Effect,
 }
 
 impl Ctx {
     /// Whether a task may be *built* here. Building is not running, which is the whole reason
-    /// `after_commit` can describe an effect without performing one.
+    /// `after` can describe an effect without performing one.
     fn builds_tasks(self) -> bool {
         matches!(self, Ctx::Task | Ctx::Effect)
     }
@@ -279,7 +279,7 @@ impl Checker {
             )
             .label("a turn is pure")
             .note(
-                "a turn runs to a fixed point with nothing able to observe it part-way; effects leave it through `after_commit`",
+                "a turn runs to a fixed point with nothing able to observe it part-way; effects leave it through `after`",
             ),
         );
     }
@@ -1221,7 +1221,7 @@ impl Checker {
                     .label("a turn is pure")
                     .secondary(at, format!("`{}` is something the world can see happen", builtin.name()))
                     .note("purity is not the same question as authority: `print` needs no capability and is still observable")
-                    .note("effects leave a turn through `after_commit`, which starts them once the snapshot is published"),
+                    .note("effects leave a turn through `after`, which starts them once the snapshot is published"),
                 );
             }
 
@@ -1242,7 +1242,7 @@ impl Checker {
                 );
             diagnostic = diagnostic
                 .note("v0 has no loop construct, so recursion is the only way a pure function can fail to return — which is what makes termination provable rather than hoped for")
-                .note("compute the value with a bounded expression, or move the work into a `task fn` and request it with `after_commit`");
+                .note("compute the value with a bounded expression, or move the work into a `task fn` and request it with `after`");
             self.push(diagnostic);
         }
     }
@@ -2900,21 +2900,21 @@ impl Checker {
                     span,
                 })
             }
-            ast::StmtKind::AfterCommit { task, returns } => {
-                self.check_after_commit(task, returns.as_ref(), span)
+            ast::StmtKind::After { task, returns } => {
+                self.check_after(task, returns.as_ref(), span)
             }
             ast::StmtKind::Expr(expr) => StmtKind::Expr(self.check_expr(expr, None)),
         };
         Stmt { kind, span }
     }
 
-    /// `after_commit deliver(m) -> delivered`.
+    /// `after deliver(m) -> delivered`.
     ///
     /// The operand is *built* here and started only after the snapshot is published. Building runs
     /// nothing — that is what M2's laziness was for — so describing an effect in the middle of a
     /// turn cannot perform one, and no code path exists by which an effect observes an
     /// intermediate graph.
-    fn check_after_commit(
+    fn check_after(
         &mut self,
         task: &ast::Expr,
         returns: Option<&ast::Ident>,
@@ -2922,7 +2922,7 @@ impl Checker {
     ) -> StmtKind {
         if !self.in_handler {
             self.push(
-                Diagnostic::new(span, "`after_commit` is only available inside an `on` handler")
+                Diagnostic::new(span, "`after` is only available inside an `on` handler")
                     .label("nothing here commits")
                     .note("a signal derives a value and requests nothing; effects are asked for where state changes"),
             );
@@ -2942,7 +2942,7 @@ impl Checker {
         }
         let Ty::Task(produced) = task.ty.clone() else {
             let message = format!(
-                "`after_commit` describes work to start later, and this is {}",
+                "`after` describes work to start later, and this is {}",
                 self.program.ty_name(&task.ty)
             );
             self.push(
@@ -2962,11 +2962,11 @@ impl Checker {
                 self.push(
                     Diagnostic::new(span, message)
                         .label("the value is dropped")
-                        .note("name the input it comes back on: `after_commit … -> handled`"),
+                        .note("name the input it comes back on: `after … -> handled`"),
                 );
                 return StmtKind::Expr(self.error_expr(span));
             }
-            return StmtKind::AfterCommit {
+            return StmtKind::After {
                 task,
                 returns: None,
             };
@@ -3001,7 +3001,7 @@ impl Checker {
             self.push(Diagnostic::new(span, message).label("the result would not fit"));
             return StmtKind::Expr(self.error_expr(span));
         }
-        StmtKind::AfterCommit {
+        StmtKind::After {
             task,
             returns: Some(index),
         }
@@ -3754,7 +3754,7 @@ impl<'a> Scan<'a> {
                     }
                 }
                 // `returns` names an input, which is not a value and so not a dependency.
-                ast::StmtKind::AfterCommit { task, .. } => self.expr(task),
+                ast::StmtKind::After { task, .. } => self.expr(task),
                 ast::StmtKind::Expr(expr) => self.expr(expr),
             }
         }
@@ -3892,7 +3892,7 @@ fn collect_calls(expr: &Expr, found: &mut Vec<FnId>) {
                         collect_calls(place, found);
                         collect_calls(value, found);
                     }
-                    StmtKind::AfterCommit { task, .. } => {
+                    StmtKind::After { task, .. } => {
                         for arg in effect_arguments(task) {
                             collect_calls(arg, found);
                         }
@@ -3919,9 +3919,9 @@ fn collect_calls(expr: &Expr, found: &mut Vec<FnId>) {
     }
 }
 
-/// The parts of an `after_commit` operand that actually run during the turn.
+/// The parts of an `after` operand that actually run during the turn.
 ///
-/// The head call does not: `after_commit deliver(m)` *builds* `deliver(m)` and the runtime starts
+/// The head call does not: `after deliver(m)` *builds* `deliver(m)` and the runtime starts
 /// it once the snapshot is published, so neither what `deliver` calls nor how long it takes is a
 /// property of the turn. Its arguments are another matter — those are evaluated on the spot, and
 /// everything a turn forbids still applies to them.
@@ -4024,7 +4024,7 @@ fn walk(expr: &Expr, visit: &mut impl FnMut(&Expr)) {
                         walk(place, visit);
                         walk(value, visit);
                     }
-                    StmtKind::AfterCommit { task, .. } => {
+                    StmtKind::After { task, .. } => {
                         for arg in effect_arguments(task) {
                             walk(arg, visit);
                         }

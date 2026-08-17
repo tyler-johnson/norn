@@ -31,9 +31,7 @@
       (params message)
       (block
         (assign (path pending) (binary + (path pending) (int 1)))
-        (after-commit
-          (call (path deliver) (arg (path message)))
-          (returns delivered))))
+        (after (call (path deliver) (arg (path message))) (returns delivered))))
     (on delivered
       (params result)
       (block
@@ -96,7 +94,7 @@ reactor Mailbox(retries: I64)
     state failed: I64 = 0
     on send(message) {
         pending = pending + 1
-        after_commit deliver(message) -> delivered
+        after deliver(message) -> delivered
     }
     on delivered(result) {
         pending = pending - 1

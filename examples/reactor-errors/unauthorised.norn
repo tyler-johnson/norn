@@ -10,7 +10,7 @@ reactor Beeper(every: I64)
 
     on rang() {
         rings = rings + 1
-        after_commit beep(every)
+        after beep(every)
     }
 
     export signal count = rings

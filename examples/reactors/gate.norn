@@ -47,7 +47,7 @@ reactor Gate(limit: I64)
         accepted = accepted + 1
         if accepted - released > limit {
             rejected = rejected + 1
-            after_commit report(accepted - released)
+            after report(accepted - released)
         }
     }
 

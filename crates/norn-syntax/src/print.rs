@@ -239,8 +239,8 @@ fn print_stmt(stmt: &Stmt, indent: usize) -> String {
         StmtKind::Return(Some(value)) => {
             format!("return {}", print_expr(value, indent, LAMBDA))
         }
-        StmtKind::AfterCommit { task, returns } => {
-            let mut out = format!("after_commit {}", print_expr(task, indent, LAMBDA));
+        StmtKind::After { task, returns } => {
+            let mut out = format!("after {}", print_expr(task, indent, LAMBDA));
             if let Some(name) = returns {
                 out.push_str(&format!(" -> {}", name.name));
             }

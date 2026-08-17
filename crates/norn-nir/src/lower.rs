@@ -444,10 +444,10 @@ impl Lowerer<'_> {
                     ));
                 }
             }
-            // Emitted in place too, and for a sharper reason: an `after_commit` inside a branch
+            // Emitted in place too, and for a sharper reason: an `after` inside a branch
             // that was not taken must not fire, and the only way to be sure of that is for the
             // request to be an instruction on the path rather than a list built beside it.
-            hir::StmtKind::AfterCommit { task, returns } => {
+            hir::StmtKind::After { task, returns } => {
                 let task = self.expr(task);
                 self.push_instr(Instr::Emit {
                     task,

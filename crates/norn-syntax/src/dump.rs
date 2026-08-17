@@ -264,12 +264,12 @@ fn dump_stmt(stmt: &Stmt) -> Node {
         }
         StmtKind::Return(None) => list("return", vec![]),
         StmtKind::Return(Some(value)) => list("return", vec![dump_expr(value)]),
-        StmtKind::AfterCommit { task, returns } => {
+        StmtKind::After { task, returns } => {
             let mut children = vec![dump_expr(task)];
             if let Some(name) = returns {
                 children.push(list("returns", vec![atom(&name.name)]));
             }
-            list("after-commit", children)
+            list("after", children)
         }
         StmtKind::Expr(expr) => dump_expr(expr),
     }

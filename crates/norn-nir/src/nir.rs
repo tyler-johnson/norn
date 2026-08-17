@@ -128,7 +128,7 @@ pub enum Instr {
     /// Commit a state cell. Emitted only in a handler, and in place: the value the turn commits is
     /// wherever the handler left it.
     SetSlot(usize, Operand),
-    /// Request an effect. Emitted only in a handler, and in place, so that an `after_commit` in a
+    /// Request an effect. Emitted only in a handler, and in place, so that an `after` in a
     /// branch that was not taken does not fire. The operand is a task that has been built and not
     /// started; the runtime starts it once the snapshot is published.
     Emit {

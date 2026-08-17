@@ -1,6 +1,6 @@
-error: `after_commit` is only available inside an `on` handler
+error: `after` is only available inside an `on` handler
   --> effect-outside-handler.norn:13:9
    |
-13 |         after_commit notify(level)
-   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^ nothing here commits
+13 |         after notify(level)
+   |         ^^^^^^^^^^^^^^^^^^^ nothing here commits
    = note: a signal derives a value and requests nothing; effects are asked for where state changes
