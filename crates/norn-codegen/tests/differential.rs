@@ -66,6 +66,10 @@ fn traps_match() {
             "byte-index-negative",
             "fn main() -> () {\n    let data = bytes(\"abc\")\n    print(data[0 - 1])\n}\n",
         ),
+        (
+            "byte-value-range",
+            "fn main() -> () {\n    let data = byte(300)\n    print(data)\n}\n",
+        ),
     ];
     for (name, source) in programs {
         let (nir, main) = common::build_source(name, source);

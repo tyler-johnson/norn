@@ -5,3 +5,7 @@ fn index_a_string(name: String) -> I64 {
 fn index_with_a_string(data: Bytes) -> I64 {
     return data["0"]
 }
+
+fn not_a_byte() -> Bytes {
+    return byte("x")
+}

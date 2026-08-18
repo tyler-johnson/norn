@@ -546,6 +546,20 @@ impl Interpreter<'_> {
                 // observable, so the cheap representation waits for typed layout (§8).
                 Value::Bytes(data[start as usize..end as usize].into())
             }
+            Builtin::Byte => {
+                let value = integer("byte", &args[0])?;
+                if value < 0 || value > 255 {
+                    return Err(self.trap(frame, format!("`byte` out of range: {value}")));
+                }
+                Value::Bytes([value as u8].into())
+            }
+            Builtin::BytesConcat => {
+                let a = blob("bytes_concat", &args[0])?;
+                let b = blob("bytes_concat", &args[1])?;
+                // Concatenation copies in v0, like `bytes_slice`: the cheap representation
+                // waits for typed layout (§8).
+                Value::Bytes([&a[..], &b[..]].concat().into())
+            }
             Builtin::BytesAt => {
                 let data = blob("bytes_at", &args[0])?;
                 let index = integer("bytes_at", &args[1])?;

@@ -11,7 +11,7 @@ fn main #0()
     local _4/text
     local _5/sum
     local _6/i
-    local _7
+    local _7/text
     local _8
     local _9
     local _10
@@ -50,96 +50,145 @@ fn main #0()
     local _43
     local _44
     local _45
+    local _46
+    local _47
+    local _48
+    local _49
+    local _50
+    local _51
+    local _52
+    local _53
+    local _54
+    local _55
+    local _56
+    local _57
+    local _58
+    local _59
+    local _60
+    local _61
   b0:
-    _7 = builtin bytes("hello, norn")
-    _0/data = _7
-    _8 = builtin print(_0/data)
-    _9 = builtin bytes_len(_0/data)
-    _10 = builtin print(_9)
-    _11 = builtin bytes_slice(_0/data, 0, 5)
-    _1/head = _11
-    _13 = builtin bytes_text(_1/head)
+    _8 = builtin bytes("hello, norn")
+    _0/data = _8
+    _9 = builtin print(_0/data)
+    _10 = builtin bytes_len(_0/data)
+    _11 = builtin print(_10)
+    _12 = builtin bytes_slice(_0/data, 0, 5)
+    _1/head = _12
+    _14 = builtin bytes_text(_1/head)
     goto b2
   b1:
-    _16 = builtin bytes("☃")
-    _3/snowman = _16
-    _18 = builtin bytes_slice(_3/snowman, 0, 1)
-    _19 = builtin bytes_text(_18)
+    _17 = builtin bytes("☃")
+    _3/snowman = _17
+    _19 = builtin bytes_slice(_3/snowman, 0, 1)
+    _20 = builtin bytes_text(_19)
     goto b10
   b2:
-    switch tag _13 [1 => b6] else b3
+    switch tag _14 [1 => b6] else b3
   b3:
-    switch tag _13 [0 => b8] else b4
+    switch tag _14 [0 => b8] else b4
   b4:
     trap "no match arm applied"
   b5:
-    _14 = builtin print(_2/text)
-    _12 = _14
+    _15 = builtin print(_2/text)
+    _13 = _15
     goto b1
   b6:
-    _2/text = _13.0
+    _2/text = _14.0
     goto b5
   b7:
-    _15 = builtin print("not text")
-    _12 = _15
+    _16 = builtin print("not text")
+    _13 = _16
     goto b1
   b8:
     goto b7
   b9:
-    _22 = builtin bytes_at(_0/data, 0)
-    _23 = builtin print(_22)
-    _24 = builtin bytes_len(_0/data)
-    _25 = _24 sub.i 1
-    _26 = builtin bytes_at(_0/data, _25)
-    _27 = builtin print(_26)
+    _23 = builtin bytes_at(_0/data, 0)
+    _24 = builtin print(_23)
+    _25 = builtin bytes_len(_0/data)
+    _26 = _25 sub.i 1
+    _27 = builtin bytes_at(_0/data, _26)
+    _28 = builtin print(_27)
     _5/sum = 0
     _6/i = 0
     goto b17
   b10:
-    switch tag _19 [1 => b14] else b11
+    switch tag _20 [1 => b14] else b11
   b11:
-    switch tag _19 [0 => b16] else b12
+    switch tag _20 [0 => b16] else b12
   b12:
     trap "no match arm applied"
   b13:
-    _20 = builtin print(_4/text)
-    _17 = _20
+    _21 = builtin print(_4/text)
+    _18 = _21
     goto b9
   b14:
-    _4/text = _19.0
+    _4/text = _20.0
     goto b13
   b15:
-    _21 = builtin print("a torn character is not text")
-    _17 = _21
+    _22 = builtin print("a torn character is not text")
+    _18 = _22
     goto b9
   b16:
     goto b15
   b17:
-    _28 = builtin bytes_len(_0/data)
-    _29 = _6/i lt _28
-    branch _29 ? b19 : b18
+    _29 = builtin bytes_len(_0/data)
+    _30 = _6/i lt _29
+    branch _30 ? b19 : b18
   b18:
-    _33 = builtin print(_5/sum)
-    _34 = builtin bytes_slice(_0/data, 7, 11)
-    _35 = builtin bytes("norn")
-    _36 = _34 eq _35
-    _37 = builtin print(_36)
-    _38 = builtin bytes("abc")
-    _39 = builtin bytes("abd")
-    _40 = _38 lt _39
-    _41 = builtin print(_40)
-    _42 = builtin bytes("")
-    _43 = builtin bytes_slice(_0/data, 4, 4)
-    _44 = _42 eq _43
-    _45 = builtin print(_44)
-    return _45
+    _34 = builtin print(_5/sum)
+    _35 = builtin byte(110)
+    _36 = builtin bytes("n")
+    _37 = _35 eq _36
+    _38 = builtin print(_37)
+    _40 = builtin bytes("hello, ")
+    _41 = builtin bytes("norn")
+    _42 = builtin bytes_concat(_40, _41)
+    _43 = builtin bytes_text(_42)
+    goto b21
   b19:
-    _30 = builtin bytes_at(_0/data, _6/i)
-    _31 = _5/sum add.i _30
-    _5/sum = _31
-    _32 = _6/i add.i 1
-    _6/i = _32
+    _31 = builtin bytes_at(_0/data, _6/i)
+    _32 = _5/sum add.i _31
+    _5/sum = _32
+    _33 = _6/i add.i 1
+    _6/i = _33
     goto b17
+  b20:
+    _46 = builtin bytes("")
+    _47 = builtin bytes_concat(_0/data, _46)
+    _48 = _47 eq _0/data
+    _49 = builtin print(_48)
+    _50 = builtin bytes_slice(_0/data, 7, 11)
+    _51 = builtin bytes("norn")
+    _52 = _50 eq _51
+    _53 = builtin print(_52)
+    _54 = builtin bytes("abc")
+    _55 = builtin bytes("abd")
+    _56 = _54 lt _55
+    _57 = builtin print(_56)
+    _58 = builtin bytes("")
+    _59 = builtin bytes_slice(_0/data, 4, 4)
+    _60 = _58 eq _59
+    _61 = builtin print(_60)
+    return _61
+  b21:
+    switch tag _43 [1 => b25] else b22
+  b22:
+    switch tag _43 [0 => b27] else b23
+  b23:
+    trap "no match arm applied"
+  b24:
+    _44 = builtin print(_7/text)
+    _39 = _44
+    goto b20
+  b25:
+    _7/text = _43.0
+    goto b24
+  b26:
+    _45 = builtin print("not text")
+    _39 = _45
+    goto b20
+  b27:
+    goto b26
 
 === output ===
 <bytes 11>
@@ -149,6 +198,9 @@ a torn character is not text
 104
 110
 1053
+true
+hello, norn
+true
 true
 true
 true

@@ -10,3 +10,9 @@ error: expected I64, found String
   |
 6 |     return data["0"]
   |                 ^^^
+
+error: expected I64, found String
+  --> bytes.norn:10:17
+   |
+10 |     return byte("x")
+   |                 ^^^

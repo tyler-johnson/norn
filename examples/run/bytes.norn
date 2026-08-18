@@ -1,6 +1,7 @@
 // Bytes: the value the wire carries and a file holds.
 //
-// There is no bytes literal — data arrives from I/O, or from `bytes(s)`, which is a string's UTF-8.
+// There is no bytes literal — data arrives from I/O, from `bytes(s)`, which is a string's UTF-8,
+// or is built up from `byte(n)` and `bytes_concat(a, b)`.
 // A slice copies in v0 (the clone-everything engines cannot make zero-copy observable), decoding
 // back to text is fallible because not every octet sequence is UTF-8, and printing a bytes value
 // shows its length rather than inventing an escape syntax for its contents.
@@ -35,6 +36,15 @@ fn main() -> () {
         i = i + 1
     }
     print(sum)
+
+    // Building: `byte` is one octet — it traps outside 0..255 — and `bytes_concat` joins two
+    // buffers.
+    print(byte(110) == bytes("n"))
+    match bytes_text(bytes_concat(bytes("hello, "), bytes("norn"))) {
+        Some(text) => print(text)
+        None => print("not text")
+    }
+    print(bytes_concat(data, bytes("")) == data)
 
     // Equality is by content, and ordering is lexicographic.
     print(bytes_slice(data, 7, 11) == bytes("norn"))

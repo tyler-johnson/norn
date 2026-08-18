@@ -704,6 +704,8 @@ pub enum Builtin {
     BytesLen,
     BytesSlice,
     BytesText,
+    Byte,
+    BytesConcat,
     /// `data[i]`. Carried by syntax alone: not in `ALL` and not in `from_name`, so `bytes_at`
     /// stays a name users may define, and the checker's desugar of an index expression is the
     /// only way to spell it.
@@ -741,6 +743,8 @@ impl Builtin {
         Builtin::BytesLen,
         Builtin::BytesSlice,
         Builtin::BytesText,
+        Builtin::Byte,
+        Builtin::BytesConcat,
         Builtin::FileCreate,
         Builtin::FlowOfFile,
         Builtin::PipeTo,
@@ -770,6 +774,8 @@ impl Builtin {
             "bytes_len" => Some(Builtin::BytesLen),
             "bytes_slice" => Some(Builtin::BytesSlice),
             "bytes_text" => Some(Builtin::BytesText),
+            "byte" => Some(Builtin::Byte),
+            "bytes_concat" => Some(Builtin::BytesConcat),
             "file_create" => Some(Builtin::FileCreate),
             "flow_of_file" => Some(Builtin::FlowOfFile),
             "pipe_to" => Some(Builtin::PipeTo),
@@ -801,6 +807,8 @@ impl Builtin {
             Builtin::BytesLen => "bytes_len",
             Builtin::BytesSlice => "bytes_slice",
             Builtin::BytesText => "bytes_text",
+            Builtin::Byte => "byte",
+            Builtin::BytesConcat => "bytes_concat",
             Builtin::BytesAt => "bytes_at",
             Builtin::FileCreate => "file_create",
             Builtin::FlowOfFile => "flow_of_file",
@@ -829,6 +837,8 @@ impl Builtin {
             | Builtin::BytesLen
             | Builtin::BytesSlice
             | Builtin::BytesText
+            | Builtin::Byte
+            | Builtin::BytesConcat
             | Builtin::BytesAt
             | Builtin::RequestMethod
             | Builtin::RequestPath
@@ -870,6 +880,8 @@ impl Builtin {
             | Builtin::BytesLen
             | Builtin::BytesSlice
             | Builtin::BytesText
+            | Builtin::Byte
+            | Builtin::BytesConcat
             | Builtin::BytesAt
             | Builtin::PipeTo
             | Builtin::RequestMethod
@@ -925,6 +937,8 @@ impl Builtin {
             Builtin::BytesLen => (vec![Ty::Bytes], Ty::I64),
             Builtin::BytesSlice => (vec![Ty::Bytes, Ty::I64, Ty::I64], Ty::Bytes),
             Builtin::BytesText => (vec![Ty::Bytes], Ty::Option(Box::new(Ty::Str))),
+            Builtin::Byte => (vec![Ty::I64], Ty::Bytes),
+            Builtin::BytesConcat => (vec![Ty::Bytes, Ty::Bytes], Ty::Bytes),
             Builtin::BytesAt => (vec![Ty::Bytes, Ty::I64], Ty::I64),
             Builtin::FileCreate => (vec![Ty::Str], task(fallible(file()))),
             Builtin::FlowOfFile => (vec![Ty::Str], task(fallible(flow()))),

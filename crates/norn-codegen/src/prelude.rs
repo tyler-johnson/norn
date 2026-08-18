@@ -134,6 +134,8 @@ pub enum Builtin {
     BytesLen,
     BytesSlice,
     BytesText,
+    Byte,
+    BytesConcat,
     BytesAt,
     FileCreate,
     FlowOfFile,
@@ -165,6 +167,8 @@ impl Builtin {
             Builtin::BytesLen => "bytes_len",
             Builtin::BytesSlice => "bytes_slice",
             Builtin::BytesText => "bytes_text",
+            Builtin::Byte => "byte",
+            Builtin::BytesConcat => "bytes_concat",
             Builtin::BytesAt => "bytes_at",
             Builtin::FileCreate => "file_create",
             Builtin::FlowOfFile => "flow_of_file",
@@ -563,6 +567,20 @@ fn eval_builtin(
             // A slice copies in v0, deliberately matching the interpreter; the cheap
             // representation waits for typed layout.
             Value::Bytes(data[start as usize..end as usize].into())
+        }
+        Builtin::Byte => {
+            let value = integer("byte", &args[0])?;
+            if value < 0 || value > 255 {
+                return Err(Trap::new(format!("`byte` out of range: {value}"), func));
+            }
+            Value::Bytes([value as u8].into())
+        }
+        Builtin::BytesConcat => {
+            let a = blob("bytes_concat", &args[0])?;
+            let b = blob("bytes_concat", &args[1])?;
+            // Concatenation copies in v0, deliberately matching the interpreter; the cheap
+            // representation waits for typed layout.
+            Value::Bytes([&a[..], &b[..]].concat().into())
         }
         Builtin::BytesAt => {
             let data = blob("bytes_at", &args[0])?;
