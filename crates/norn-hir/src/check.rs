@@ -4567,10 +4567,9 @@ impl Checker {
             && !Ty::Unit.fits(expected)
         {
             let message = format!("expected {}, found ()", self.program.ty_name(expected));
-            self.push(
-                Diagnostic::new(span, message)
-                    .note("a `while` produces `()`; `loop` with `break value` is how a loop yields one"),
-            );
+            self.push(Diagnostic::new(span, message).note(
+                "a `while` produces `()`; `loop` with `break value` is how a loop yields one",
+            ));
             return self.error_expr(span);
         }
         Expr {
@@ -4656,8 +4655,8 @@ impl Checker {
                 match result {
                     Some(result) if is_loop && !Ty::Unit.fits(&result) => {
                         let result = self.program.ty_name(&result);
-                        let mut diagnostic =
-                            Diagnostic::new(span, "`break` needs a value here").label(format!(
+                        let mut diagnostic = Diagnostic::new(span, "`break` needs a value here")
+                            .label(format!(
                                 "this leaves the loop with nothing, and the loop produces {result}"
                             ));
                         if let Some(at) = first_value {
@@ -6263,7 +6262,12 @@ impl Moves<'_> {
     /// Report every affine local the loop moved without declaring. `summary` is everything that
     /// can reach the back edge or the exit; only affine locals ever hold `Some`, so affinity needs
     /// no separate check.
-    fn escaped_moves(&mut self, entry: &[Option<Span>], declared: &[bool], summary: &[Option<Span>]) {
+    fn escaped_moves(
+        &mut self,
+        entry: &[Option<Span>],
+        declared: &[bool],
+        summary: &[Option<Span>],
+    ) {
         for (index, moved_at) in summary.iter().enumerate() {
             let Some(at) = moved_at else { continue };
             // Declared inside the loop is fine — fresh each pass. Already moved at entry has been

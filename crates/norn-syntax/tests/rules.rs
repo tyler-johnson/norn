@@ -467,7 +467,10 @@ fn a_comma_ends_a_bare_break_in_a_match_arm() {
     // Match arms separate by comma-or-newline, so `break,` on one line must leave the comma to the
     // arm list rather than swallowing it as the start of a value.
     let dumped = expr("loop { match poll() { Err(_) => break, Ok(v) => v } }");
-    assert!(dumped.contains("(arm (construct Err (arg _)) (break))"), "{dumped}");
+    assert!(
+        dumped.contains("(arm (construct Err (arg _)) (break))"),
+        "{dumped}"
+    );
 }
 
 #[test]
