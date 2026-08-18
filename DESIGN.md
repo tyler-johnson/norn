@@ -573,7 +573,7 @@ let payload = packet.slice(32, packet.len)
 
 There is no general-purpose `Shared<Mutable<T>>`. Shared mutation requires a reactor, an explicitly atomic type, or an opt-in lock from a low-level concurrency package.
 
-> **Neither `Shared<T>` nor `Bytes` is in v0.** Sharing is an answer to the cost of copying, and v0's ordinary values are copied freely by an interpreter that clones — there is nothing yet that could tell a share from a copy. Both arrive with the native backend, which is the first thing that makes the difference measurable. Affine ownership of operating-system resources, described above, is implemented in full.
+> **Neither `Shared<T>` nor `Bytes` is in v0.** Sharing is an answer to the cost of copying, and v0's ordinary values are copied freely by an engine that clones — there is nothing yet that could tell a share from a copy. M5's native backend deliberately kept that cloned representation, so both now arrive with the backend that gives values layout, which is the first thing that makes the difference measurable. Affine ownership of operating-system resources, described above, is implemented in full.
 
 
 ### Reactive graphs: reactor-local arenas

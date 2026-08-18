@@ -290,6 +290,32 @@ observably leak-free.
 
 NIR → restricted Rust → `rustc` → binary. `norn build svc.norn -o svc`.
 
+Generated code keeps the interpreter's value representation: one dynamically tagged `Value` enum,
+aggregates behind `Rc` with copy-on-write. NIR carries no types — nothing after HIR ever did — so a
+typed layout would have meant threading `hir::Ty` through lowering first, and the done-when asks
+for byte-identical traces, which the shared representation delivers by construction. Typed layout
+is now the entry fee for §8's item 6 rather than a side effect of this milestone.
+
+The backend is a printer with a prelude. `norn-codegen` emits a prelude ported from the
+interpreter item for item — trap text included, because trap messages interpolate `{:?}` of the
+value and operator enums and stderr is part of the oracle — then the program: blocks as match
+arms, block `b` of a `task fn` as state `2b`, and state `2b + 1` re-executing only the terminator,
+so a woken task re-asks its suspension point without re-running the instructions before it.
+Awaiting a `task fn` pushes an explicit frame, exactly the interpreter's shape; a plain function
+compiles to a direct Rust call, which is sound because `Rvalue::Call` can never target anything
+that parks.
+
+`rustc` is the only tool `norn build` needs. The compiler embeds `norn-rt`'s sources at its own
+build time, compiles them to an rlib once per (toolchain, flags, sources) hash under
+`~/.cache/norn`, and links each program with a single `rustc --extern norn_rt=…`. No cargo, no
+checkout, and a toolchain switch re-keys the cache rather than mislinking.
+
+The oracle compares engine against engine, never snapshots. The differential tests run every
+deterministic example both ways and require stdout, stderr — the trace — and the exit code to
+match byte for byte, with a trap corpus for the message coupling; `NORN_BLESS` cannot bless the
+engines into agreement. The two live-socket programs get native mirrors of the echo and server
+tests, asserting the same structural claims against a real clock.
+
 *Done when:* every M1–M4 test produces a byte-identical turn trace under both engines.
 
 ### M6 — HTTP and flows
@@ -368,8 +394,10 @@ Ordered roughly by when it becomes worth doing, not by importance:
 5. **Borrow checking.** Until then, `&T` as a non-escaping parameter only, and no `&mut` at all.
    Partial moves wait here too: M4 rejects moving out of a field rather than tracking it, because a
    half-moved record has no name in this language and `match` already takes one apart.
-6. **Move checking for ordinary values, and `Shared<T>`.** Both wait on M5, which is where copying
-   a value first costs something an implementation can measure.
+6. **Move checking for ordinary values, and `Shared<T>`.** Both wait on a typed value
+   representation. M5's backend deliberately kept the interpreter's dynamically tagged, `Rc`-shared
+   values, so copying still costs a reference-count bump; the backend that gives values layout is
+   where the cost first becomes measurable, and where these two stop being inert.
 7. **Generics and traits.** Required before a real standard library.
 8. **Capability inference, test handlers.** `uses { ... }` is checked but not inferred in v0.
 9. **Derives and constrained attributes.** `@derive(Json)`, `@http_api` — `DESIGN.md` §8 stage 2.
