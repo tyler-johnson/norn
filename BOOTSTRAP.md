@@ -465,9 +465,10 @@ Ordered roughly by when it becomes worth doing, not by importance:
    representation. M5's backend deliberately kept the interpreter's dynamically tagged, `Rc`-shared
    values, so copying still costs a reference-count bump; the backend that gives values layout is
    where the cost first becomes measurable, and where these two stop being inert. Zero-copy `Bytes`
-   slices wait here too — M6's `bytes_slice` copies, because a clone-everything representation
-   cannot make sharing observable — and so does `+` on `Bytes`, which is only worth having once
-   concatenation has a cost model to answer to.
+   slices wait here too — M6's `bytes_slice` copies, and so does the proto-std gate's
+   `bytes_concat`, because a clone-everything representation cannot make sharing observable — and
+   so does `+` on `Bytes`, which is only worth having once concatenation has a cost model to
+   answer to.
 7. **Generics and traits.** Required before a real standard library.
 8. **Capability inference, test handlers.** `uses { ... }` is checked but not inferred in v0.
 9. **Derives and constrained attributes.** `@derive(Json)`, `@http_api` — `DESIGN.md` §8 stage 2.
@@ -500,8 +501,9 @@ Ordered roughly by when it becomes worth doing, not by importance:
 
     The decision this entry records, made after M6: the standard library follows Rust's model,
     not Go's. Users should think in terms of libraries, so the builtin table is scaffolding with
-    unstable spellings — 25 names as of M6, each implemented twice (an interpreter arm and its
-    prelude mirror, trap text as ABI) and each a name no user function may take. Go keeps its
+    unstable spellings — 27 nameable as of the byte primitives, plus the syntax-carried `bytes_at`
+    behind `data[i]`, each implemented twice (an interpreter arm and its
+    prelude mirror, trap text as ABI) and each nameable one a name no user function may take. Go keeps its
     builtins forever and affords short names by keeping the set near fifteen and shadowable;
     Norn's set is bigger, growing, and reserved, so staying on that road means either squatting
     on `read`/`open`/`close` or weakening the closed vocabulary that `uses` checking leans on.
@@ -513,8 +515,11 @@ Ordered roughly by when it becomes worth doing, not by importance:
     Go's `net/http` predates Go's generics by a decade, and `Option`/`Result` are already
     spellable at concrete types. Its gates are modules — met, above — a loop construct — met: `while` and `loop`, `break` and
     `continue`, expressions all, with turns barred from reaching them so the termination theorem
-    narrowed instead of dying — and a few byte primitives — indexing, building — after which HTTP parsing and rendering,
-    `bytes_text`, and `pipe_to` over `flow_next` become concrete Norn modules: most of the table.
+    narrowed instead of dying — and a few byte primitives — met: `data[i]` indexing (out of range
+    traps, like `bytes_slice`) and `byte` with `bytes_concat` for building. Every proto-std gate
+    is now met and the absorption is unblocked: HTTP parsing and rendering, `bytes_text`, and
+    `pipe_to` over `flow_next` — deferred to that work, so a real consumer drives its design —
+    become concrete Norn modules: most of the table.
     The general std — collections, `Flow<T>` beyond `Bytes`, and the method spelling that turns
     `request_header(&req, h)` into `req.header(h)` — waits for item 7's generics and traits.
     What never dissolves is a small intrinsic layer at the syscall boundary, which is also where
