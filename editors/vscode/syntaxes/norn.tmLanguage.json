@@ -546,7 +546,7 @@
     "reserved": {
       "comment": "Words held for a later milestone. The lexer refuses them as names, so showing them as errors is the truth rather than a warning.",
       "name": "invalid.illegal.reserved.norn",
-      "match": "\\b(?:blocking|break|const|continue|delay|event|for|impl|in|interface|loop|macro|pub|source|static|trait|type|where|while)\\b"
+      "match": "\\b(?:blocking|const|delay|event|for|impl|in|interface|macro|pub|source|static|trait|type|where)\\b"
     },
     "keywords": {
       "patterns": [
@@ -556,7 +556,11 @@
         },
         {
           "name": "keyword.control.flow.norn",
-          "match": "\\b(?:return)\\b"
+          "match": "\\b(?:return|break|continue)\\b"
+        },
+        {
+          "name": "keyword.control.loop.norn",
+          "match": "\\b(?:while|loop)\\b"
         },
         {
           "comment": "Suspension and structured concurrency: the three words M2 made real.",

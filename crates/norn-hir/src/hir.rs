@@ -182,8 +182,8 @@ pub enum Ty {
     /// annotates the element type; there is nowhere to write `Signal<I64>` at all.
     Signal(Box<Ty>),
     /// Registered, never produced. v0 has no `event` nodes and no way to read one — the read side
-    /// needs a subscription and `for await`, and there is no loop construct yet. It exists so that
-    /// writing `Event<T>` is answered with the milestone rather than "unknown type".
+    /// still waits on subscriptions and `for await`. It exists so that writing `Event<T>` is
+    /// answered with the milestone rather than "unknown type".
     Event(Box<Ty>),
     /// The type of an expression that never produces a value: `return`, or a block that always
     /// leaves early. Compatible with every expected type.
@@ -634,6 +634,23 @@ pub enum ExprKind {
     Return {
         value: Option<Box<Expr>>,
     },
+    /// `while cond { … }`. The condition re-evaluates before every iteration; the whole expression
+    /// is `()`.
+    While {
+        cond: Box<Expr>,
+        body: Box<Expr>,
+    },
+    /// `loop { … }`. Typed by its `break value`s: their unified type, `()` if only bare breaks,
+    /// `Never` if no break at all.
+    Loop {
+        body: Box<Expr>,
+    },
+    /// Leave the innermost loop. `value` is only ever `Some` inside a `loop`.
+    Break {
+        value: Option<Box<Expr>>,
+    },
+    /// Jump to the innermost loop's next iteration.
+    Continue,
     /// Stands in for an expression that failed to check.
     Error,
 }

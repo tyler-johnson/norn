@@ -426,6 +426,19 @@ fn print_expr_bare(expr: &Expr, indent: usize) -> String {
             }
             out
         }
+        ExprKind::While { cond, body } => {
+            format!(
+                "while {} {}",
+                print_expr(cond, indent, LAMBDA),
+                print_block(body, indent)
+            )
+        }
+        ExprKind::Loop { body } => format!("loop {}", print_block(body, indent)),
+        ExprKind::Break { value: None } => "break".into(),
+        ExprKind::Break { value: Some(value) } => {
+            format!("break {}", print_expr(value, indent, LAMBDA))
+        }
+        ExprKind::Continue => "continue".into(),
         ExprKind::Match { scrutinee, arms } => {
             let pad = INDENT.repeat(indent);
             let inner = INDENT.repeat(indent + 1);

@@ -1092,6 +1092,41 @@ impl Parser {
             }
             TokenKind::Kw(Kw::Match) => self.match_expr(),
             TokenKind::Kw(Kw::If) => self.if_expr(),
+            TokenKind::Kw(Kw::While) => self.while_expr(),
+            TokenKind::Kw(Kw::Loop) => {
+                self.advance();
+                let body = self.block()?;
+                let span = start.to(body.span);
+                Ok(Expr {
+                    kind: ExprKind::Loop { body },
+                    span,
+                })
+            }
+            TokenKind::Kw(Kw::Break) => {
+                self.advance();
+                let has_value = !self.at(&TokenKind::RBrace)
+                    && !self.at(&TokenKind::Comma)
+                    && !self.at(&TokenKind::RParen)
+                    && !self.at_eof()
+                    && !self.peek().nl_before;
+                let value = if has_value {
+                    Some(Box::new(self.expr()?))
+                } else {
+                    None
+                };
+                let span = value.as_ref().map_or(start, |v| start.to(v.span));
+                Ok(Expr {
+                    kind: ExprKind::Break { value },
+                    span,
+                })
+            }
+            TokenKind::Kw(Kw::Continue) => {
+                self.advance();
+                Ok(Expr {
+                    kind: ExprKind::Continue,
+                    span: start,
+                })
+            }
             TokenKind::Kw(Kw::Scope) => {
                 self.advance();
                 let block = self.block()?;
@@ -1300,6 +1335,20 @@ impl Parser {
                 cond: Box::new(cond),
                 then,
                 els,
+            },
+            span,
+        })
+    }
+
+    fn while_expr(&mut self) -> PResult<Expr> {
+        let start = self.advance().span;
+        let cond = self.expr()?;
+        let body = self.block()?;
+        let span = start.to(body.span);
+        Ok(Expr {
+            kind: ExprKind::While {
+                cond: Box::new(cond),
+                body,
             },
             span,
         })

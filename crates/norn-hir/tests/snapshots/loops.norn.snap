@@ -1,0 +1,52 @@
+error: `break` is only available inside a loop
+ --> loops.norn:5:5
+  |
+5 |     break
+  |     ^^^^^ there is no loop to leave
+
+error: `continue` is only available inside a loop
+ --> loops.norn:9:5
+  |
+9 |     continue
+  |     ^^^^^^^^ there is no loop to continue
+
+error: `break` can only carry a value out of a `loop`
+  --> loops.norn:14:9
+   |
+14 |         break 1
+   |         ^^^^^^^ this `while` produces ()
+
+error: expected I64, found String
+  --> loops.norn:23:15
+   |
+23 |         break "two"
+   |               ^^^^^
+
+error: `break` needs a value here
+  --> loops.norn:33:9
+   |
+33 |         break
+   |         ^^^^^ this leaves the loop with nothing, and the loop produces I64
+  --> loops.norn:31:13
+   |
+31 |             break 1
+   |             ^^^^^^^ the loop's type was settled here
+
+error: expected (), found I64
+  --> loops.norn:43:15
+   |
+43 |         break 1
+   |               ^
+
+error: expected Bool, found I64
+  --> loops.norn:49:11
+   |
+49 |     while 1 {
+   |           ^
+
+error: expected I64, found ()
+  --> loops.norn:55:18
+   |
+55 |     let n: I64 = while flag() {
+   |                  ^^^^^^^^^^^^^^
+   = note: a `while` produces `()`; `loop` with `break value` is how a loop yields one

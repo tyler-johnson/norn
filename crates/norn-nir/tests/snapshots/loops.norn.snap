@@ -1,0 +1,277 @@
+=== nir ===
+enum Option #0 (None/0, Some/1)
+enum Result #1 (Ok/1, Err/1)
+enum IoError #2 (NotFound/0, Denied/0, InUse/0, Refused/0, Closed/0, Other/1)
+
+task fn main #0()
+    local _0/n
+    local _1/k
+    local _2/total
+    local _3/i
+    local _4/odds
+    local _5/left
+    local _6/next
+    local _7/drained
+    local _8/sum
+    local _9/j
+    local _10/row
+    local _11/cells
+    local _12/col
+    local _13/passes
+    local _14
+    local _15
+    local _16
+    local _17
+    local _18
+    local _19
+    local _20
+    local _21
+    local _22
+    local _23
+    local _24
+    local _25
+    local _26
+    local _27
+    local _28
+    local _29
+    local _30
+    local _31
+    local _32
+    local _33
+    local _34
+    local _35
+    local _36
+    local _37
+    local _38
+    local _39
+    local _40
+    local _41
+    local _42
+    local _43
+    local _44
+    local _45
+    local _46
+    local _47
+    local _48
+    local _49
+    local _50
+    local _51
+    local _52
+    local _53
+    local _54
+    local _55
+    local _56
+    local _57
+  b0:
+    _0/n = 3
+    goto b1
+  b1:
+    _14 = _0/n gt 0
+    branch _14 ? b3 : b2
+  b2:
+    _1/k = 1
+    goto b4
+  b3:
+    _15 = builtin print(_0/n)
+    _16 = _0/n sub.i 1
+    _0/n = _16
+    goto b1
+  b4:
+    _18 = _1/k mul.i 2
+    _1/k = _18
+    _20 = _1/k gt 20
+    branch _20 ? b6 : b7
+  b5:
+    _2/total = _17
+    _21 = builtin print(_2/total)
+    _3/i = 0
+    _4/odds = 0
+    goto b9
+  b6:
+    _17 = _1/k
+    goto b5
+  b7:
+    _19 = ()
+    goto b8
+  b8:
+    goto b4
+  b9:
+    _22 = _3/i lt 10
+    branch _22 ? b11 : b10
+  b10:
+    _28 = builtin print(_4/odds)
+    _5/left = 3
+    goto b15
+  b11:
+    _23 = _3/i add.i 1
+    _3/i = _23
+    _25 = _3/i rem.i 2
+    _26 = _25 eq 0
+    branch _26 ? b12 : b13
+  b12:
+    goto b9
+  b13:
+    _24 = ()
+    goto b14
+  b14:
+    _27 = _4/odds add.i 1
+    _4/odds = _27
+    goto b9
+  b15:
+    _31 = call step#1(_5/left)
+    goto b18
+  b16:
+    _7/drained = _29
+    _32 = builtin print(_7/drained)
+    _8/sum = 0
+    _9/j = 0
+    goto b25
+  b17:
+    goto b15
+  b18:
+    switch tag _31 [1 => b22] else b19
+  b19:
+    switch tag _31 [0 => b24] else b20
+  b20:
+    trap "no match arm applied"
+  b21:
+    _5/left = _6/next
+    _30 = ()
+    goto b17
+  b22:
+    _6/next = _31.0
+    goto b21
+  b23:
+    _29 = "drained"
+    goto b16
+  b24:
+    goto b23
+  b25:
+    _33 = _9/j lt 3
+    branch _33 ? b27 : b26
+  b26:
+    _38 = builtin print(_8/sum)
+    _10/row = 0
+    _11/cells = 0
+    goto b29
+  b27:
+    _34 = task double#2(_9/j)
+    await _34 -> _35, resume b28
+  b28:
+    _36 = _8/sum add.i _35
+    _8/sum = _36
+    _37 = _9/j add.i 1
+    _9/j = _37
+    goto b25
+  b29:
+    _39 = _10/row lt 3
+    branch _39 ? b31 : b30
+  b30:
+    _48 = builtin print(_11/cells)
+    _13/passes = 0
+    goto b40
+  b31:
+    _40 = _10/row add.i 1
+    _10/row = _40
+    _12/col = 0
+    goto b32
+  b32:
+    _42 = _12/col add.i 1
+    _12/col = _42
+    _44 = _12/col eq 2
+    branch _44 ? b34 : b35
+  b33:
+    goto b29
+  b34:
+    goto b32
+  b35:
+    _43 = ()
+    goto b36
+  b36:
+    _46 = _12/col gt 3
+    branch _46 ? b37 : b38
+  b37:
+    _41 = ()
+    goto b33
+  b38:
+    _45 = ()
+    goto b39
+  b39:
+    _47 = _11/cells add.i 1
+    _11/cells = _47
+    goto b32
+  b40:
+    scope enter
+    _51 = task shout#3(_13/passes)
+    spawn _51
+    _52 = task builtin sleep(1)
+    await _52 -> _53, resume b42
+  b41:
+    _57 = builtin print(_13/passes)
+    return _57
+  b42:
+    _54 = _13/passes add.i 1
+    _13/passes = _54
+    _56 = _13/passes eq 2
+    branch _56 ? b43 : b44
+  b43:
+    _49 = ()
+    scope exit, resume b46
+  b44:
+    _55 = ()
+    goto b45
+  b45:
+    _50 = _55
+    scope exit, resume b47
+  b46:
+    goto b41
+  b47:
+    goto b40
+
+fn step #1(_0/n)
+    local _1
+    local _2
+    local _3
+    local _4
+    local _5
+  b0:
+    _2 = _0/n gt 0
+    branch _2 ? b1 : b2
+  b1:
+    _3 = _0/n sub.i 1
+    _4 = Option.Some(_3)
+    _1 = _4
+    goto b3
+  b2:
+    _5 = Option.None()
+    _1 = _5
+    goto b3
+  b3:
+    return _1
+
+task fn double #2(_0/n)
+    local _1
+  b0:
+    _1 = _0/n add.i _0/n
+    return _1
+
+task fn shout #3(_0/n)
+    local _1
+  b0:
+    _1 = builtin print(_0/n)
+    return _1
+
+=== output ===
+3
+2
+1
+32
+5
+drained
+6
+6
+0
+1
+2
+=== result ===
+()

@@ -319,6 +319,17 @@ pub enum ExprKind {
         then: Block,
         els: Option<Box<Expr>>,
     },
+    While {
+        cond: Box<Expr>,
+        body: Block,
+    },
+    Loop {
+        body: Block,
+    },
+    Break {
+        value: Option<Box<Expr>>,
+    },
+    Continue,
     Block(Block),
     Lambda {
         is_task: bool,

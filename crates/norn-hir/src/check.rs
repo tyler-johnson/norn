@@ -303,6 +303,22 @@ struct Checker {
     /// How many `scope { … }` expressions enclose the expression being checked. Reset per function,
     /// which is what makes "inside a scope in the same function" the rule `spawn` enforces.
     scope_depth: usize,
+    /// The loops enclosing the expression being checked, innermost last. `break` and `continue`
+    /// target the last frame; a `loop`'s frame is also where its `break value`s agree on a type.
+    loops: Vec<LoopCtx>,
+}
+
+/// One enclosing loop, as `break` and `continue` see it.
+struct LoopCtx {
+    /// `loop` rather than `while`. Only a `loop` may be left with a value.
+    is_loop: bool,
+    /// What a `loop` produces. Seeded from the expectation when there is one, settled by the first
+    /// `break value` otherwise, and checked against every later one.
+    result: Option<Ty>,
+    /// Whether any `break` targeted this frame. A `loop` nothing leaves is `Never`, not `()`.
+    saw_break: bool,
+    /// The first `break value` site, for the diagnostic when a bare `break` disagrees with it.
+    first_value: Option<Span>,
 }
 
 impl Checker {
@@ -412,6 +428,7 @@ impl Checker {
             in_handler: false,
             assigning: false,
             scope_depth: 0,
+            loops: Vec::new(),
         }
     }
 
@@ -804,6 +821,24 @@ impl Checker {
         );
     }
 
+    /// The other diagnostic a turn's rules share. Purity is why a turn cannot be observed;
+    /// termination is why it is over. A loop is the one construct whose finiteness the checker
+    /// cannot see, so turn-reachable code may not contain one — the same shape as the recursion
+    /// rule, and together they are what keeps every turn provably terminating.
+    fn unterminating(&mut self, what: &str, span: Span) {
+        self.push(
+            Diagnostic::new(
+                span,
+                format!("a `{what}` cannot appear in a turn, because a turn must end"),
+            )
+            .label("a loop is not provably finite")
+            .note(
+                "turn-reachable code has neither loops nor recursion, which is what makes every turn provably terminating",
+            )
+            .note("compute the value with a bounded expression, or move the work into a `task fn` and request it with `after`"),
+        );
+    }
+
     /// Pass one: every type name exists before any type is resolved, so declarations may refer to
     /// one another in any order.
     fn declare_types(&mut self, module: &ast::Module) {
@@ -1143,6 +1178,7 @@ impl Checker {
             self.in_handler = false;
             self.uses = self.program.fns[id.index()].uses.clone();
             self.scope_depth = 0;
+            self.loops = Vec::new();
             for ((name, ty), param) in params.iter().zip(&decl.params) {
                 self.declare_param(name.clone(), ty.clone(), param.name.span);
             }
@@ -1848,6 +1884,7 @@ impl Checker {
         self.ctx = ctx;
         self.uses = uses.to_vec();
         self.scope_depth = 0;
+        self.loops = Vec::new();
         self.reactor = Some(id);
         self.in_handler = handler;
         // A node body sees only what it depends on; a handler sees state but never a signal. Both
@@ -2580,6 +2617,10 @@ impl Checker {
             } => self.check_call(callee, type_args, args, expected, span),
             ast::ExprKind::Block(block) => self.check_block(block, expected, span),
             ast::ExprKind::If { cond, then, els } => self.check_if(cond, then, els, expected, span),
+            ast::ExprKind::While { cond, body } => self.check_while(cond, body, expected, span),
+            ast::ExprKind::Loop { body } => self.check_loop(body, expected, span),
+            ast::ExprKind::Break { value } => self.check_break(value.as_deref(), span),
+            ast::ExprKind::Continue => self.check_continue(span),
             ast::ExprKind::Match { scrutinee, arms } => {
                 self.check_match(scrutinee, arms, expected, span)
             }
@@ -4439,6 +4480,163 @@ impl Checker {
         }
     }
 
+    fn check_while(
+        &mut self,
+        cond: &ast::Expr,
+        body: &ast::Block,
+        expected: Option<&Ty>,
+        span: Span,
+    ) -> Expr {
+        if self.ctx.in_turn() {
+            self.unterminating("while", span);
+            return self.error_expr(span);
+        }
+        // The frame opens before the condition: a `break` in a condition targets this loop, because
+        // the condition re-runs every iteration and is as much part of the loop as the body.
+        self.loops.push(LoopCtx {
+            is_loop: false,
+            result: None,
+            saw_break: false,
+            first_value: None,
+        });
+        let cond = self.check_expr(cond, Some(&Ty::Bool));
+        let body = self.check_block(body, Some(&Ty::Unit), body.span);
+        self.loops.pop();
+        if let Some(expected) = expected
+            && !Ty::Unit.fits(expected)
+        {
+            let message = format!("expected {}, found ()", self.program.ty_name(expected));
+            self.push(
+                Diagnostic::new(span, message)
+                    .note("a `while` produces `()`; `loop` with `break value` is how a loop yields one"),
+            );
+            return self.error_expr(span);
+        }
+        Expr {
+            kind: ExprKind::While {
+                cond: Box::new(cond),
+                body: Box::new(body),
+            },
+            ty: Ty::Unit,
+            span,
+        }
+    }
+
+    fn check_loop(&mut self, body: &ast::Block, expected: Option<&Ty>, span: Span) -> Expr {
+        if self.ctx.in_turn() {
+            self.unterminating("loop", span);
+            return self.error_expr(span);
+        }
+        self.loops.push(LoopCtx {
+            is_loop: true,
+            result: expected.cloned(),
+            saw_break: false,
+            first_value: None,
+        });
+        let body = self.check_block(body, Some(&Ty::Unit), body.span);
+        let frame = self.loops.pop().expect("pushed above");
+        // No `break` at all means the expression never produces a value; only bare breaks mean it
+        // produces nothing in particular.
+        let ty = if frame.saw_break {
+            frame.result.unwrap_or(Ty::Unit)
+        } else {
+            Ty::Never
+        };
+        Expr {
+            kind: ExprKind::Loop {
+                body: Box::new(body),
+            },
+            ty,
+            span,
+        }
+    }
+
+    fn check_break(&mut self, value: Option<&ast::Expr>, span: Span) -> Expr {
+        if self.loops.is_empty() {
+            self.push(
+                Diagnostic::new(span, "`break` is only available inside a loop")
+                    .label("there is no loop to leave"),
+            );
+            return self.error_expr(span);
+        }
+        let last = self.loops.len() - 1;
+        let value = match value {
+            Some(value) if !self.loops[last].is_loop => {
+                self.push(
+                    Diagnostic::new(span, "`break` can only carry a value out of a `loop`")
+                        .label("this `while` produces ()"),
+                );
+                // The value is still checked for its own errors; the break itself stays bare so
+                // nothing downstream cascades.
+                self.check_expr(value, None);
+                self.loops[last].saw_break = true;
+                None
+            }
+            Some(value) => {
+                // First break wins: it settles the loop's type, and every later break is checked
+                // against it — the same first-arm-wins agreement a `match` uses.
+                let expected = self.loops[last].result.clone();
+                let checked = self.check_expr(value, expected.as_ref());
+                let frame = &mut self.loops[last];
+                frame.saw_break = true;
+                if frame.result.is_none() && checked.ty != Ty::Never && !checked.ty.is_error() {
+                    frame.result = Some(checked.ty.clone());
+                }
+                if frame.first_value.is_none() {
+                    frame.first_value = Some(span);
+                }
+                Some(Box::new(checked))
+            }
+            None => {
+                self.loops[last].saw_break = true;
+                let is_loop = self.loops[last].is_loop;
+                let result = self.loops[last].result.clone();
+                let first_value = self.loops[last].first_value;
+                match result {
+                    Some(result) if is_loop && !Ty::Unit.fits(&result) => {
+                        let result = self.program.ty_name(&result);
+                        let mut diagnostic =
+                            Diagnostic::new(span, "`break` needs a value here").label(format!(
+                                "this leaves the loop with nothing, and the loop produces {result}"
+                            ));
+                        if let Some(at) = first_value {
+                            diagnostic =
+                                diagnostic.secondary(at, "the loop's type was settled here");
+                        }
+                        self.push(diagnostic);
+                    }
+                    Some(_) => {}
+                    None => {
+                        if is_loop {
+                            self.loops[last].result = Some(Ty::Unit);
+                        }
+                    }
+                }
+                None
+            }
+        };
+        Expr {
+            kind: ExprKind::Break { value },
+            ty: Ty::Never,
+            span,
+        }
+    }
+
+    fn check_continue(&mut self, span: Span) -> Expr {
+        if self.loops.is_empty() {
+            self.push(
+                Diagnostic::new(span, "`continue` is only available inside a loop")
+                    .label("there is no loop to continue"),
+            );
+            return self.error_expr(span);
+        }
+        Expr {
+            kind: ExprKind::Continue,
+            ty: Ty::Never,
+            span,
+        }
+    }
+
     fn check_match(
         &mut self,
         scrutinee: &ast::Expr,
@@ -5182,6 +5380,19 @@ impl<'a> Scan<'a> {
                     self.expr(els);
                 }
             }
+            // A loop binds nothing; even a `break` value has to be scanned, because a member read
+            // in it is a dependency like any other.
+            ast::ExprKind::While { cond, body } => {
+                self.expr(cond);
+                self.block(body);
+            }
+            ast::ExprKind::Loop { body } => self.block(body),
+            ast::ExprKind::Break { value } => {
+                if let Some(value) = value {
+                    self.expr(value);
+                }
+            }
+            ast::ExprKind::Continue => {}
             ast::ExprKind::Match { scrutinee, arms } => {
                 self.expr(scrutinee);
                 for arm in arms {
@@ -5358,9 +5569,15 @@ fn collect_calls(expr: &Expr, found: &mut Vec<FnId>) {
         | ExprKind::Scope { body: inner }
         | ExprKind::Spawn { expr: inner }
         | ExprKind::Try { expr: inner, .. }
+        | ExprKind::Loop { body: inner }
         | ExprKind::ReactorInput { reactor: inner, .. }
         | ExprKind::ReactorExport { reactor: inner, .. } => collect_calls(inner, found),
-        ExprKind::Binary { lhs, rhs, .. } | ExprKind::ShortCircuit { lhs, rhs, .. } => {
+        ExprKind::Binary { lhs, rhs, .. }
+        | ExprKind::ShortCircuit { lhs, rhs, .. }
+        | ExprKind::While {
+            cond: lhs,
+            body: rhs,
+        } => {
             collect_calls(lhs, found);
             collect_calls(rhs, found);
         }
@@ -5400,11 +5617,12 @@ fn collect_calls(expr: &Expr, found: &mut Vec<FnId>) {
                 collect_calls(tail, found);
             }
         }
-        ExprKind::Return { value } => {
+        ExprKind::Return { value } | ExprKind::Break { value } => {
             if let Some(value) = value {
                 collect_calls(value, found);
             }
         }
+        ExprKind::Continue => {}
         ExprKind::Unit
         | ExprKind::Int(_)
         | ExprKind::Float(_)
@@ -5490,9 +5708,15 @@ fn walk(expr: &Expr, visit: &mut impl FnMut(&Expr)) {
         | ExprKind::Scope { body: inner }
         | ExprKind::Spawn { expr: inner }
         | ExprKind::Try { expr: inner, .. }
+        | ExprKind::Loop { body: inner }
         | ExprKind::ReactorInput { reactor: inner, .. }
         | ExprKind::ReactorExport { reactor: inner, .. } => walk(inner, visit),
-        ExprKind::Binary { lhs, rhs, .. } | ExprKind::ShortCircuit { lhs, rhs, .. } => {
+        ExprKind::Binary { lhs, rhs, .. }
+        | ExprKind::ShortCircuit { lhs, rhs, .. }
+        | ExprKind::While {
+            cond: lhs,
+            body: rhs,
+        } => {
             walk(lhs, visit);
             walk(rhs, visit);
         }
@@ -5532,11 +5756,12 @@ fn walk(expr: &Expr, visit: &mut impl FnMut(&Expr)) {
                 walk(tail, visit);
             }
         }
-        ExprKind::Return { value } => {
+        ExprKind::Return { value } | ExprKind::Break { value } => {
             if let Some(value) = value {
                 walk(value, visit);
             }
         }
+        ExprKind::Continue => {}
         ExprKind::Unit
         | ExprKind::Int(_)
         | ExprKind::Float(_)
@@ -5743,6 +5968,21 @@ impl Moves<'_> {
                 }
                 self.diverged = true;
             }
+            // Walked once, like any other subexpression. What a back edge means for ownership —
+            // that a body may not move what it did not declare — is its own rule, landing next.
+            ExprKind::While { cond, body } => {
+                self.value(cond);
+                self.value(body);
+            }
+            ExprKind::Loop { body } => self.value(body),
+            // Like `return`, these end their path: what follows them in the tree is unreachable.
+            ExprKind::Break { value } => {
+                if let Some(value) = value {
+                    self.value(value);
+                }
+                self.diverged = true;
+            }
+            ExprKind::Continue => self.diverged = true,
         }
     }
 

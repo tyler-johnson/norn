@@ -366,6 +366,13 @@ fn dump_expr(expr: &Expr) -> Node {
             }
             list("if", children)
         }
+        ExprKind::While { cond, body } => {
+            list("while", vec![dump_expr(cond), dump_block(body)])
+        }
+        ExprKind::Loop { body } => list("loop", vec![dump_block(body)]),
+        ExprKind::Break { value: None } => list("break", vec![]),
+        ExprKind::Break { value: Some(value) } => list("break", vec![dump_expr(value)]),
+        ExprKind::Continue => list("continue", vec![]),
         ExprKind::Match { scrutinee, arms } => {
             let mut children = vec![dump_expr(scrutinee)];
             for arm in arms {

@@ -155,6 +155,7 @@ fn lower_fn(program: &hir::Program, def: &hir::FnDef) -> Function {
         blocks: vec![Block::default()],
         current: 0,
         open_scopes: 0,
+        loops: Vec::new(),
     };
     let result = lowerer.expr(&def.body);
     // A body of type `!` has already returned on every path; the terminator here is unreachable,
@@ -219,6 +220,23 @@ struct Lowerer<'p> {
     /// Scopes open around the expression being lowered. A `return` or a `?` that crosses one has to
     /// leave it, so the exits are emitted before the return.
     open_scopes: usize,
+    /// The loops enclosing the expression being lowered, innermost last: what `break` and
+    /// `continue` jump to.
+    loops: Vec<LoopFrame>,
+}
+
+#[derive(Clone)]
+struct LoopFrame {
+    /// The back-edge and `continue` target. A `while`'s condition lowers *inside* it, so jumping
+    /// here re-evaluates the condition.
+    header: BlockId,
+    /// Where `break` jumps.
+    exit: BlockId,
+    /// Where `break value` writes before jumping. `None` for a `while`, whose breaks are bare.
+    dest: Option<Place>,
+    /// `open_scopes` when the loop was entered. A `break` or `continue` from inside a `scope {}`
+    /// has to leave every scope opened since, the way `return_from` leaves them all.
+    open_scopes_at_entry: usize,
 }
 
 impl Lowerer<'_> {
@@ -250,6 +268,20 @@ impl Lowerer<'_> {
             self.switch_to(resume);
         }
         self.terminate(Term::Return(value));
+    }
+
+    /// Jump to `target`, exiting every scope opened since `depth` first, the way `return_from`
+    /// leaves them all on the way out of the function. The code the source wrote after the jump
+    /// lands in a fresh block nothing reaches, exactly as after a `return`; `prune` deletes it.
+    fn divert(&mut self, depth: usize, target: BlockId) {
+        for _ in depth..self.open_scopes {
+            let resume = self.new_block();
+            self.terminate(Term::ScopeExit { resume });
+            self.switch_to(resume);
+        }
+        self.terminate(Term::Goto(target));
+        let unreachable = self.new_block();
+        self.switch_to(unreachable);
     }
 
     /// Terminate the current block, unless a `return` already terminated it.
@@ -357,6 +389,80 @@ impl Lowerer<'_> {
                 }
             }
             hir::ExprKind::If { cond, then, els } => self.if_expr(cond, then, els.as_deref()),
+            hir::ExprKind::While { cond, body } => {
+                let header = self.new_block();
+                let exit = self.new_block();
+                self.terminate(Term::Goto(header));
+                self.switch_to(header);
+                // The frame opens before the condition lowers: the condition is re-evaluated every
+                // iteration, so it lives inside the header and a `break` in it targets this loop.
+                self.loops.push(LoopFrame {
+                    header,
+                    exit,
+                    dest: None,
+                    open_scopes_at_entry: self.open_scopes,
+                });
+                let cond = self.expr(cond);
+                let body_block = self.new_block();
+                self.terminate(Term::Branch {
+                    cond,
+                    then: body_block,
+                    els: exit,
+                });
+                self.switch_to(body_block);
+                self.expr(body);
+                // A no-op when the body already diverted; otherwise the back edge.
+                self.terminate(Term::Goto(header));
+                self.loops.pop();
+                self.switch_to(exit);
+                Operand::Const(Const::Unit)
+            }
+            hir::ExprKind::Loop { body } => {
+                let dest = Place::local(self.temp());
+                let header = self.new_block();
+                let exit = self.new_block();
+                self.terminate(Term::Goto(header));
+                self.switch_to(header);
+                self.loops.push(LoopFrame {
+                    header,
+                    exit,
+                    dest: Some(dest.clone()),
+                    open_scopes_at_entry: self.open_scopes,
+                });
+                self.expr(body);
+                self.terminate(Term::Goto(header));
+                self.loops.pop();
+                // A `loop` no break leaves keeps `exit` unreachable, and `prune` deletes it.
+                self.switch_to(exit);
+                Operand::Copy(dest)
+            }
+            hir::ExprKind::Break { value } => {
+                let frame = self
+                    .loops
+                    .last()
+                    .expect("the checker rejects a stray `break`")
+                    .clone();
+                // The value lowers first — it may await, or open and close scopes of its own — and
+                // only then do the loop's scopes unwind.
+                if let Some(dest) = &frame.dest {
+                    let value = match value {
+                        Some(value) => self.expr(value),
+                        None => Operand::Const(Const::Unit),
+                    };
+                    self.emit(dest.clone(), Rvalue::Use(value));
+                }
+                self.divert(frame.open_scopes_at_entry, frame.exit);
+                Operand::Const(Const::Unit)
+            }
+            hir::ExprKind::Continue => {
+                let frame = self
+                    .loops
+                    .last()
+                    .expect("the checker rejects a stray `continue`")
+                    .clone();
+                self.divert(frame.open_scopes_at_entry, frame.header);
+                Operand::Const(Const::Unit)
+            }
             hir::ExprKind::Match { scrutinee, arms } => self.match_expr(scrutinee, arms),
             hir::ExprKind::Try { expr, enum_id } => self.try_expr(expr, enum_id.index()),
             hir::ExprKind::Await { expr } => {

@@ -1,0 +1,63 @@
+// The loop typing rules: where `break` and `continue` may appear, what a `break` may carry, and
+// what each loop form produces.
+
+fn break_outside() {
+    break
+}
+
+fn continue_outside() {
+    continue
+}
+
+fn value_in_a_while() {
+    while true {
+        break 1
+    }
+}
+
+fn values_disagree() {
+    let n = loop {
+        if flag() {
+            break 1
+        }
+        break "two"
+    }
+    print(n)
+}
+
+fn bare_after_value() {
+    let n = loop {
+        if flag() {
+            break 1
+        }
+        break
+    }
+    print(n)
+}
+
+fn value_after_bare() {
+    let n = loop {
+        if flag() {
+            break
+        }
+        break 1
+    }
+    print(n)
+}
+
+fn not_a_bool() {
+    while 1 {
+        print("never")
+    }
+}
+
+fn a_while_is_unit() {
+    let n: I64 = while flag() {
+        print("still not a value")
+    }
+    print(n)
+}
+
+fn flag() -> Bool {
+    false
+}

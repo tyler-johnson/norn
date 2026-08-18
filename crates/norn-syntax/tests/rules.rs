@@ -439,3 +439,53 @@ fn scope_and_spawn_round_trip() {
     assert!(parsed.ok(), "{}", errors(source));
     assert_eq!(print::module(&parsed.module), source);
 }
+
+#[test]
+fn loops_dump_their_shapes() {
+    assert_eq!(
+        expr("while ready { step() }"),
+        "(while (path ready) (block (call (path step))))"
+    );
+    assert_eq!(expr("loop { step() }"), "(loop (block (call (path step))))");
+    assert_eq!(expr("loop { break }"), "(loop (block (break)))");
+    assert_eq!(expr("loop { break 5 }"), "(loop (block (break (int 5))))");
+    assert_eq!(expr("loop { continue }"), "(loop (block (continue)))");
+}
+
+#[test]
+fn a_break_value_does_not_cross_a_line_break() {
+    // Like `return`: the expression on the next line is its own statement, not the break's value.
+    let dumped = ast("fn f() {\n    loop {\n        break\n        step()\n    }\n}\n")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(dumped.contains("(break) (call (path step))"), "{dumped}");
+}
+
+#[test]
+fn a_comma_ends_a_bare_break_in_a_match_arm() {
+    // Match arms separate by comma-or-newline, so `break,` on one line must leave the comma to the
+    // arm list rather than swallowing it as the start of a value.
+    let dumped = expr("loop { match poll() { Err(_) => break, Ok(v) => v } }");
+    assert!(dumped.contains("(arm (construct Err (arg _)) (break))"), "{dumped}");
+}
+
+#[test]
+fn a_break_value_ends_at_a_comma_too() {
+    let dumped = expr("loop { match poll() { Err(_) => break 0, Ok(v) => v } }");
+    assert!(dumped.contains("(break (int 0))"), "{dumped}");
+}
+
+#[test]
+fn loops_round_trip() {
+    let source = "fn f() -> I64 {\n    let mut n = 3\n    while n > 0 {\n        n = n - 1\n    }\n    loop {\n        if n == 0 {\n            break\n        }\n        continue\n    }\n    loop {\n        break n\n    }\n}\n";
+    let parsed = parse(source);
+    assert!(parsed.ok(), "{}", errors(source));
+    let canonical = print::module(&parsed.module);
+    assert_eq!(canonical, source);
+    assert_eq!(
+        dump::module(&parsed.module),
+        dump::module(&parse(&canonical).module),
+        "the canonical form parses to a different tree"
+    );
+}

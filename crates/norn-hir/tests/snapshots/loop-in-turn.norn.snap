@@ -1,0 +1,15 @@
+error: a `loop` cannot appear in a turn, because a turn must end
+  --> loop-in-turn.norn:12:22
+   |
+12 |         after report(loop { break 0 })
+   |                      ^^^^^^^^^^^^^^^^ a loop is not provably finite
+   = note: turn-reachable code has neither loops nor recursion, which is what makes every turn provably terminating
+   = note: compute the value with a bounded expression, or move the work into a `task fn` and request it with `after`
+
+error: a `while` cannot appear in a turn, because a turn must end
+  --> loop-in-turn.norn:17:9
+   |
+17 |         while total < n {
+   |         ^^^^^^^^^^^^^^^^^ a loop is not provably finite
+   = note: turn-reachable code has neither loops nor recursion, which is what makes every turn provably terminating
+   = note: compute the value with a bounded expression, or move the work into a `task fn` and request it with `after`

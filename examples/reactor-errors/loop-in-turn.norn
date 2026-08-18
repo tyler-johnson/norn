@@ -1,0 +1,26 @@
+// The direct half of the termination rule: a loop written in a turn is refused where it stands,
+// because a turn must end and a loop is not provably finite. The `after` operand is no escape —
+// its arguments are evaluated during the turn, before the work it describes is started.
+
+reactor Counter() {
+    input bumped: () [capacity: 8, overflow: reject]
+
+    state n: I64 = 0
+
+    on bumped() {
+        n = n + 1
+        after report(loop { break 0 })
+    }
+
+    signal doubled: I64 = {
+        let mut total = 0
+        while total < n {
+            total = total + 2
+        }
+        total
+    }
+}
+
+task fn report(value: I64) {
+    print(value)
+}
