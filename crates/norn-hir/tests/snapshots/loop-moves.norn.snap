@@ -1,0 +1,35 @@
+error: `conn` cannot be moved inside a loop
+  --> loop-moves.norn:13:25
+   |
+13 |         await tcp_close(conn)
+   |                         ^^^^ moved here
+  --> loop-moves.norn:8:27
+   |
+ 8 | task fn closes_every_pass(conn: Connection, passes: I64) -> ()
+   |                           ^^^^ …but it was declared outside the loop
+   = note: a `Connection` has one owner; the first pass of the loop hands it over, and the next would find it gone
+   = note: declare it inside the loop if each pass should have its own
+
+error: `conn` cannot be moved inside a loop
+  --> loop-moves.norn:24:29
+   |
+24 |             await tcp_close(conn)
+   |                             ^^^^ moved here
+  --> loop-moves.norn:19:30
+   |
+19 | task fn moves_then_continues(conn: Connection, retry: Bool) -> ()
+   |                              ^^^^ …but it was declared outside the loop
+   = note: a `Connection` has one owner; the first pass of the loop hands it over, and the next would find it gone
+   = note: declare it inside the loop if each pass should have its own
+
+error: `conn` cannot be moved inside a loop
+  --> loop-moves.norn:33:20
+   |
+33 |     while consumes(conn) {
+   |                    ^^^^ moved here
+  --> loop-moves.norn:32:32
+   |
+32 | task fn moves_in_the_condition(conn: Connection) -> () {
+   |                                ^^^^ …but it was declared outside the loop
+   = note: a `Connection` has one owner; the first pass of the loop hands it over, and the next would find it gone
+   = note: declare it inside the loop if each pass should have its own

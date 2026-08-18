@@ -1,0 +1,68 @@
+// What a back edge means for ownership: a loop body — condition included, it re-runs every pass —
+// may not move an affine value it did not declare. The first pass would hand the value over, and
+// the next would find it gone. A value declared inside the loop is fresh each pass and moves
+// freely, which is what the accept loop does on purpose: the listener is only ever borrowed, and
+// each connection is born and dies inside one pass.
+
+// The first pass closes the connection; the second would close nothing.
+task fn closes_every_pass(conn: Connection, passes: I64) -> ()
+    uses { net.io }
+{
+    let mut n = passes
+    while n > 0 {
+        await tcp_close(conn)
+        n = n - 1
+    }
+}
+
+// A `continue` feeds the back edge, so a move on its path is a move the next pass sees.
+task fn moves_then_continues(conn: Connection, retry: Bool) -> ()
+    uses { net.io }
+{
+    loop {
+        if retry {
+            await tcp_close(conn)
+            continue
+        }
+        break
+    }
+}
+
+// The condition is as much part of the loop as the body: it runs again every iteration.
+task fn moves_in_the_condition(conn: Connection) -> () {
+    while consumes(conn) {
+        print("waiting")
+    }
+}
+
+fn consumes(conn: Connection) -> Bool {
+    true
+}
+
+// Legal: the listener is borrowed, never moved, and each pass declares its own connection.
+task fn accepts_forever(listener: Listener) -> ()
+    uses { net.io }
+{
+    loop {
+        match await tcp_accept(&listener) {
+            Ok(conn) => await tcp_close(conn)
+            Err(_) => break
+        }
+    }
+}
+
+// Legal: the body moves the connection out and puts a fresh one back, so the back edge sees the
+// name owning a value again — net-unmoved.
+task fn replaces_each_pass(listener: Listener, passes: I64) -> Result<(), IoError>
+    uses { net.io }
+{
+    let mut conn = await tcp_accept(&listener)?
+    let mut n = passes
+    while n > 0 {
+        await tcp_close(conn)
+        conn = await tcp_accept(&listener)?
+        n = n - 1
+    }
+    await tcp_close(conn)
+    Ok(())
+}

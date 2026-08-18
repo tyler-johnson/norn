@@ -784,10 +784,11 @@ impl Checker {
     ///
     /// It runs over typed HIR rather than inside `check_fns` because it needs both halves of what
     /// checking produced — types, to know which values move, and spans, to say where — and needs to
-    /// perturb neither. There is no fixed point to reach: v0 has no `while`, no `for`, and no
-    /// `loop`, so a body is a tree, and the only join is where an `if` or a `match` comes back
-    /// together. Recursion is the language's one cycle and it crosses a call boundary, where
-    /// parameters are fresh.
+    /// perturb neither. There is no fixed point to reach: the only joins are where an `if` or a
+    /// `match` comes back together, and a loop is walked once, because the loop rule — a body may
+    /// not move anything it did not declare — means a legal body leaves outer ownership exactly
+    /// where it found it, so one walk stands for every iteration. Recursion is the language's one
+    /// other cycle and it crosses a call boundary, where parameters are fresh.
     fn check_moves(&mut self) {
         let mut errors: Vec<(usize, Vec<Diagnostic>)> = Vec::new();
         for (index, function) in self.program.fns.iter().enumerate() {
@@ -795,6 +796,10 @@ impl Checker {
                 program: &self.program,
                 locals: &function.locals,
                 moved: vec![None; function.locals.len()],
+                declared: (0..function.locals.len())
+                    .map(|local| local < function.params)
+                    .collect(),
+                frames: Vec::new(),
                 diverged: false,
                 errors: Vec::new(),
             };
@@ -5827,6 +5832,22 @@ fn head_name(expr: &ast::Expr) -> Option<(String, Span)> {
     }
 }
 
+/// Slot-wise union of move states, keeping the first span seen for each local.
+fn union(into: &mut [Option<Span>], from: &[Option<Span>]) {
+    for (slot, state) in into.iter_mut().zip(from) {
+        if slot.is_none() {
+            *slot = *state;
+        }
+    }
+}
+
+/// The advice for a lost task, shared between "already moved" and "moved inside a loop": a borrow
+/// is never the answer for one, because running it twice is what was wanted and is not what `&`
+/// would give.
+fn task_advice() -> String {
+    "a task is work to be done once; build another call if it should happen again".to_string()
+}
+
 fn binds_anything(pat: &Pat) -> bool {
     match &pat.kind {
         PatKind::Bind(_) => true,
@@ -5847,6 +5868,14 @@ struct Moves<'p> {
     program: &'p Program,
     locals: &'p [LocalDef],
     moved: Vec<Option<Span>>,
+    /// Which locals have been declared on the path walked so far: parameters at entry, everything
+    /// else as its `let` or pattern binding is reached. What the loop rule means by "outside the
+    /// loop" is exactly "declared before the loop was entered".
+    declared: Vec<bool>,
+    /// One frame per enclosing loop: the union of `moved` at every `break` and `continue` that
+    /// targeted it. Together with the body's fall-through state this is everything that can reach
+    /// the loop's back edge or its exit.
+    frames: Vec<Vec<Option<Span>>>,
     /// Whether the path being walked has already left the function. A branch that returns
     /// contributes nothing to what follows it, which is why `if x { return } else { close(c) }`
     /// leaves `c` moved rather than "maybe moved".
@@ -5968,21 +5997,60 @@ impl Moves<'_> {
                 }
                 self.diverged = true;
             }
-            // Walked once, like any other subexpression. What a back edge means for ownership —
-            // that a body may not move what it did not declare — is its own rule, landing next.
+            // The loop rule: a body — condition included, it re-runs every iteration — may not
+            // move an affine value declared outside the loop. Body-locals are fresh each pass and
+            // move freely. A legal body is therefore a no-op on outer ownership, which is what
+            // lets one walk stand for every iteration: afterwards `moved` is restored to the entry
+            // state, and the body-locals' stale entries are unobservable because nothing after the
+            // loop can name them.
             ExprKind::While { cond, body } => {
+                let entry = self.moved.clone();
+                let declared = self.declared.clone();
+                self.frames.push(vec![None; self.moved.len()]);
                 self.value(cond);
-                self.value(body);
+                // The condition's own state reaches the back edge even when the body diverges on
+                // every path, so it joins the summary unconditionally.
+                let after_cond = self.moved.clone();
+                let (body_state, body_diverged) = self.branch(|this| this.value(body));
+                let mut summary = self.frames.pop().expect("pushed above");
+                union(&mut summary, &after_cond);
+                if !body_diverged {
+                    union(&mut summary, &body_state);
+                }
+                self.escaped_moves(&entry, &declared, &summary);
+                self.moved = entry;
             }
-            ExprKind::Loop { body } => self.value(body),
-            // Like `return`, these end their path: what follows them in the tree is unreachable.
+            ExprKind::Loop { body } => {
+                let entry = self.moved.clone();
+                let declared = self.declared.clone();
+                self.frames.push(vec![None; self.moved.len()]);
+                let (body_state, body_diverged) = self.branch(|this| this.value(body));
+                let mut summary = self.frames.pop().expect("pushed above");
+                if !body_diverged {
+                    union(&mut summary, &body_state);
+                }
+                self.escaped_moves(&entry, &declared, &summary);
+                self.moved = entry;
+                // A `loop` nothing breaks out of never reaches the code after it.
+                if expr.ty == Ty::Never {
+                    self.diverged = true;
+                }
+            }
+            // Like `return`, these end their path — what follows them in the tree is unreachable —
+            // but unlike a `return`, their moves do not leave the function: a `continue` feeds the
+            // back edge and a `break` feeds the exit. So the state is recorded in the loop's frame
+            // *before* the path diverges, or `rejoin` would drop it.
             ExprKind::Break { value } => {
                 if let Some(value) = value {
                     self.value(value);
                 }
+                self.record_exit();
                 self.diverged = true;
             }
-            ExprKind::Continue => self.diverged = true,
+            ExprKind::Continue => {
+                self.record_exit();
+                self.diverged = true;
+            }
         }
     }
 
@@ -6044,6 +6112,7 @@ impl Moves<'_> {
                 // The name is fresh whatever it shadows, and whatever it held on an earlier line of
                 // a `match` arm it does not hold now.
                 self.moved[local.index()] = None;
+                self.declared[local.index()] = true;
             }
             StmtKind::Assign { place, value } => {
                 self.value(value);
@@ -6065,7 +6134,10 @@ impl Moves<'_> {
     /// aggregate is taken apart — the scrutinee moved as a whole, and the pieces are named here.
     fn bind(&mut self, pat: &Pat) {
         match &pat.kind {
-            PatKind::Bind(id) => self.moved[id.index()] = None,
+            PatKind::Bind(id) => {
+                self.moved[id.index()] = None;
+                self.declared[id.index()] = true;
+            }
             PatKind::Variant { args, .. } | PatKind::Struct { args, .. } => {
                 for arg in args {
                     self.bind(arg);
@@ -6077,6 +6149,47 @@ impl Moves<'_> {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// Union the current state into the innermost loop's frame: this path is about to jump to the
+    /// loop's back edge or exit, and what it moved arrives there with it.
+    fn record_exit(&mut self) {
+        let moved = self.moved.clone();
+        let frame = self
+            .frames
+            .last_mut()
+            .expect("the checker rejects a stray `break` or `continue`");
+        union(frame, &moved);
+    }
+
+    /// Report every affine local the loop moved without declaring. `summary` is everything that
+    /// can reach the back edge or the exit; only affine locals ever hold `Some`, so affinity needs
+    /// no separate check.
+    fn escaped_moves(&mut self, entry: &[Option<Span>], declared: &[bool], summary: &[Option<Span>]) {
+        for (index, moved_at) in summary.iter().enumerate() {
+            let Some(at) = moved_at else { continue };
+            // Declared inside the loop is fine — fresh each pass. Already moved at entry has been
+            // reported at the use site inside, and once is enough.
+            if !declared[index] || entry[index].is_some() {
+                continue;
+            }
+            let local = &self.locals[index];
+            let name = local.name.clone();
+            let ty = self.program.ty_name(&local.ty);
+            let advice = match local.ty {
+                Ty::Task(_) => task_advice(),
+                _ => "declare it inside the loop if each pass should have its own".to_string(),
+            };
+            self.errors.push(
+                Diagnostic::new(*at, format!("`{name}` cannot be moved inside a loop"))
+                    .label("moved here")
+                    .secondary(local.span, "…but it was declared outside the loop")
+                    .note(format!(
+                        "a `{ty}` has one owner; the first pass of the loop hands it over, and the next would find it gone"
+                    ))
+                    .note(advice),
+            );
         }
     }
 
@@ -6097,10 +6210,7 @@ impl Moves<'_> {
         // a descriptor behind it; it is not the answer for a task, which has to be built again
         // because running it twice is what was wanted and is not what `&` would give.
         let advice = match local.ty {
-            Ty::Task(_) => {
-                "a task is work to be done once; build another call if it should happen again"
-                    .to_string()
-            }
+            Ty::Task(_) => task_advice(),
             _ => format!("`&{name}` is how a call looks at it without taking it"),
         };
         self.errors.push(
