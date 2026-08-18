@@ -1,4 +1,18 @@
 {
+  "import names": {
+    "prefix": "import",
+    "body": [
+      "import { ${1:name} } from \"${2:./file}\""
+    ],
+    "description": "Import exported names from another file"
+  },
+  "import a namespace": {
+    "prefix": "importas",
+    "body": [
+      "import * as ${1:name} from \"${2:./file}\""
+    ],
+    "description": "Import a whole file under one name"
+  },
   "task function": {
     "prefix": "taskfn",
     "body": [

@@ -366,6 +366,53 @@ fn a_use_declaration_teaches_the_import_spelling() {
 }
 
 #[test]
+fn export_marks_each_kind_of_declaration() {
+    let dumped = ast(
+        "export struct P {\n    x: I64\n}\n\nexport enum E {\n    A\n}\n\nexport fn f() {}\n\nexport task fn t() {}\n\nexport reactor R() {\n    input go: () [capacity: 1, overflow: reject]\n    on go() {}\n}\n",
+    );
+    assert!(dumped.contains("(struct P export"), "{dumped}");
+    assert!(dumped.contains("(enum E export"), "{dumped}");
+    assert!(dumped.contains("(fn f export"), "{dumped}");
+    assert!(dumped.contains("(fn t export task"), "{dumped}");
+    assert!(dumped.contains("(reactor R export"), "{dumped}");
+}
+
+#[test]
+fn export_round_trips() {
+    let source = "export struct P {\n    x: I64\n}\n\nexport task fn t() {}\n";
+    let parsed = parse(source);
+    assert!(parsed.ok(), "{}", errors(source));
+    assert_eq!(print::module(&parsed.module), source);
+}
+
+#[test]
+fn a_top_level_export_signal_is_pointed_home() {
+    let rendered = errors("export signal open = 1\n");
+    assert!(
+        rendered.contains("`export signal` lives inside a reactor"),
+        "{rendered}"
+    );
+}
+
+#[test]
+fn export_prefixes_only_declarations() {
+    let rendered = errors("export let x = 1\n");
+    assert!(
+        rendered.contains("`export` prefixes `fn`, `task fn`, `struct`, `enum`, and `reactor`"),
+        "{rendered}"
+    );
+}
+
+#[test]
+fn an_exported_signal_still_parses_inside_a_reactor() {
+    // The member spelling predates file-level `export`; adding the top-level arm must not steal it.
+    let dumped = ast(
+        "reactor Gate() {\n    input go: () [capacity: 1, overflow: reject]\n    state n: I64 = 0\n    on go() {\n        n = n + 1\n    }\n    export signal open = n\n}\n",
+    );
+    assert!(dumped.contains("(signal open export"), "{dumped}");
+}
+
+#[test]
 fn spawn_takes_a_whole_call() {
     // Not just the callee: `spawn f(x)` starts `f(x)`, and nothing else would be worth writing.
     assert_eq!(

@@ -1,15 +1,15 @@
 === ast ===
 (module
-  (struct User (field id I64) (field name String) (field email String))
+  (struct User export (field id I64) (field name String) (field email String))
   (struct Profile
     (field user User)
     (field display_name String)
     (field verified Bool))
-  (enum LoadError
+  (enum LoadError export
     (variant NotFound)
     (variant Invalid (tuple String))
     (variant Io (fields (field code I64) (field message String))))
-  (fn display_name
+  (fn display_name export
     (params (param profile (ref Profile)))
     (ret String)
     (block (return (path profile.display_name))))
@@ -78,7 +78,7 @@
           (arg verified (bool false)))))))
 
 === canonical ===
-struct User {
+export struct User {
     id: I64
     name: String
     email: String
@@ -90,13 +90,13 @@ struct Profile {
     verified: Bool
 }
 
-enum LoadError {
+export enum LoadError {
     NotFound
     Invalid(String)
     Io { code: I64, message: String }
 }
 
-fn display_name(profile: &Profile) -> String {
+export fn display_name(profile: &Profile) -> String {
     return profile.display_name
 }
 

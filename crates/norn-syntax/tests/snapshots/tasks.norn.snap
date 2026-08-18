@@ -10,7 +10,7 @@
     (variant Timeout)
     (variant Status (tuple I64))
     (variant Decode (tuple String)))
-  (fn fetch_profile task
+  (fn fetch_profile export task
     (params (param base Url) (param id UserId))
     (ret (ty Result Profile FetchError))
     (uses net.connect clock)
@@ -111,7 +111,7 @@ enum FetchError {
     Decode(String)
 }
 
-task fn fetch_profile(base: Url, id: UserId) -> Result<Profile, FetchError>
+export task fn fetch_profile(base: Url, id: UserId) -> Result<Profile, FetchError>
     uses { net.connect, clock }
 {
     let response = await http.get(base / "profiles" / id).timeout(2.seconds)?

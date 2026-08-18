@@ -7,7 +7,7 @@ struct Snapshot {
     healthy: Bool
 }
 
-reactor Gate(limit: I64) {
+export reactor Gate(limit: I64) {
     input opened: () [capacity: 64, overflow: reject]
     input closed: () [capacity: 8, overflow: drop_oldest]
     input measured: Sample [capacity: 1, overflow: drop_newest]

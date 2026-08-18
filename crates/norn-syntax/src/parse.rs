@@ -157,12 +157,48 @@ impl Parser {
         }
         match self.peek_kind().clone() {
             TokenKind::Kw(Kw::Import) => imports.push(self.import_decl()?),
-            TokenKind::Kw(Kw::Struct) => items.push(Item::Struct(self.struct_decl()?)),
-            TokenKind::Kw(Kw::Enum) => items.push(Item::Enum(self.enum_decl()?)),
+            TokenKind::Kw(Kw::Struct) => items.push(Item::Struct(self.struct_decl(None)?)),
+            TokenKind::Kw(Kw::Enum) => items.push(Item::Enum(self.enum_decl(None)?)),
             TokenKind::Kw(Kw::Fn) | TokenKind::Kw(Kw::Task) => {
-                items.push(Item::Fn(self.fn_decl()?))
+                items.push(Item::Fn(self.fn_decl(None)?))
             }
-            TokenKind::Kw(Kw::Reactor) => items.push(Item::Reactor(self.reactor_decl()?)),
+            TokenKind::Kw(Kw::Reactor) => items.push(Item::Reactor(self.reactor_decl(None)?)),
+            TokenKind::Kw(Kw::Export) => {
+                let exported = Some(self.advance().span);
+                match self.peek_kind().clone() {
+                    TokenKind::Kw(Kw::Struct) => {
+                        items.push(Item::Struct(self.struct_decl(exported)?))
+                    }
+                    TokenKind::Kw(Kw::Enum) => items.push(Item::Enum(self.enum_decl(exported)?)),
+                    TokenKind::Kw(Kw::Fn) | TokenKind::Kw(Kw::Task) => {
+                        items.push(Item::Fn(self.fn_decl(exported)?))
+                    }
+                    TokenKind::Kw(Kw::Reactor) => {
+                        items.push(Item::Reactor(self.reactor_decl(exported)?))
+                    }
+                    TokenKind::Kw(Kw::Signal) => {
+                        let span = self.peek().span;
+                        return Err(self.push(
+                            Diagnostic::new(span, "`export signal` lives inside a reactor")
+                                .label("a signal is a reactor member")
+                                .note("at the top level, `export` prefixes `fn`, `task fn`, `struct`, `enum`, and `reactor`"),
+                        ));
+                    }
+                    other => {
+                        let span = self.peek().span;
+                        return Err(self.push(
+                            Diagnostic::new(
+                                span,
+                                format!(
+                                    "expected a declaration after `export`, found {}",
+                                    other.describe()
+                                ),
+                            )
+                            .note("`export` prefixes `fn`, `task fn`, `struct`, `enum`, and `reactor`"),
+                        ));
+                    }
+                }
+            }
             TokenKind::At => {
                 let span = self.peek().span;
                 return Err(self.push(
@@ -192,7 +228,7 @@ impl Parser {
                     _ => diagnostic,
                 };
                 return Err(self.push(diagnostic.note(
-                    "a file contains `import`, `struct`, `enum`, `fn`, `task fn`, and `reactor` declarations",
+                    "a file contains `import`, `export`, `struct`, `enum`, `fn`, `task fn`, and `reactor` declarations",
                 )));
             }
         }
@@ -278,9 +314,13 @@ impl Parser {
                 return;
             }
             let token = self.peek();
+            // `export` here means recovery inside a broken reactor stops at an `export signal`
+            // member — an accepted trade-off: no corpus file has that shape, and a file-level
+            // `export` is the far more common thing to resynchronise on.
             let starts_decl = matches!(
                 token.kind,
                 TokenKind::Kw(Kw::Import)
+                    | TokenKind::Kw(Kw::Export)
                     | TokenKind::Kw(Kw::Struct)
                     | TokenKind::Kw(Kw::Enum)
                     | TokenKind::Kw(Kw::Fn)
@@ -296,8 +336,11 @@ impl Parser {
 
     // ---------------------------------------------------------------- declarations
 
-    fn struct_decl(&mut self) -> PResult<StructDecl> {
-        let start = self.advance().span;
+    fn struct_decl(&mut self, exported: Option<Span>) -> PResult<StructDecl> {
+        // An exported item's span starts at the `export`, so a diagnostic about the whole
+        // declaration underlines the whole declaration.
+        let start = exported.unwrap_or(self.peek().span);
+        self.advance();
         let name = self.ident()?;
         self.expect(TokenKind::LBrace)?;
         let mut fields = Vec::new();
@@ -307,6 +350,7 @@ impl Parser {
         }
         let end = self.expect(TokenKind::RBrace)?.span;
         Ok(StructDecl {
+            exported,
             name,
             fields,
             span: start.to(end),
@@ -321,8 +365,9 @@ impl Parser {
         Ok(FieldDecl { name, ty, span })
     }
 
-    fn enum_decl(&mut self) -> PResult<EnumDecl> {
-        let start = self.advance().span;
+    fn enum_decl(&mut self, exported: Option<Span>) -> PResult<EnumDecl> {
+        let start = exported.unwrap_or(self.peek().span);
+        self.advance();
         let name = self.ident()?;
         self.expect(TokenKind::LBrace)?;
         let mut variants = Vec::new();
@@ -361,14 +406,15 @@ impl Parser {
         }
         let end = self.expect(TokenKind::RBrace)?.span;
         Ok(EnumDecl {
+            exported,
             name,
             variants,
             span: start.to(end),
         })
     }
 
-    fn fn_decl(&mut self) -> PResult<FnDecl> {
-        let start = self.peek().span;
+    fn fn_decl(&mut self, exported: Option<Span>) -> PResult<FnDecl> {
+        let start = exported.unwrap_or(self.peek().span);
         let is_task = self.eat(&TokenKind::Kw(Kw::Task));
         self.expect(TokenKind::Kw(Kw::Fn))?;
         let name = self.ident()?;
@@ -399,6 +445,7 @@ impl Parser {
         let body = self.block()?;
         let span = start.to(body.span);
         Ok(FnDecl {
+            exported,
             is_task,
             name,
             params,
@@ -439,8 +486,9 @@ impl Parser {
         Ok(uses)
     }
 
-    fn reactor_decl(&mut self) -> PResult<ReactorDecl> {
-        let start = self.advance().span;
+    fn reactor_decl(&mut self, exported: Option<Span>) -> PResult<ReactorDecl> {
+        let start = exported.unwrap_or(self.peek().span);
+        self.advance();
         let name = self.ident()?;
         let params = self.param_list()?;
         let uses = if self.at(&TokenKind::Kw(Kw::Uses)) {
@@ -456,6 +504,7 @@ impl Parser {
         }
         let end = self.expect(TokenKind::RBrace)?.span;
         Ok(ReactorDecl {
+            exported,
             name,
             params,
             uses,

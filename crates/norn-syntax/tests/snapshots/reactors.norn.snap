@@ -1,7 +1,7 @@
 === ast ===
 (module
   (struct Snapshot (field open I64) (field healthy Bool))
-  (reactor Gate
+  (reactor Gate export
     (params (param limit I64))
     (input opened unit (queue (int 64) reject))
     (input closed unit (queue (int 8) drop_oldest))
@@ -84,7 +84,7 @@ struct Snapshot {
     healthy: Bool
 }
 
-reactor Gate(limit: I64) {
+export reactor Gate(limit: I64) {
     input opened: () [capacity: 64, overflow: reject]
     input closed: () [capacity: 8, overflow: drop_oldest]
     input measured: Sample [capacity: 1, overflow: drop_newest]

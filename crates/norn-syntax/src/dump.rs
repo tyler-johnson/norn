@@ -106,6 +106,9 @@ fn dump_item(item: &Item) -> Node {
     match item {
         Item::Struct(decl) => {
             let mut children = vec![atom(&decl.name.name)];
+            if decl.exported.is_some() {
+                children.push(atom("export"));
+            }
             for field in &decl.fields {
                 children.push(list(
                     "field",
@@ -116,6 +119,9 @@ fn dump_item(item: &Item) -> Node {
         }
         Item::Enum(decl) => {
             let mut children = vec![atom(&decl.name.name)];
+            if decl.exported.is_some() {
+                children.push(atom("export"));
+            }
             for variant in &decl.variants {
                 let mut parts = vec![atom(&variant.name.name)];
                 match &variant.payload {
@@ -139,6 +145,9 @@ fn dump_item(item: &Item) -> Node {
         }
         Item::Fn(decl) => {
             let mut children = vec![atom(&decl.name.name)];
+            if decl.exported.is_some() {
+                children.push(atom("export"));
+            }
             if decl.is_task {
                 children.push(atom("task"));
             }
@@ -163,6 +172,9 @@ fn dump_item(item: &Item) -> Node {
         }
         Item::Reactor(decl) => {
             let mut children = vec![atom(&decl.name.name)];
+            if decl.exported.is_some() {
+                children.push(atom("export"));
+            }
             children.push(list(
                 "params",
                 decl.params

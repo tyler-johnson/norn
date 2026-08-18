@@ -19,7 +19,7 @@ enum FetchError {
     Decode(String)
 }
 
-task fn fetch_profile(base: Url, id: UserId) -> Result<Profile, FetchError>
+export task fn fetch_profile(base: Url, id: UserId) -> Result<Profile, FetchError>
     uses { net.connect, clock }
 {
     let response = await http.get(base / "profiles" / id).timeout(2.seconds)?

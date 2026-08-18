@@ -55,7 +55,12 @@ fn print_import(decl: &ImportDecl) -> String {
 fn print_item(item: &Item) -> String {
     match item {
         Item::Struct(decl) => {
-            let mut out = format!("struct {} {{\n", decl.name.name);
+            let export = if decl.exported.is_some() {
+                "export "
+            } else {
+                ""
+            };
+            let mut out = format!("{export}struct {} {{\n", decl.name.name);
             for field in &decl.fields {
                 out.push_str(&format!(
                     "{INDENT}{}: {}\n",
@@ -67,7 +72,12 @@ fn print_item(item: &Item) -> String {
             out
         }
         Item::Enum(decl) => {
-            let mut out = format!("enum {} {{\n", decl.name.name);
+            let export = if decl.exported.is_some() {
+                "export "
+            } else {
+                ""
+            };
+            let mut out = format!("{export}enum {} {{\n", decl.name.name);
             for variant in &decl.variants {
                 out.push_str(INDENT);
                 out.push_str(&variant.name.name);
@@ -92,6 +102,9 @@ fn print_item(item: &Item) -> String {
         }
         Item::Fn(decl) => {
             let mut out = String::new();
+            if decl.exported.is_some() {
+                out.push_str("export ");
+            }
             if decl.is_task {
                 out.push_str("task ");
             }
@@ -120,7 +133,12 @@ fn print_item(item: &Item) -> String {
                 .iter()
                 .map(|p| format!("{}: {}", p.name.name, print_type(&p.ty)))
                 .collect();
-            let mut out = format!("reactor {}({})", decl.name.name, params.join(", "));
+            let export = if decl.exported.is_some() {
+                "export "
+            } else {
+                ""
+            };
+            let mut out = format!("{export}reactor {}({})", decl.name.name, params.join(", "));
             if decl.uses.is_empty() {
                 out.push(' ');
             } else {

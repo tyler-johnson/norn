@@ -82,6 +82,9 @@ pub enum Item {
 
 #[derive(Debug)]
 pub struct StructDecl {
+    /// The span of the `export` keyword, when the declaration is public to importing files. A span
+    /// rather than a flag, so the checker can point at the word itself.
+    pub exported: Option<Span>,
     pub name: Ident,
     pub fields: Vec<FieldDecl>,
     pub span: Span,
@@ -96,6 +99,7 @@ pub struct FieldDecl {
 
 #[derive(Debug)]
 pub struct EnumDecl {
+    pub exported: Option<Span>,
     pub name: Ident,
     pub variants: Vec<Variant>,
     pub span: Span,
@@ -117,6 +121,7 @@ pub enum VariantPayload {
 
 #[derive(Debug)]
 pub struct FnDecl {
+    pub exported: Option<Span>,
     pub is_task: bool,
     pub name: Ident,
     pub params: Vec<Param>,
@@ -138,6 +143,7 @@ pub struct Param {
 /// nothing here runs in order, and the order it does run in is computed rather than written.
 #[derive(Debug)]
 pub struct ReactorDecl {
+    pub exported: Option<Span>,
     pub name: Ident,
     pub params: Vec<Param>,
     /// The capability set of the effects this reactor launches. Its spawner's set must cover it.

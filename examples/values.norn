@@ -1,4 +1,4 @@
-struct User {
+export struct User {
     id: I64
     name: String
     email: String
@@ -10,13 +10,13 @@ struct Profile {
     verified: Bool
 }
 
-enum LoadError {
+export enum LoadError {
     NotFound
     Invalid(String)
     Io { code: I64, message: String }
 }
 
-fn display_name(profile: &Profile) -> String {
+export fn display_name(profile: &Profile) -> String {
     return profile.display_name
 }
 
