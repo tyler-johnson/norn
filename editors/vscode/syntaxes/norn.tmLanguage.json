@@ -55,9 +55,6 @@
       "include": "#let-plain"
     },
     {
-      "include": "#constructor"
-    },
-    {
       "include": "#reserved"
     },
     {
@@ -518,24 +515,6 @@
           "match": "\\."
         }
       ]
-    },
-    "constructor": {
-      "comment": "`#` is what marks data. `#User(id: 7)` builds a record and `user(id: 7)` calls a function; nothing but the mark separates them.",
-      "match": "(#)([A-Za-z_][A-Za-z0-9_]*)(?:(\\.)([A-Za-z_][A-Za-z0-9_]*))?",
-      "captures": {
-        "1": {
-          "name": "punctuation.definition.constructor.norn"
-        },
-        "2": {
-          "name": "entity.name.type.constructor.norn"
-        },
-        "3": {
-          "name": "punctuation.accessor.norn"
-        },
-        "4": {
-          "name": "entity.name.type.constructor.norn"
-        }
-      }
     },
     "reserved": {
       "comment": "Words held for a later milestone. The lexer refuses them as names, so showing them as errors is the truth rather than a warning.",

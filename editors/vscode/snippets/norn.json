@@ -50,8 +50,8 @@
     "prefix": "matchresult",
     "body": [
       "match ${1:value} {",
-      "\t#Ok(${2:v}) => ${3:()}",
-      "\t#Err(${4:e}) => ${5:()}",
+      "\tOk(${2:v}) => ${3:()}",
+      "\tErr(${4:e}) => ${5:()}",
       "}"
     ],
     "description": "A match over Result"
@@ -73,7 +73,7 @@
       "    uses { ${1:clock} }",
       "{",
       "\t$0",
-      "\t#Ok(())",
+      "\tOk(())",
       "}"
     ],
     "description": "A task `main` returning a Result"
