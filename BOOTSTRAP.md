@@ -111,6 +111,15 @@ Alternatives considered:
   `uses { … }` applies to a reactor as well as to a task: it is the authority the reactor's effects
   need, and the spawner's set must cover it.
 
+  A signal is also *callable* from anywhere inside its own reactor: `is_full(count + 1, limit)`
+  applies the lifted body to arguments written at the call site. Naming a signal reuses its value,
+  calling one reuses its definition, and only the second is legal in an `on` handler — a call has no
+  temporal semantics to get wrong, because it says which values it is a function of. Its parameters
+  are the signal's dependencies in `deps` order, so the callee is ordered before the caller and a
+  self-call is the ordinary cycle error. A `state` initialiser may not call one: it runs before the
+  first turn. Purity on this path is carried by `check_turns`' walk over the call graph rather than
+  by the `cx: None` the propagation path calls node bodies with.
+
   `combine` is struck, subsumed by lifting: a signal expression may mention any number of nodes and
   is lifted to a function of them, so combining is what an ordinary expression already does. `hold`,
   `scan`, `count`, `map`, `merge`, `delay`, and `keyed` are deferred alongside `event` nodes — they

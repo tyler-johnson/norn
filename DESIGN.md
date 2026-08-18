@@ -182,6 +182,23 @@ signal can_edit  = session.role.allows(Edit) && document.is_open
 
 **Mentioning a node in a signal expression reads its current value, and the whole expression is lifted to a function of the nodes it mentions.** `full_name` above depends on `user` because it names it; `greeting` depends on `full_name` for the same reason; nothing declares a subscription. That rule is what lets ordinary expressions — arithmetic, `match`, `if`, constructors, calls to pure functions — serve as the reactive vocabulary, rather than an operator for each shape.
 
+Because a signal *is* that lifted function, it can also be applied directly: **naming a signal reuses its value; calling it reuses its definition.**
+
+```
+// Illustrative syntax
+signal is_full = count >= limit
+
+on added(n) {
+    if is_full(count + n, limit) { rejected = rejected + 1 } else { count = count + n }
+}
+```
+
+A handler may not *read* a signal. It runs before propagation, so the value it would see is last turn's — and the alternatives are worse than late, they are incoherent: recomputing on demand mid-handler, or propagating after each assignment, both hand the handler a half-committed state and reproduce exactly the glitch above. The retained value is at least the fixed point of a state that genuinely existed.
+
+Calling sidesteps the question rather than answering it. `is_full(count + n, limit)` has no temporal semantics at all; it is a pure function applied to arguments written at the call site, and `count + n` is a value no node holds — which is the point, since a guard deciding whether to commit is asking about the state it is about to produce. The ambiguity in a read was never staleness as such: it was a *name* eliding its arguments. Spelling them removes it.
+
+The rule is scoped to what it can mean. Only a signal is callable, because only a signal has a body; the call is legal anywhere inside its own reactor but has no spelling outside one, since a handle exposes only inputs and exports; and a `state` initialiser may not call one, because it runs before any turn has given the nodes it derives from a value.
+
 If one input replaces `user`, no observer sees a new first name with an old last name. If one input changes both `session` and `document`, `can_edit` is published only after both changes have propagated.
 
 ### State and feedback

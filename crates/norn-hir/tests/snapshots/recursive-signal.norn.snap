@@ -1,0 +1,7 @@
+error: instantaneous causality cycle loops → loops
+  --> recursive-signal.norn:13:5
+   |
+13 |     signal loops = loops(count) + 1
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `loops` depends on `loops`
+   = note: a signal is its expression, so a cycle among signals has no value to settle on
+   = note: break it with a `state` cell: state is the temporal boundary a feedback loop has to cross

@@ -1,0 +1,195 @@
+=== nir ===
+record Report #0 (count, rejected, full, warn)
+enum Option #0 (None/0, Some/1)
+enum Result #1 (Ok/1, Err/1)
+enum IoError #2 (NotFound/0, Denied/0, InUse/0, Refused/0, Closed/0, Other/1)
+
+reactor Gate #0
+    node 0 limit param slot 0 arg 0 <- []
+    node 1 count state slot 1 init Gate.count.init#2 <- []
+    node 2 rejected state slot 2 init Gate.rejected.init#3 <- []
+    node 3 is_full signal Gate.is_full#4 <- [count, limit]
+    node 4 headroom signal Gate.headroom#5 <- [limit, count]
+    node 5 warn signal Gate.warn#6 <- [count, limit, headroom, is_full]
+    node 6 report signal Gate.report#7 export <- [count, rejected, is_full, warn]
+    order [limit, count, rejected, is_full, headroom, warn, report]
+    input 0 added capacity 8 overflow reject handler Gate.on.added#1
+        plan [count, rejected, is_full, headroom, warn, report]
+    exports [report]
+
+task fn main #0()
+    local _0/gate
+    local _1
+    local _2
+    local _3
+    local _4
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+    local _10
+    local _11
+    local _12
+    local _13
+    local _14
+    local _15
+    local _16
+    local _17
+    local _18
+    local _19
+  b0:
+    scope enter
+    _2 = spawn reactor Gate#0(4)
+    _0/gate = _2
+    _3 = input 0 of _0/gate
+    _4 = task builtin send(_3, 1)
+    await _4 -> _5, resume b1
+  b1:
+    _6 = input 0 of _0/gate
+    _7 = task builtin send(_6, 2)
+    await _7 -> _8, resume b2
+  b2:
+    _9 = input 0 of _0/gate
+    _10 = task builtin send(_9, 3)
+    await _10 -> _11, resume b3
+  b3:
+    _12 = input 0 of _0/gate
+    _13 = task builtin send(_12, 1)
+    await _13 -> _14, resume b4
+  b4:
+    _15 = task builtin sleep(10)
+    await _15 -> _16, resume b5
+  b5:
+    _17 = export 0 of _0/gate
+    _18 = builtin latest(_17)
+    _19 = builtin print(_18)
+    _1 = _19
+    scope exit, resume b6
+  b6:
+    return _1
+
+fn Gate.on.added #1(_0/n, _1/limit, _2/count, _3/rejected)
+    local _4
+    local _5
+    local _6
+    local _7
+    local _8
+  b0:
+    _5 = _2/count add.i _0/n
+    _6 = call Gate.is_full#4(_5, _1/limit)
+    branch _6 ? b1 : b2
+  b1:
+    _7 = _3/rejected add.i 1
+    _3/rejected = _7
+    set slot 2 = _3/rejected
+    _4 = ()
+    goto b3
+  b2:
+    _8 = _2/count add.i _0/n
+    _2/count = _8
+    set slot 1 = _2/count
+    _4 = ()
+    goto b3
+  b3:
+    return _4
+
+fn Gate.count.init #2()
+  b0:
+    return 0
+
+fn Gate.rejected.init #3()
+  b0:
+    return 0
+
+fn Gate.is_full #4(_0/count, _1/limit)
+    local _2
+  b0:
+    _2 = _0/count ge _1/limit
+    return _2
+
+fn Gate.headroom #5(_0/limit, _1/count)
+    local _2
+  b0:
+    _2 = _0/limit sub.i _1/count
+    return _2
+
+fn Gate.warn #6(_0/count, _1/limit, _2/headroom, _3/is_full)
+    local _4
+    local _5
+    local _6
+  b0:
+    _5 = call Gate.is_full#4(_0/count, _1/limit)
+    _4 = _5
+    branch _4 ? b2 : b1
+  b1:
+    _6 = _2/headroom lt 2
+    _4 = _6
+    goto b2
+  b2:
+    return _4
+
+fn Gate.report #7(_0/count, _1/rejected, _2/is_full, _3/warn)
+    local _4
+  b0:
+    _4 = #Report(_0/count, _1/rejected, _2/is_full, _3/warn)
+    return _4
+
+=== graph ===
+reactor Gate #0
+    node 0 limit param slot 0 arg 0 <- []
+    node 1 count state slot 1 init Gate.count.init#2 <- []
+    node 2 rejected state slot 2 init Gate.rejected.init#3 <- []
+    node 3 is_full signal Gate.is_full#4 <- [count, limit]
+    node 4 headroom signal Gate.headroom#5 <- [limit, count]
+    node 5 warn signal Gate.warn#6 <- [count, limit, headroom, is_full]
+    node 6 report signal Gate.report#7 export <- [count, rejected, is_full, warn]
+    order [limit, count, rejected, is_full, headroom, warn, report]
+    input 0 added capacity 8 overflow reject handler Gate.on.added#1
+        plan [count, rejected, is_full, headroom, warn, report]
+    exports [report]
+
+=== output ===
+#Report(count: 3, rejected: 2, full: false, warn: true)
+=== result ===
+()
+=== trace ===
+0ms t0 spawn main root
+0ms t0 resume
+0ms t0 scope enter 1
+0ms R0 create Gate in t0
+0ms R0 publish 0
+0ms t0 park timer 10ms
+0ms R0 turn 0 added
+0ms R0 commit count
+0ms R0 recompute is_full
+0ms R0 recompute headroom
+0ms R0 recompute warn
+0ms R0 recompute report
+0ms R0 publish 1
+0ms R0 turn 1 added
+0ms R0 commit count
+0ms R0 recompute is_full
+0ms R0 recompute headroom
+0ms R0 recompute warn
+0ms R0 recompute report
+0ms R0 publish 2
+0ms R0 turn 2 added
+0ms R0 commit rejected
+0ms R0 recompute is_full
+0ms R0 recompute headroom
+0ms R0 recompute warn
+0ms R0 recompute report
+0ms R0 publish 3
+0ms R0 turn 3 added
+0ms R0 commit rejected
+0ms R0 recompute is_full
+0ms R0 recompute headroom
+0ms R0 recompute warn
+0ms R0 recompute report
+0ms R0 publish 4
+10ms -- clock
+10ms t0 resume
+10ms R0 stop
+10ms t0 scope exit 1
+10ms t0 done

@@ -1,0 +1,6 @@
+error: a `state` initialiser cannot call the signal `is_full`
+  --> init-calls-signal.norn:12:26
+   |
+12 |     state seeded: Bool = is_full(0, limit)
+   |                          ^^^^^^^ initialisers run before the first turn
+   = note: read a constructor parameter instead, or derive the value with a signal

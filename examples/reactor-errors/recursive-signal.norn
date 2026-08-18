@@ -1,0 +1,20 @@
+// A signal calling itself.
+//
+// The call records a dependency edge exactly so the callee is ordered before the caller, which
+// makes this the ordinary cycle: `loops` would have to settle before it could settle. It reports as
+// `DESIGN.md` §3's flagship diagnostic rather than as a separate rule about recursion, because it
+// is the same thing — a signal is its expression, and this expression has no fixed point.
+
+reactor Gate(limit: I64) {
+    input added: () [capacity: 8, overflow: reject]
+
+    state count: I64 = 0
+
+    signal loops = loops(count) + 1
+
+    on added() {
+        count = count + 1
+    }
+
+    export signal out = loops
+}

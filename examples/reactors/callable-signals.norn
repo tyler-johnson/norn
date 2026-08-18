@@ -1,0 +1,70 @@
+// Calling a signal instead of reading one.
+//
+// A signal is two things: the node whose value the graph maintains, and the pure function that
+// derives it. Naming one reuses the value; calling one reuses the definition. `report` does the
+// first, `warn` and the handler do the second.
+//
+// The handler is why the call form has to exist. `on added` must decide *before* it commits, and
+// the value it needs to decide about — `count + n` — is one no node holds: the graph's `count` is
+// still last turn's and will not move until propagation, which happens after the handler returns.
+// A read could not answer the question at all, and reading `is_full` here is rejected precisely
+// because the answer it would give looks current and is not. `is_full(count + n, limit)` asks the
+// question the guard actually has, and says which values it is asking about.
+//
+// That is the whole trade: a name elides its arguments, so "is this current?" is a real question;
+// a call spells them, so it is not.
+
+record Report {
+    count: I64
+    rejected: I64
+    full: Bool
+    warn: Bool
+}
+
+reactor Gate(limit: I64) {
+    input added: I64 [capacity: 8, overflow: reject]
+
+    state count: I64 = 0
+    state rejected: I64 = 0
+
+    signal is_full  = count >= limit
+    signal headroom = limit - count
+
+    // A signal body calling another signal. The call records a dependency edge, so `is_full` is
+    // ordered before `warn` — but the argument is the caller's own, not the callee's node value.
+    signal warn = is_full(count, limit) || headroom < 2
+
+    on added(n) {
+        // The hypothetical: would it be full if this message were accepted? Nothing holds that
+        // value, so nothing could be read to find out.
+        if is_full(count + n, limit) {
+            rejected = rejected + 1
+        } else {
+            count = count + n
+        }
+    }
+
+    // Named, not called: this is the graph's value, published after the turn settles.
+    export signal report = #Report(
+        count: count,
+        rejected: rejected,
+        full: is_full,
+        warn: warn
+    )
+}
+
+task fn main() -> ()
+    uses { clock }
+{
+    scope {
+        let gate = spawn reactor Gate(limit: 4)
+        await send(gate.added, 1)
+        await send(gate.added, 2)
+        // Both of these are refused without ever moving `count`: 3 + 3 and then 3 + 1 each reach
+        // the limit of 4, and the guard asks about the sum rather than about the cell.
+        await send(gate.added, 3)
+        await send(gate.added, 1)
+        await sleep(10)
+        print(latest(gate.report))
+    }
+}

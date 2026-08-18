@@ -1,0 +1,33 @@
+// The four ways a member in call position goes wrong, and the one that is a read.
+//
+// Reading `is_full` in a handler stays rejected — that is the rule the call form exists to work
+// around, not to weaken — but the note now says what to write instead, built from the signal's own
+// dependencies. Only a signal has a body to call; `count` and `added` hold and carry values rather
+// than deriving them.
+
+reactor Gate(limit: I64) {
+    input added: I64 [capacity: 8, overflow: reject]
+
+    state count: I64 = 0
+
+    signal is_full = count >= limit
+
+    on added(n) {
+        if is_full {
+            count = count
+        } else {
+            count = count + n
+        }
+        if is_full(count) {
+            count = count
+        }
+        if count(1) > 0 {
+            count = count
+        }
+        if added(1) > 0 {
+            count = count
+        }
+    }
+
+    export signal out = is_full
+}

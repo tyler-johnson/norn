@@ -865,6 +865,28 @@ impl Checker {
                             None => {}
                         }
                     }
+                    // Calling a signal is calling a function of nodes that have no value yet, for
+                    // the same reason reading one is: there has been no turn.
+                    for (found, span) in &scan.calls {
+                        if Builtin::from_name(found).is_some() || self.fns.contains_key(found) {
+                            continue;
+                        }
+                        let Some(sort) = members.get(found) else {
+                            continue;
+                        };
+                        self.push(
+                            Diagnostic::new(
+                                *span,
+                                format!(
+                                    "a `state` initialiser cannot call the {} `{found}`",
+                                    sort.describe()
+                                ),
+                            )
+                            .label("initialisers run before the first turn")
+                            .note("read a constructor parameter instead, or derive the value with a signal"),
+                        );
+                        ok = false;
+                    }
                 }
                 ast::MemberKind::Signal { name, body, .. } => {
                     let Some(node) = self.node_index(id, &name.name) else {
@@ -883,6 +905,19 @@ impl Checker {
                                 push_once(&mut deps[node], dep);
                             }
                             None => {}
+                        }
+                    }
+                    // Calling a signal names its *definition* rather than its value, so it is not a
+                    // read — but the callee's body has to be typed before this one, and an edge is
+                    // what says so. The edge is redundant at runtime rather than wrong: whatever
+                    // moved the callee's value moved one of the arguments passed to it too.
+                    for (found, _) in &scan.calls {
+                        if Builtin::from_name(found).is_some() || self.fns.contains_key(found) {
+                            continue;
+                        }
+                        if let Some(Sort::Signal) = members.get(found) {
+                            let dep = self.node_index(id, found).expect("a member with a sort");
+                            push_once(&mut deps[node], dep);
                         }
                     }
                 }
@@ -2085,6 +2120,25 @@ impl Checker {
         expr
     }
 
+    /// `is_full(count, limit)` — the call to write where a read of a signal was attempted. Naming
+    /// the dependencies is the whole point: a call says which values it is a function of, and that
+    /// is the question a read leaves open.
+    fn signal_call_hint(&self, name: &str) -> String {
+        let Some(id) = self.reactor else {
+            return format!("{name}()");
+        };
+        let Some(node) = self.node_index(id, name) else {
+            return format!("{name}()");
+        };
+        let reactor = &self.program.reactors[id.index()];
+        let deps: Vec<&str> = reactor.nodes[node]
+            .deps
+            .iter()
+            .map(|dep| reactor.nodes[dep.index()].name.as_str())
+            .collect();
+        format!("{name}({})", deps.join(", "))
+    }
+
     /// A reactor member that exists but is not in scope where it was written.
     fn unreadable_member(&mut self, name: &str, sort: Sort, span: Span) {
         if sort == Sort::Signal && self.assigning {
@@ -2104,13 +2158,16 @@ impl Checker {
             // propagation, so a signal read there would quietly mean last turn's value — and a
             // language whose central claim is glitch freedom should not have a way to read a
             // stale value that looks exactly like reading a fresh one.
-            Sort::Signal => Diagnostic::new(
-                span,
-                format!("an `on` handler cannot read the signal `{name}`"),
-            )
-            .label("signals are recomputed after the handler runs")
-            .note("reading it here would mean the previous turn's value, which is never what was meant")
-            .note("compute the condition from state, or move the decision into a signal of its own"),
+            Sort::Signal => {
+                let call = self.signal_call_hint(name);
+                Diagnostic::new(
+                    span,
+                    format!("an `on` handler cannot read the signal `{name}`"),
+                )
+                .label("signals are recomputed after the handler runs")
+                .note("reading it here would mean the previous turn's value, which is never what was meant")
+                .note(format!("call it with the values you mean: `{call}`"))
+            }
             Sort::Input => Diagnostic::new(span, format!("`{name}` is an input, not a value"))
                 .label("an input is a mailbox")
                 .note("respond to it with `on {name}(…) {{ … }}`; a node body cannot read one"),
@@ -2433,12 +2490,7 @@ impl Checker {
         }
 
         let Some(&id) = self.fns.get(name) else {
-            self.error(path.span, format!("unknown function `{name}`"));
-            return Expr {
-                kind: ExprKind::Error,
-                ty: Ty::Error,
-                span,
-            };
+            return self.check_member_call(name, path.span, args, span);
         };
         let (params, ret) = self.signatures[id.index()].clone();
         let param_names: Vec<String> = params.iter().map(|(n, _)| n.clone()).collect();
@@ -2471,6 +2523,89 @@ impl Checker {
                 args: checked,
             },
             ty,
+            span,
+        }
+    }
+
+    /// A reactor member named in call position.
+    ///
+    /// A signal is two things: a node whose value the graph maintains, and the pure function that
+    /// derives it. Naming one reuses the value; calling one reuses the definition. A call carries no
+    /// temporal semantics at all — it is that function applied to the arguments written here — which
+    /// is why it is legal in a handler where reading the node is not. What made a read ambiguous was
+    /// the name eliding its arguments; a call spells them, so "which values is this?" is answered at
+    /// the call site rather than by a rule about when the turn recomputes.
+    ///
+    /// One consequence worth naming: a body reached this way runs on the caller's frame, with the
+    /// caller's `cx`, rather than with the `cx: None` the propagation path calls node bodies with.
+    /// Purity is still enforced — statically by `verify_pure`, transitively by `check_turns` — but
+    /// on this path it is a checked property rather than a structurally impossible one.
+    fn check_member_call(
+        &mut self,
+        name: &str,
+        name_span: Span,
+        args: &[ast::Arg],
+        span: Span,
+    ) -> Expr {
+        let (Some(sort), Some(id)) = (self.members.get(name).copied(), self.reactor) else {
+            self.error(name_span, format!("unknown function `{name}`"));
+            return self.error_expr(span);
+        };
+        if sort != Sort::Signal {
+            let diagnostic = match sort {
+                Sort::State => Diagnostic::new(
+                    name_span,
+                    format!("`{name}` is a state cell, not a function"),
+                )
+                .label("state holds a value; it does not derive one")
+                .note("only a signal has a body to call"),
+                Sort::Param => Diagnostic::new(
+                    name_span,
+                    format!("`{name}` is a reactor parameter, not a function"),
+                )
+                .label("a parameter holds a value; it does not derive one")
+                .note("only a signal has a body to call"),
+                Sort::Input => {
+                    Diagnostic::new(name_span, format!("`{name}` is an input, not a function"))
+                        .label("an input is a mailbox")
+                        .note(format!("respond to it with `on {name}(…) {{ … }}`"))
+                }
+                Sort::Signal => unreachable!("handled above"),
+            };
+            self.push(diagnostic);
+            return self.error_expr(span);
+        }
+
+        let node = self.node_index(id, name).expect("a member with a sort");
+        let NodeKind::Signal { body } = self.program.reactors[id.index()].nodes[node].kind else {
+            unreachable!("`Sort::Signal` is a signal node")
+        };
+        // Parameters are the signal's dependencies, in the order its lifted body takes them, which
+        // is the contract `hir::Node::deps` states and the propagation path already relies on.
+        let deps = self.program.reactors[id.index()].nodes[node].deps.clone();
+        let ret = self.program.reactors[id.index()].nodes[node].ty.clone();
+        let mut param_names = Vec::with_capacity(deps.len());
+        let mut param_tys = Vec::with_capacity(deps.len());
+        for dep in &deps {
+            let dep_node = &self.program.reactors[id.index()].nodes[dep.index()];
+            param_names.push(dep_node.name.clone());
+            param_tys.push(dep_node.ty.clone());
+        }
+
+        let Some(order) = self.argument_order(&param_names, args, name, "parameter", span) else {
+            return self.error_expr(span);
+        };
+        let mut checked = Vec::with_capacity(param_tys.len());
+        for (index, ty) in param_tys.iter().enumerate() {
+            let arg = &args[order[index]];
+            checked.push(self.check_expr(&arg.value, Some(ty)));
+        }
+        Expr {
+            kind: ExprKind::Call {
+                callee: body,
+                args: checked,
+            },
+            ty: ret,
             span,
         }
     }
@@ -3811,6 +3946,10 @@ struct Scan<'a> {
     bound: Vec<Vec<String>>,
     reads: Vec<(String, Span)>,
     writes: Vec<(String, Span)>,
+    /// Member names in *call* position. Separate from `reads` because whether one is a dependency
+    /// depends on what the name resolves to, and a scan does not resolve — a built-in or a
+    /// top-level `fn` of the same name wins, and only the checker knows those.
+    calls: Vec<(String, Span)>,
 }
 
 impl<'a> Scan<'a> {
@@ -3820,6 +3959,7 @@ impl<'a> Scan<'a> {
             bound: vec![Vec::new()],
             reads: Vec::new(),
             writes: Vec::new(),
+            calls: Vec::new(),
         }
     }
 
@@ -3845,6 +3985,15 @@ impl<'a> Scan<'a> {
         }
     }
 
+    fn call(&mut self, name: &str, span: Span) {
+        if self.is_bound(name) || !self.members.contains_key(name) {
+            return;
+        }
+        if !self.calls.iter().any(|(seen, _)| seen == name) {
+            self.calls.push((name.to_string(), span));
+        }
+    }
+
     fn expr(&mut self, expr: &ast::Expr) {
         match &expr.kind {
             ast::ExprKind::Path(path) => {
@@ -3853,10 +4002,17 @@ impl<'a> Scan<'a> {
             }
             ast::ExprKind::Field { base, .. } => self.expr(base),
             ast::ExprKind::Call { callee, args, .. } => {
-                // The callee of a call is a function name, never a member. Scanning it would make
-                // a member named like a function into a dependency of everything that calls it.
-                if !matches!(callee.kind, ast::ExprKind::Path(_)) {
-                    self.expr(callee);
+                // A path callee is never a *read*: scanning it would make a member named like a
+                // function into a dependency of everything that calls it. It is recorded as a call
+                // instead, because calling a signal does create an edge — the callee's body has to
+                // be typed before the caller's — and only the checker can tell the two apart.
+                match &callee.kind {
+                    ast::ExprKind::Path(path) if path.segments.len() == 1 => {
+                        let head = &path.segments[0];
+                        self.call(&head.name, head.span);
+                    }
+                    ast::ExprKind::Path(_) => {}
+                    _ => self.expr(callee),
                 }
                 for arg in args {
                     self.expr(&arg.value);

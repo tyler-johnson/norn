@@ -1,0 +1,27 @@
+error: an `on` handler cannot read the signal `is_full`
+  --> signal-calls.norn:16:12
+   |
+16 |         if is_full {
+   |            ^^^^^^^ signals are recomputed after the handler runs
+   = note: reading it here would mean the previous turn's value, which is never what was meant
+   = note: call it with the values you mean: `is_full(count, limit)`
+
+error: `is_full` takes 2 parameters, found 1
+  --> signal-calls.norn:21:12
+   |
+21 |         if is_full(count) {
+   |            ^^^^^^^^^^^^^^
+
+error: `count` is a state cell, not a function
+  --> signal-calls.norn:24:12
+   |
+24 |         if count(1) > 0 {
+   |            ^^^^^ state holds a value; it does not derive one
+   = note: only a signal has a body to call
+
+error: `added` is an input, not a function
+  --> signal-calls.norn:27:12
+   |
+27 |         if added(1) > 0 {
+   |            ^^^^^ an input is a mailbox
+   = note: respond to it with `on added(…) { … }`

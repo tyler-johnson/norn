@@ -1,0 +1,21 @@
+// A `state` initialiser calling a signal.
+//
+// Rejected for the same reason reading one is: an initialiser runs in `create`, before any turn,
+// so the nodes a signal's body is a function of have no values yet. The arguments here happen to
+// be a literal and a constructor parameter, but the rule is about *when* this runs, not about what
+// it was passed.
+
+reactor Gate(limit: I64) {
+    input added: () [capacity: 8, overflow: reject]
+
+    state count: I64 = 0
+    state seeded: Bool = is_full(0, limit)
+
+    signal is_full = count >= limit
+
+    on added() {
+        count = count + 1
+    }
+
+    export signal out = seeded
+}
