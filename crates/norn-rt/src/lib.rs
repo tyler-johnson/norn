@@ -15,6 +15,7 @@ use std::io;
 
 pub mod clock;
 pub mod graph;
+pub mod http;
 pub mod poll;
 pub mod scope;
 pub mod task;
