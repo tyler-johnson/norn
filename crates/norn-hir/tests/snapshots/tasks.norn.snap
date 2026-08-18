@@ -32,7 +32,7 @@ error: unknown capability `net.write`
    |
 46 |     uses { net.write }
    |            ^^^^^^^^^ not a capability v0 knows
-   = note: the vocabulary is fixed: clock, net.listen, net.io
+   = note: the vocabulary is fixed: clock, net.listen, net.io, fs.read, fs.write
 
 error: `await` is only available inside a `task fn`
   --> tasks.norn:53:5

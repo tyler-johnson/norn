@@ -341,6 +341,16 @@ impl Checker {
             "Connection".into(),
             TypeName::Builtin(Ty::Resource(Resource::Connection)),
         );
+        self.types.insert(
+            "File".into(),
+            TypeName::Builtin(Ty::Resource(Resource::File)),
+        );
+        // `Flow` is registered so that redeclaring it is an error, but `resolve_ty` intercepts the
+        // name before this entry is consulted: the only writable spelling is `Flow<Bytes>`.
+        self.types.insert(
+            "Flow".into(),
+            TypeName::Builtin(Ty::Resource(Resource::Flow)),
+        );
         self.types
             .insert("IoError".into(), TypeName::Enum(EnumId::IO_ERROR));
         // `Option` and `Result` have their own `Ty` spellings and `resolve_ty` checks those
@@ -1771,6 +1781,23 @@ impl Checker {
                     // it is also why there is no escape check to write: a signal cannot appear in
                     // a field, a parameter, a return type, or a payload, because there is nowhere
                     // to write it down.
+                    // A flow is generic in spelling only: `Bytes` is the one element type v0 has,
+                    // so the argument is checked here rather than becoming a type parameter.
+                    "Flow" => {
+                        if args.len() == 1 {
+                            match self.resolve_ty(&args[0]) {
+                                Ty::Bytes => return Ty::Resource(Resource::Flow),
+                                // Already reported; a second diagnostic would be noise.
+                                Ty::Error => return Ty::Error,
+                                _ => {}
+                            }
+                        }
+                        self.push(
+                            Diagnostic::new(ty.span, "the only flow in v0 is `Flow<Bytes>`")
+                                .note("flows of other element types arrive with typed layout; see BOOTSTRAP.md §8"),
+                        );
+                        return Ty::Error;
+                    }
                     "Signal" | "Event" => {
                         self.push(
                             Diagnostic::new(

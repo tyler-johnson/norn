@@ -1,0 +1,13 @@
+=== output ===
+10000
+=== trace ===
+0ms t0 spawn main root
+0ms t0 resume
+0ms t0 open r0 flow
+0ms t0 open r1 file
+0ms t0 pipe r0 -> r1 4096
+0ms t0 pipe r0 -> r1 4096
+0ms t0 pipe r0 -> r1 1808
+0ms t0 close r0
+0ms t0 close r1
+0ms t0 done

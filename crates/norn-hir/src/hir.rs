@@ -67,6 +67,12 @@ pub mod io_error {
 pub enum Resource {
     Listener,
     Connection,
+    /// A write-only sink on the filesystem, from `file_create`.
+    File,
+    /// A finite stream of bytes with demand-driven transfer. Its type is spelled `Flow<Bytes>` —
+    /// the only element type in v0 — and the only things that consume one are `pipe_to` and
+    /// `http_respond_flow`.
+    Flow,
 }
 
 impl Resource {
@@ -74,6 +80,8 @@ impl Resource {
         match self {
             Resource::Listener => "Listener",
             Resource::Connection => "Connection",
+            Resource::File => "File",
+            Resource::Flow => "Flow<Bytes>",
         }
     }
 }
@@ -86,17 +94,26 @@ pub enum Capability {
     Clock,
     NetListen,
     NetIo,
+    FsRead,
+    FsWrite,
 }
 
 impl Capability {
-    pub const ALL: &'static [Capability] =
-        &[Capability::Clock, Capability::NetListen, Capability::NetIo];
+    pub const ALL: &'static [Capability] = &[
+        Capability::Clock,
+        Capability::NetListen,
+        Capability::NetIo,
+        Capability::FsRead,
+        Capability::FsWrite,
+    ];
 
     pub fn from_name(name: &str) -> Option<Capability> {
         match name {
             "clock" => Some(Capability::Clock),
             "net.listen" => Some(Capability::NetListen),
             "net.io" => Some(Capability::NetIo),
+            "fs.read" => Some(Capability::FsRead),
+            "fs.write" => Some(Capability::FsWrite),
             _ => None,
         }
     }
@@ -106,6 +123,8 @@ impl Capability {
             Capability::Clock => "clock",
             Capability::NetListen => "net.listen",
             Capability::NetIo => "net.io",
+            Capability::FsRead => "fs.read",
+            Capability::FsWrite => "fs.write",
         }
     }
 }
@@ -664,6 +683,9 @@ pub enum Builtin {
     BytesLen,
     BytesSlice,
     BytesText,
+    FileCreate,
+    FlowOfFile,
+    PipeTo,
 }
 
 impl Builtin {
@@ -685,6 +707,9 @@ impl Builtin {
         Builtin::BytesLen,
         Builtin::BytesSlice,
         Builtin::BytesText,
+        Builtin::FileCreate,
+        Builtin::FlowOfFile,
+        Builtin::PipeTo,
     ];
 
     pub fn from_name(name: &str) -> Option<Builtin> {
@@ -703,6 +728,9 @@ impl Builtin {
             "bytes_len" => Some(Builtin::BytesLen),
             "bytes_slice" => Some(Builtin::BytesSlice),
             "bytes_text" => Some(Builtin::BytesText),
+            "file_create" => Some(Builtin::FileCreate),
+            "flow_of_file" => Some(Builtin::FlowOfFile),
+            "pipe_to" => Some(Builtin::PipeTo),
             _ => None,
         }
     }
@@ -723,6 +751,9 @@ impl Builtin {
             Builtin::BytesLen => "bytes_len",
             Builtin::BytesSlice => "bytes_slice",
             Builtin::BytesText => "bytes_text",
+            Builtin::FileCreate => "file_create",
+            Builtin::FlowOfFile => "flow_of_file",
+            Builtin::PipeTo => "pipe_to",
         }
     }
 
@@ -747,7 +778,10 @@ impl Builtin {
             | Builtin::TcpWrite
             | Builtin::TcpClose
             | Builtin::Send
-            | Builtin::Latest => false,
+            | Builtin::Latest
+            | Builtin::FileCreate
+            | Builtin::FlowOfFile
+            | Builtin::PipeTo => false,
         }
     }
 
@@ -765,7 +799,10 @@ impl Builtin {
             | Builtin::Bytes
             | Builtin::BytesLen
             | Builtin::BytesSlice
-            | Builtin::BytesText => &[],
+            | Builtin::BytesText
+            | Builtin::PipeTo => &[],
+            Builtin::FileCreate => &[Capability::FsWrite],
+            Builtin::FlowOfFile => &[Capability::FsRead],
             Builtin::Sleep => &[Capability::Clock],
             Builtin::TcpListen => &[Capability::NetListen],
             Builtin::TcpAccept | Builtin::TcpRead | Builtin::TcpWrite | Builtin::TcpClose => {
@@ -784,6 +821,8 @@ impl Builtin {
     pub fn signature(self) -> (Vec<Ty>, Ty) {
         let listener = || Ty::Resource(Resource::Listener);
         let connection = || Ty::Resource(Resource::Connection);
+        let file = || Ty::Resource(Resource::File);
+        let flow = || Ty::Resource(Resource::Flow);
         let borrowed = |ty: Ty| Ty::Ref(Box::new(ty));
         let io_error = || Ty::Enum(EnumId::IO_ERROR);
         let task = |ty: Ty| Ty::Task(Box::new(ty));
@@ -806,6 +845,9 @@ impl Builtin {
             Builtin::BytesLen => (vec![Ty::Bytes], Ty::I64),
             Builtin::BytesSlice => (vec![Ty::Bytes, Ty::I64, Ty::I64], Ty::Bytes),
             Builtin::BytesText => (vec![Ty::Bytes], Ty::Option(Box::new(Ty::Str))),
+            Builtin::FileCreate => (vec![Ty::Str], task(fallible(file()))),
+            Builtin::FlowOfFile => (vec![Ty::Str], task(fallible(flow()))),
+            Builtin::PipeTo => (vec![flow(), file()], task(fallible(Ty::I64))),
         }
     }
 }

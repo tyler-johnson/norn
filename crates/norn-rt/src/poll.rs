@@ -82,6 +82,35 @@ enum Backing {
         /// progress has to be remembered somewhere that outlives the attempt.
         written: usize,
     },
+    /// A write-only sink on the filesystem. A regular file is always ready under `poll(2)`, so a
+    /// write here blocks the loop for as long as one chunk takes — at most 4 KiB, which is the
+    /// accepted v0 behaviour rather than a thread pool nothing else needs yet.
+    File(std::fs::File),
+    Flow(FlowEntry),
+}
+
+/// A flow in flight. Every v0 flow knows its length up front — a file's size, a request body's
+/// `Content-Length` — which is why `remaining` can be a number and a close-delimited transfer has
+/// no representation here.
+///
+/// All transfer progress lives in this entry rather than in the task that drives it, because the
+/// interpreter's re-ask protocol resumes a suspension point by asking again from the top: a parked
+/// `pipe_to` must find the half-flushed chunk where it left it.
+struct FlowEntry {
+    source: FlowSource,
+    /// Bytes the source still owes, beyond what is buffered.
+    remaining: u64,
+    /// The chunk currently in transit — at most one, which is the demand claim: nothing is read
+    /// from the source until the sink has taken what was already read.
+    buffered: Vec<u8>,
+    /// How much of `buffered` the sink has already accepted.
+    buffered_written: usize,
+    /// Bytes fully delivered, which is what `pipe_to` resolves to.
+    transferred: u64,
+}
+
+enum FlowSource {
+    File(std::fs::File),
 }
 
 struct Entry {
@@ -95,6 +124,10 @@ impl Backing {
         match self {
             Backing::Listener(listener) => Some(listener.as_raw_fd()),
             Backing::Connection { stream, .. } => Some(stream.as_raw_fd()),
+            Backing::File(file) => Some(file.as_raw_fd()),
+            Backing::Flow(flow) => match &flow.source {
+                FlowSource::File(file) => Some(file.as_raw_fd()),
+            },
         }
     }
 }
@@ -103,6 +136,18 @@ struct Interest {
     task: TaskId,
     fd: RawFd,
     write: bool,
+}
+
+/// One observable step of a flow-to-sink transfer, as `pipe_step` reports it.
+pub enum PipeProgress {
+    /// One chunk was fully delivered: this many bytes.
+    Chunk(usize),
+    /// Everything the flow promised has been delivered: the total.
+    Done(u64),
+    /// The sink cannot take more right now; park writing on this resource.
+    ParkWrite(ResourceId),
+    /// The source has nothing to give right now; park reading on this resource.
+    ParkRead(ResourceId),
 }
 
 /// The resource table and the readiness registry. Slots are never reused, so a stale handle names
@@ -157,6 +202,7 @@ impl Readiness {
         match &self.entry(id)?.backing {
             Backing::Listener(listener) => Ok(listener.local_addr()?.port()),
             Backing::Connection { stream, .. } => Ok(stream.local_addr()?.port()),
+            _ => Err(io::Error::from(io::ErrorKind::InvalidInput)),
         }
     }
 
@@ -221,6 +267,118 @@ impl Readiness {
                     return Err(err);
                 }
             }
+        }
+    }
+
+    // ---------------------------------------------------------------- files and flows
+
+    /// Create (or truncate) a file as a write-only sink.
+    pub fn file_create(&mut self, path: &str) -> io::Result<ResourceId> {
+        let file = std::fs::File::create(path)?;
+        Ok(self.push(ResourceKind::File, Backing::File(file)))
+    }
+
+    /// Open a file and wrap it as a flow. The length is read once, here: a file that shrinks
+    /// under the transfer surfaces as `UnexpectedEof` rather than a short flow that looks whole.
+    pub fn flow_of_file(&mut self, path: &str) -> io::Result<ResourceId> {
+        let file = std::fs::File::open(path)?;
+        let remaining = file.metadata()?.len();
+        Ok(self.push(
+            ResourceKind::Flow,
+            Backing::Flow(FlowEntry {
+                source: FlowSource::File(file),
+                remaining,
+                buffered: Vec::new(),
+                buffered_written: 0,
+                transferred: 0,
+            }),
+        ))
+    }
+
+    /// Drive one flow-to-sink transfer forward by one observable step. The caller loops on
+    /// `Chunk` — emitting a trace line per delivered chunk is its business — and parks on the
+    /// `Park` variants, re-asking from the top when woken; every intermediate state lives in the
+    /// `FlowEntry`, so re-asking is safe.
+    pub fn pipe_step(&mut self, flow: ResourceId, sink: ResourceId) -> io::Result<PipeProgress> {
+        // The flow entry comes out of its slot so that the sink can be reached mutably beside it.
+        // Nothing in between can close either — this is one synchronous step of one task.
+        let slot = self
+            .entries
+            .get_mut(flow.index())
+            .and_then(Option::take)
+            .ok_or_else(|| io::Error::from(io::ErrorKind::NotConnected))?;
+        let Backing::Flow(mut state) = slot.backing else {
+            self.entries[flow.index()] = Some(slot);
+            return Err(io::Error::from(io::ErrorKind::InvalidInput));
+        };
+        let outcome = self.flow_progress(&mut state, sink);
+        self.entries[flow.index()] = Some(Entry {
+            kind: slot.kind,
+            backing: Backing::Flow(state),
+        });
+        outcome
+    }
+
+    fn flow_progress(
+        &mut self,
+        state: &mut FlowEntry,
+        sink: ResourceId,
+    ) -> io::Result<PipeProgress> {
+        loop {
+            // Flush the chunk in transit before touching the source: at most one chunk is ever
+            // buffered, which is what makes the transfer demand-driven.
+            while state.buffered_written < state.buffered.len() {
+                match self.sink_write(sink, &state.buffered[state.buffered_written..])? {
+                    Some(0) => return Err(io::Error::from(io::ErrorKind::WriteZero)),
+                    Some(wrote) => state.buffered_written += wrote,
+                    None => return Ok(PipeProgress::ParkWrite(sink)),
+                }
+            }
+            if !state.buffered.is_empty() {
+                let bytes = state.buffered.len();
+                state.transferred += bytes as u64;
+                state.buffered.clear();
+                state.buffered_written = 0;
+                return Ok(PipeProgress::Chunk(bytes));
+            }
+            if state.remaining == 0 {
+                return Ok(PipeProgress::Done(state.transferred));
+            }
+            let want = state.remaining.min(4096) as usize;
+            match &mut state.source {
+                FlowSource::File(file) => {
+                    let mut chunk = vec![0u8; want];
+                    let read = loop {
+                        match file.read(&mut chunk) {
+                            Ok(read) => break read,
+                            Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
+                            Err(err) => return Err(err),
+                        }
+                    };
+                    if read == 0 {
+                        // The file shrank under the transfer: the promised length cannot arrive.
+                        return Err(io::Error::from(io::ErrorKind::UnexpectedEof));
+                    }
+                    chunk.truncate(read);
+                    state.remaining -= read as u64;
+                    state.buffered = chunk;
+                    state.buffered_written = 0;
+                }
+            }
+        }
+    }
+
+    /// Push bytes at whatever kind of sink this is. `Ok(None)` means it would block.
+    fn sink_write(&mut self, sink: ResourceId, data: &[u8]) -> io::Result<Option<usize>> {
+        match &mut self.entry(sink)?.backing {
+            Backing::File(file) => loop {
+                match file.write(data) {
+                    Ok(wrote) => return Ok(Some(wrote)),
+                    Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
+                    Err(err) => return Err(err),
+                }
+            },
+            _ => Err(io::Error::from(io::ErrorKind::InvalidInput)),
         }
     }
 

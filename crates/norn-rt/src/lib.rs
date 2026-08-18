@@ -22,7 +22,7 @@ pub mod timer;
 pub mod trace;
 
 use crate::graph::{ReactorSpec, ReactorState};
-use crate::poll::Readiness;
+use crate::poll::{PipeProgress, Readiness};
 use crate::task::{TaskState, Wait};
 use crate::timer::Timers;
 use crate::trace::{Event, Trace, WaitReason};
@@ -436,6 +436,55 @@ impl<'e, V: Clone> Cx<'_, 'e, V> {
             Err(err) => {
                 self.finish_wait();
                 Poll::Ready(Err(err))
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- files and flows
+
+    pub fn file_create(&mut self, path: &str) -> io::Result<ResourceId> {
+        let id = self.core.readiness.file_create(path)?;
+        self.take_ownership(id);
+        Ok(id)
+    }
+
+    pub fn flow_of_file(&mut self, path: &str) -> io::Result<ResourceId> {
+        let id = self.core.readiness.flow_of_file(path)?;
+        self.take_ownership(id);
+        Ok(id)
+    }
+
+    /// Drive `flow` into `sink` until everything the flow promised has arrived. One trace line per
+    /// delivered chunk; all transfer state lives in the flow's table entry, so a parked transfer
+    /// resumes by asking again. Completion — and failure — consumes both ends: the language moved
+    /// them into this call, so nothing can legally touch either again, and the close happens here
+    /// rather than at whenever the owning scope ends.
+    pub fn pipe(&mut self, flow: ResourceId, sink: ResourceId) -> Poll<io::Result<i64>> {
+        loop {
+            match self.core.readiness.pipe_step(flow, sink) {
+                Ok(PipeProgress::Chunk(bytes)) => {
+                    let task = self.task;
+                    self.core.emit(Event::Pipe {
+                        task,
+                        source: flow,
+                        sink,
+                        bytes,
+                    });
+                }
+                Ok(PipeProgress::Done(total)) => {
+                    self.finish_wait();
+                    self.close(flow);
+                    self.close(sink);
+                    return Poll::Ready(Ok(total as i64));
+                }
+                Ok(PipeProgress::ParkWrite(on)) => return self.park_on(on, true),
+                Ok(PipeProgress::ParkRead(on)) => return self.park_on(on, false),
+                Err(err) => {
+                    self.finish_wait();
+                    self.close(flow);
+                    self.close(sink);
+                    return Poll::Ready(Err(err));
+                }
             }
         }
     }

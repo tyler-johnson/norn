@@ -134,6 +134,9 @@ pub enum Builtin {
     BytesLen,
     BytesSlice,
     BytesText,
+    FileCreate,
+    FlowOfFile,
+    PipeTo,
 }
 
 impl Builtin {
@@ -153,6 +156,9 @@ impl Builtin {
             Builtin::BytesLen => "bytes_len",
             Builtin::BytesSlice => "bytes_slice",
             Builtin::BytesText => "bytes_text",
+            Builtin::FileCreate => "file_create",
+            Builtin::FlowOfFile => "flow_of_file",
+            Builtin::PipeTo => "pipe_to",
         }
     }
 }
@@ -543,6 +549,23 @@ fn poll_builtin(
         Builtin::TcpClose => {
             cx.close(resource(name, &args[0])?);
             Poll::Ready(Value::Unit)
+        }
+        // Creating and opening do not block, so these answer at once either way.
+        Builtin::FileCreate => Poll::Ready(fallible(
+            cx.file_create(&text(name, &args[0])?)
+                .map(|id| Value::Resource(ResourceKind::File, id)),
+        )),
+        Builtin::FlowOfFile => Poll::Ready(fallible(
+            cx.flow_of_file(&text(name, &args[0])?)
+                .map(|id| Value::Resource(ResourceKind::Flow, id)),
+        )),
+        Builtin::PipeTo => {
+            let flow = resource(name, &args[0])?;
+            let sink = resource(name, &args[1])?;
+            match cx.pipe(flow, sink) {
+                Poll::Ready(outcome) => Poll::Ready(fallible(outcome.map(Value::Int))),
+                Poll::Pending => Poll::Pending,
+            }
         }
         Builtin::Send => {
             let Value::Input(reactor, input) = &args[0] else {
