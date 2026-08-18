@@ -411,10 +411,12 @@ impl<'e, V: Clone> Cx<'_, 'e, V> {
     }
 
     pub fn read(&mut self, connection: ResourceId) -> Poll<io::Result<String>> {
-        match self.core.readiness.read(connection) {
-            Ok(Some(text)) => {
+        // `tcp_read` is the `String` API of M2, so it decodes lossily; readers that want the raw
+        // octets go through the flow machinery instead.
+        match self.core.readiness.read_bytes(connection) {
+            Ok(Some(bytes)) => {
                 self.finish_wait();
-                Poll::Ready(Ok(text))
+                Poll::Ready(Ok(String::from_utf8_lossy(&bytes).into_owned()))
             }
             Ok(None) => self.park_on(connection, false),
             Err(err) => {

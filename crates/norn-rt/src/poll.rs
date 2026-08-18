@@ -53,6 +53,9 @@ impl std::fmt::Display for ResourceId {
 pub enum ResourceKind {
     Listener,
     Connection,
+    File,
+    Request,
+    Flow,
 }
 
 impl ResourceKind {
@@ -60,22 +63,40 @@ impl ResourceKind {
         match self {
             ResourceKind::Listener => "listener",
             ResourceKind::Connection => "connection",
+            ResourceKind::File => "file",
+            ResourceKind::Request => "request",
+            ResourceKind::Flow => "flow",
         }
     }
 }
 
-enum Socket {
+/// What a resource actually is under its handle. M2's table held only sockets; M6 adds files,
+/// HTTP requests, and flows, all behind the same affine `ResourceId` and the same close-on-scope
+/// discipline, because "a resource has exactly one closer" does not care what the closer closes.
+enum Backing {
     Listener(TcpListener),
-    Connection(TcpStream),
+    Connection {
+        stream: TcpStream,
+        /// How much of the text currently being written has already gone out. A non-blocking write
+        /// may take only part of it, and the task re-polls the same `await` with the same text, so
+        /// progress has to be remembered somewhere that outlives the attempt.
+        written: usize,
+    },
 }
 
 struct Entry {
     kind: ResourceKind,
-    socket: Socket,
-    /// How much of the string currently being written has already gone out. A non-blocking write
-    /// may take only part of it, and the task re-polls the same `await` with the same string, so
-    /// progress has to be remembered somewhere that outlives the attempt.
-    written: usize,
+    backing: Backing,
+}
+
+impl Backing {
+    /// The descriptor readiness would poll for this backing, when it owns one directly.
+    fn fd(&self) -> Option<RawFd> {
+        match self {
+            Backing::Listener(listener) => Some(listener.as_raw_fd()),
+            Backing::Connection { stream, .. } => Some(stream.as_raw_fd()),
+        }
+    }
 }
 
 struct Interest {
@@ -117,13 +138,9 @@ impl Readiness {
             .ok_or_else(|| io::Error::from(io::ErrorKind::NotConnected))
     }
 
-    fn push(&mut self, kind: ResourceKind, socket: Socket) -> ResourceId {
+    fn push(&mut self, kind: ResourceKind, backing: Backing) -> ResourceId {
         let id = ResourceId(self.entries.len() as u32);
-        self.entries.push(Some(Entry {
-            kind,
-            socket,
-            written: 0,
-        }));
+        self.entries.push(Some(Entry { kind, backing }));
         id
     }
 
@@ -133,28 +150,28 @@ impl Readiness {
         let address = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
         let listener = TcpListener::bind(address)?;
         listener.set_nonblocking(true)?;
-        Ok(self.push(ResourceKind::Listener, Socket::Listener(listener)))
+        Ok(self.push(ResourceKind::Listener, Backing::Listener(listener)))
     }
 
     pub fn port(&mut self, id: ResourceId) -> io::Result<u16> {
-        match &self.entry(id)?.socket {
-            Socket::Listener(listener) => Ok(listener.local_addr()?.port()),
-            Socket::Connection(stream) => Ok(stream.local_addr()?.port()),
+        match &self.entry(id)?.backing {
+            Backing::Listener(listener) => Ok(listener.local_addr()?.port()),
+            Backing::Connection { stream, .. } => Ok(stream.local_addr()?.port()),
         }
     }
 
     /// `Ok(None)` means the operation would block; the caller registers interest and parks.
     pub fn accept(&mut self, id: ResourceId) -> io::Result<Option<ResourceId>> {
-        let accepted = match &self.entry(id)?.socket {
-            Socket::Listener(listener) => listener.accept(),
-            Socket::Connection(_) => return Err(io::Error::from(io::ErrorKind::InvalidInput)),
+        let accepted = match &self.entry(id)?.backing {
+            Backing::Listener(listener) => listener.accept(),
+            _ => return Err(io::Error::from(io::ErrorKind::InvalidInput)),
         };
         match accepted {
             Ok((stream, _)) => {
                 stream.set_nonblocking(true)?;
                 Ok(Some(self.push(
                     ResourceKind::Connection,
-                    Socket::Connection(stream),
+                    Backing::Connection { stream, written: 0 },
                 )))
             }
             Err(err) if err.kind() == io::ErrorKind::WouldBlock => Ok(None),
@@ -162,21 +179,18 @@ impl Readiness {
         }
     }
 
-    /// Read whatever has arrived. End of stream is an error rather than an empty string: a reader
-    /// that cannot tell the two apart loops forever on a closed connection.
-    pub fn read(&mut self, id: ResourceId) -> io::Result<Option<String>> {
-        let Socket::Connection(stream) = &mut self.entry(id)?.socket else {
+    /// Read whatever has arrived, as the raw octets the wire carried. End of stream is an error
+    /// rather than an empty chunk: a reader that cannot tell the two apart loops forever on a
+    /// closed connection.
+    pub fn read_bytes(&mut self, id: ResourceId) -> io::Result<Option<Vec<u8>>> {
+        let Backing::Connection { stream, .. } = &mut self.entry(id)?.backing else {
             return Err(io::Error::from(io::ErrorKind::InvalidInput));
         };
         let mut buffer = [0u8; 4096];
         loop {
             match stream.read(&mut buffer) {
                 Ok(0) => return Err(io::Error::from(io::ErrorKind::UnexpectedEof)),
-                Ok(read) => {
-                    // Reads and writes are `String` in M2; `Bytes` and a backpressured `Flow`
-                    // arrive in M6, and lossy decoding is the honest placeholder until then.
-                    return Ok(Some(String::from_utf8_lossy(&buffer[..read]).into_owned()));
-                }
+                Ok(read) => return Ok(Some(buffer[..read].to_vec())),
                 Err(err) if err.kind() == io::ErrorKind::WouldBlock => return Ok(None),
                 Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
                 Err(err) => return Err(err),
@@ -185,26 +199,25 @@ impl Readiness {
     }
 
     pub fn write(&mut self, id: ResourceId, text: &str) -> io::Result<Option<()>> {
-        let entry = self.entry(id)?;
-        let Socket::Connection(stream) = &mut entry.socket else {
+        let Backing::Connection { stream, written } = &mut self.entry(id)?.backing else {
             return Err(io::Error::from(io::ErrorKind::InvalidInput));
         };
         let bytes = text.as_bytes();
         loop {
-            if entry.written >= bytes.len() {
-                entry.written = 0;
+            if *written >= bytes.len() {
+                *written = 0;
                 return Ok(Some(()));
             }
-            match stream.write(&bytes[entry.written..]) {
+            match stream.write(&bytes[*written..]) {
                 Ok(0) => {
-                    entry.written = 0;
+                    *written = 0;
                     return Err(io::Error::from(io::ErrorKind::WriteZero));
                 }
-                Ok(wrote) => entry.written += wrote,
+                Ok(wrote) => *written += wrote,
                 Err(err) if err.kind() == io::ErrorKind::WouldBlock => return Ok(None),
                 Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
                 Err(err) => {
-                    entry.written = 0;
+                    *written = 0;
                     return Err(err);
                 }
             }
@@ -223,20 +236,18 @@ impl Readiness {
         let Some(entry) = slot.take() else {
             return false;
         };
-        let fd = match &entry.socket {
-            Socket::Listener(listener) => listener.as_raw_fd(),
-            Socket::Connection(stream) => stream.as_raw_fd(),
-        };
-        // Dropping the socket closes the descriptor, so no interest may outlive it.
+        let fd = entry.backing.fd();
+        // Dropping the backing closes any descriptor it owns, so no interest may outlive it.
         drop(entry);
-        self.interests.retain(|interest| interest.fd != fd);
+        if let Some(fd) = fd {
+            self.interests.retain(|interest| interest.fd != fd);
+        }
         true
     }
 
     pub fn watch(&mut self, id: ResourceId, write: bool, task: TaskId) -> io::Result<()> {
-        let fd = match &self.entry(id)?.socket {
-            Socket::Listener(listener) => listener.as_raw_fd(),
-            Socket::Connection(stream) => stream.as_raw_fd(),
+        let Some(fd) = self.entry(id)?.backing.fd() else {
+            return Err(io::Error::from(io::ErrorKind::InvalidInput));
         };
         self.interests.retain(|interest| interest.task != task);
         self.interests.push(Interest { task, fd, write });
