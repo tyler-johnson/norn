@@ -1,5 +1,3 @@
-module errors.declarations
-
 struct Missing {
     name String
 }

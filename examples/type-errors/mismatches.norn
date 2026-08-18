@@ -1,5 +1,3 @@
-module errors.mismatches
-
 struct User {
     id: I64
     name: String

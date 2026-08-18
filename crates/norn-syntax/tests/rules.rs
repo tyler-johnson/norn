@@ -340,6 +340,32 @@ fn from_is_not_a_keyword() {
 }
 
 #[test]
+fn a_module_header_teaches_its_replacement() {
+    // `module` is no longer a keyword, so the old header is a bare identifier where a declaration
+    // was expected — and the diagnostic says what replaced it.
+    let rendered = errors("module fmt\n\nfn main() {}\n");
+    assert!(
+        rendered.contains("a file no longer opens with `module …`"),
+        "{rendered}"
+    );
+    // The word itself is an ordinary identifier now.
+    let dumped = ast("fn main() {\n    let module = 1\n    let x = module\n}\n");
+    assert!(dumped.contains("(let module"), "{dumped}");
+}
+
+#[test]
+fn a_use_declaration_teaches_the_import_spelling() {
+    let rendered = errors("use std.fs\n\nfn main() {}\n");
+    assert!(
+        rendered.contains("imports are spelled `import { name } from \"./file\"`"),
+        "{rendered}"
+    );
+    // `use` is an ordinary identifier now; only the `uses { … }` clause keeps its keyword.
+    let dumped = ast("fn main() {\n    let use = 1\n    let x = use\n}\n");
+    assert!(dumped.contains("(let use"), "{dumped}");
+}
+
+#[test]
 fn spawn_takes_a_whole_call() {
     // Not just the callee: `spawn f(x)` starts `f(x)`, and nothing else would be worth writing.
     assert_eq!(

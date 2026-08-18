@@ -125,17 +125,8 @@ impl Parser {
 
     fn module(&mut self) -> Module {
         let start = self.peek().span;
-        let mut name = None;
         let mut imports = Vec::new();
         let mut items = Vec::new();
-
-        if self.at(&TokenKind::Kw(Kw::Module)) {
-            self.advance();
-            match self.path() {
-                Ok(path) => name = Some(path),
-                Err(Bail) => self.recover(),
-            }
-        }
 
         while !self.at_eof() {
             let before = self.pos;
@@ -151,7 +142,6 @@ impl Parser {
 
         let end = self.peek().span;
         Module {
-            name,
             imports,
             items,
             span: start.to(end),
@@ -173,13 +163,6 @@ impl Parser {
                 items.push(Item::Fn(self.fn_decl()?))
             }
             TokenKind::Kw(Kw::Reactor) => items.push(Item::Reactor(self.reactor_decl()?)),
-            TokenKind::Kw(Kw::Module) => {
-                let span = self.peek().span;
-                return Err(self.push(
-                    Diagnostic::new(span, "`module` must be the first declaration in a file")
-                        .label("second module declaration"),
-                ));
-            }
             TokenKind::At => {
                 let span = self.peek().span;
                 return Err(self.push(
@@ -194,15 +177,23 @@ impl Parser {
             }
             other => {
                 let span = self.peek().span;
-                return Err(self.push(
-                    Diagnostic::new(
-                        span,
-                        format!("expected a declaration, found {}", other.describe()),
-                    )
-                    .note(
-                        "a file contains `import`, `struct`, `enum`, `fn`, `task fn`, and `reactor` declarations",
+                let mut diagnostic = Diagnostic::new(
+                    span,
+                    format!("expected a declaration, found {}", other.describe()),
+                );
+                // Two spellings from before modules landed, each free since bare identifiers were
+                // never valid declarations: say what replaced them rather than only what was found.
+                diagnostic = match &other {
+                    TokenKind::Ident(name) if name == "module" => diagnostic.note(
+                        "a file no longer opens with `module …`; the importing file names it by path",
                     ),
-                ));
+                    TokenKind::Ident(name) if name == "use" => diagnostic
+                        .note("imports are spelled `import { name } from \"./file\"`"),
+                    _ => diagnostic,
+                };
+                return Err(self.push(diagnostic.note(
+                    "a file contains `import`, `struct`, `enum`, `fn`, `task fn`, and `reactor` declarations",
+                )));
             }
         }
         Ok(())

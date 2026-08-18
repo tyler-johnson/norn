@@ -1,5 +1,3 @@
-module errors.imports
-
 import fmt from "./fmt"
 
 fn recovers_after_the_clause() -> I64 {

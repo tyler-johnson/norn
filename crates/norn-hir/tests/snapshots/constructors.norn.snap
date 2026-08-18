@@ -1,27 +1,27 @@
 error: `Point` is already the name of a struct
-  --> constructors.norn:15:4
+  --> constructors.norn:13:4
    |
-15 | fn Point(x: I64) -> I64 {
+13 | fn Point(x: I64) -> I64 {
    |    ^^^^^ a call must be unambiguous
    = note: `Point(…)` has to mean one thing, and the struct `Point` already claims it
 
 error: `Some` cannot be a binding
-  --> constructors.norn:22:9
+  --> constructors.norn:20:9
    |
-22 |     let Some = 5
+20 |     let Some = 5
    |         ^^^^ a built-in constructor
    = note: `None`, `Some`, `Ok`, and `Err` always name the Option and Result constructors
 
 error: `Shape` is an enum
-  --> constructors.norn:28:5
+  --> constructors.norn:26:5
    |
-28 |     Shape(radius: 1)
+26 |     Shape(radius: 1)
    |     ^^^^^
    = note: name the variant, as in `Shape.Empty`
 
 error: `Shape.Circle` carries a payload
-  --> constructors.norn:33:5
+  --> constructors.norn:31:5
    |
-33 |     Shape.Circle
+31 |     Shape.Circle
    |     ^^^^^^^^^^^^ not a unit variant
    = note: construct it with its fields, as in `Shape.Circle(centre: …, radius: …)`

@@ -1,5 +1,3 @@
-module arithmetic
-
 fn factorial(n: I64) -> I64 {
     if n <= 1 {
         return 1

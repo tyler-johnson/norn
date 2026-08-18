@@ -1,5 +1,3 @@
-module reactors
-
 // The reactor grammar, as syntax. Nothing here is checked or run — this file is the M0 corpus's
 // regression net for the new productions, the way `tasks.norn` is for tasks, so it deliberately
 // includes forms later milestones will bring meaning to.

@@ -1,33 +1,33 @@
 error: cannot tell what type `None` builds here
- --> inference.norn:9:17
+ --> inference.norn:7:17
   |
-9 |     let value = None
+7 |     let value = None
   |                 ^^^^ no expected type at this position
   = note: annotate the binding or the return type, as in `let x: Option<I64> = …`
 
 error: this fails with String, but the function fails with Failure
-  --> inference.norn:14:17
+  --> inference.norn:12:17
    |
-14 |     let value = fails()?
+12 |     let value = fails()?
    |                 ^^^^^^^^
    = note: there is no automatic error conversion; match and rebuild the error
 
 error: `?` applies to Result and Option, not I64
-  --> inference.norn:23:17
+  --> inference.norn:21:17
    |
-23 |     let value = 1?
+21 |     let value = 1?
    |                 ^^
 
 error: this `match` does not cover Failure.Missing
-  --> inference.norn:28:5
+  --> inference.norn:26:5
    |
-28 |     match failure {
+26 |     match failure {
    |     ^^^^^^^^^^^^^^^ not exhaustive
    = note: add the missing arms, or a `_ => …` catch-all
 
 error: this `match` on I64 needs a catch-all arm
-  --> inference.norn:34:5
+  --> inference.norn:32:5
    |
-34 |     match n {
+32 |     match n {
    |     ^^^^^^^^^
    = note: add `_ => …`

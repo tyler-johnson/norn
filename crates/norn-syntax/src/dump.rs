@@ -70,9 +70,6 @@ fn list(head: impl Into<String>, children: Vec<Node>) -> Node {
 
 pub fn module(module: &Module) -> String {
     let mut children = Vec::new();
-    if let Some(name) = &module.name {
-        children.push(list("module-name", vec![atom(name.text())]));
-    }
     for decl in &module.imports {
         let mut parts = vec![atom(format!("{:?}", decl.specifier))];
         match &decl.kind {

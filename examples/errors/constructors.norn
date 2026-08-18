@@ -1,5 +1,3 @@
-module errors.constructors
-
 fn brace_literal(name: String) -> Profile {
     let user = User { id: 7, name: name }
     return user

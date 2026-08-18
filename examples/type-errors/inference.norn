@@ -1,5 +1,3 @@
-module errors.inference
-
 enum Failure {
     Broken
     Missing(String)

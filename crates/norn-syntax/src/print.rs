@@ -16,9 +16,6 @@ const LAMBDA: u8 = 0;
 
 pub fn module(module: &Module) -> String {
     let mut out = String::new();
-    if let Some(name) = &module.name {
-        out.push_str(&format!("module {}\n", name.text()));
-    }
     if !module.imports.is_empty() {
         if !out.is_empty() {
             out.push('\n');

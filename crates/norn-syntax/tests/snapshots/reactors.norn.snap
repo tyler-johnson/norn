@@ -1,6 +1,5 @@
 === ast ===
 (module
-  (module-name reactors)
   (struct Snapshot (field open I64) (field healthy Bool))
   (reactor Gate
     (params (param limit I64))
@@ -80,8 +79,6 @@
           (call (path print) (arg (call (path latest) (arg (path gate.snapshot))))))))))
 
 === canonical ===
-module reactors
-
 struct Snapshot {
     open: I64
     healthy: Bool

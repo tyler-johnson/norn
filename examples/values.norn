@@ -1,5 +1,3 @@
-module values
-
 struct User {
     id: I64
     name: String

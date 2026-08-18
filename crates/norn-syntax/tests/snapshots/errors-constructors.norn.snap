@@ -1,6 +1,6 @@
 error: expected a line break between statements, found `{`
- --> constructors.norn:4:21
+ --> constructors.norn:2:21
   |
-4 |     let user = User { id: 7, name: name }
+2 |     let user = User { id: 7, name: name }
   |                     ^ this brace opens a block
   = note: a brace always opens a block; a struct is built with `Name(field: value)`

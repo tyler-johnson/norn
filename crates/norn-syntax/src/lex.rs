@@ -9,7 +9,6 @@ use crate::span::Span;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Kw {
-    Module,
     Import,
     As,
     Struct,
@@ -42,7 +41,6 @@ impl Kw {
     /// test is the first. It sits beside `text`'s exhaustive match so that adding a variant puts
     /// the compiler's finger next to the line that also needs the new word.
     pub const ALL: &'static [Kw] = &[
-        Kw::Module,
         Kw::Import,
         Kw::As,
         Kw::Struct,
@@ -72,7 +70,6 @@ impl Kw {
 
     pub fn text(self) -> &'static str {
         match self {
-            Kw::Module => "module",
             Kw::Import => "import",
             Kw::As => "as",
             Kw::Struct => "struct",
@@ -361,7 +358,6 @@ impl<'a> Lexer<'a> {
             return TokenKind::Underscore;
         }
         let kw = match word {
-            "module" => Some(Kw::Module),
             "import" => Some(Kw::Import),
             "as" => Some(Kw::As),
             "struct" => Some(Kw::Struct),

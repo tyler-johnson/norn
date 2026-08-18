@@ -1,5 +1,3 @@
-module results
-
 struct Config {
     port: I64
     host: String

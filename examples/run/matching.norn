@@ -1,5 +1,3 @@
-module matching
-
 struct Point {
     x: I64
     y: I64

@@ -13,9 +13,6 @@
       "include": "#import-decl"
     },
     {
-      "include": "#module-decl"
-    },
-    {
       "include": "#fn-decl"
     },
     {
@@ -191,17 +188,6 @@
           "match": ","
         }
       ]
-    },
-    "module-decl": {
-      "match": "\\b(module)\\s+([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*)",
-      "captures": {
-        "1": {
-          "name": "keyword.control.import.norn"
-        },
-        "2": {
-          "name": "entity.name.namespace.norn"
-        }
-      }
     },
     "fn-decl": {
       "comment": "Spans the parameter list so that `name:` reads as a parameter and everything else in it reads as a type. `applyEndPatternLast` lets the unit type `()` be consumed before the closing paren is considered.",

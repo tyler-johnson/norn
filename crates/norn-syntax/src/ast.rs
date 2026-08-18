@@ -36,9 +36,9 @@ impl Path {
     }
 }
 
+/// A file is a module: it carries no name of its own, and the importing file names it by path.
 #[derive(Debug)]
 pub struct Module {
-    pub name: Option<Path>,
     pub imports: Vec<ImportDecl>,
     pub items: Vec<Item>,
     pub span: Span,

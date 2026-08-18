@@ -1,5 +1,3 @@
-module errors.statements
-
 fn two_on_one_line() -> I64 {
     let a = 1 let b = 2
     return a + b

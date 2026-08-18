@@ -1,5 +1,3 @@
-module type_errors.constructors
-
 struct Point {
     x: I64
     y: I64

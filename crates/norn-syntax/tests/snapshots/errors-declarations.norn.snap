@@ -1,18 +1,18 @@
 error: expected `:`, found `String`
- --> declarations.norn:4:10
+ --> declarations.norn:2:10
   |
-4 |     name String
+2 |     name String
   |          ^^^^^^
 
 error: only a `task fn` may declare capabilities
- --> declarations.norn:8:5
+ --> declarations.norn:6:5
   |
-8 |     uses { fs.read }
+6 |     uses { fs.read }
   |     ^^^^ `uses` on an ordinary function
   = note: ordinary functions are pure; move the effectful work into a `task fn`
 
 error: expected `)`, found `->`
-  --> declarations.norn:13:20
+  --> declarations.norn:11:20
    |
-13 | fn unclosed(a: I64 -> I64 {
+11 | fn unclosed(a: I64 -> I64 {
    |                    ^^

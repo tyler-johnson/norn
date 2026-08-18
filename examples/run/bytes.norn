@@ -5,8 +5,6 @@
 // back to text is fallible because not every octet sequence is UTF-8, and printing a bytes value
 // shows its length rather than inventing an escape syntax for its contents.
 
-module bytes
-
 fn main() -> () {
     let data = bytes("hello, norn")
     print(data)

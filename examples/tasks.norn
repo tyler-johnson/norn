@@ -1,5 +1,3 @@
-module tasks
-
 import * as fs from "std/fs"
 import * as http from "std/http"
 import * as json from "std/json"
