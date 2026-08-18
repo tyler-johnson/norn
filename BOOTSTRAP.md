@@ -356,9 +356,10 @@ tests, asserting the same structural claims against a real clock.
 Minimal HTTP/1.1 in `norn-rt`, `Flow<Bytes>` with demand-driven transfer, `pipe_to`.
 
 The done-when is stated against v0-spelled examples rather than against `DESIGN.md` §10's service.
-That sketch leans on closures, `for await` and loops, generics, method resolution, the event
+That sketch leans on closures, `for await`, generics, method resolution, the event
 operators, route patterns with bound parameters, and JSON — fifteen-odd constructs that are M7 or
-later — so passing it would mean building the rest of the language first. §10 stays as the
+later (the loops it also wanted have since landed) — so passing it would mean building the rest of
+the language first. §10 stays as the
 aspirational sketch; the programs making M6's claims are `examples/http/hello.norn` and
 `examples/http/files.norn`, the second being §5's streaming upload and download respelled with
 free functions and `match` dispatch on the method.
@@ -447,8 +448,8 @@ Ordered roughly by when it becomes worth doing, not by importance:
    one. M3 launches every request and lets the scope cancel what is outstanding, which is correct
    but has no way to say "only the latest matters"; saying so needs a policy vocabulary on `after`,
    and that is the same scheduling question as `map_task`'s rather than a causality one. The read
-   side of an event also wants `for await`, which needs a loop construct. Requires the trace tooling
-   from M3.
+   side of an event also wants `for await` — the loop construct it sits on now exists, and the
+   subscription semantics are what remain M7's. Requires the trace tooling from M3.
 2. **Multi-threaded scheduler.** Work stealing, parallel reactors on separate workers. The
    single-threaded loop is a correctness baseline to differential-test against.
 3. **Language server.** `norn-lsp` over stdio: diagnostics first, which is `norn_hir::check`'s
@@ -476,9 +477,10 @@ Ordered roughly by when it becomes worth doing, not by importance:
     every response says `Connection: close`); an HTTP client (`http_get` — M6 is server-only);
     route patterns with bound parameters (`files.norn` dispatches on `match request_method(&req)`
     because there is nothing to bind a path segment to). General flow sources and sinks wait here
-    too, along with a `flow_next` for consuming a flow from Norn code once a loop construct makes
-    that shape reasonable — in v0 a flow comes from a file or a request body and is consumed only
-    by `pipe_to` and `http_respond_flow`, wholly inside the runtime. `coalesce_latest` remains a
+    too, along with a `flow_next` for consuming a flow from Norn code — the loop construct now
+    makes that shape reasonable, and the primitive itself is what waits — in v0 a flow comes from
+    a file or a request body and is consumed only by `pipe_to` and `http_respond_flow`, wholly
+    inside the runtime. `coalesce_latest` remains a
     §10 gap rather than M6 work: it is an overflow policy, not a wire feature.
 12. **Modules — landed — and the standard library that dissolves the builtins.** Earlier than its
     position suggests: modules gate the standard library, and item 7 does not — the ordering
@@ -509,8 +511,9 @@ Ordered roughly by when it becomes worth doing, not by importance:
 
     The absorption comes in two waves with different gates. The proto-std needs no generics —
     Go's `net/http` predates Go's generics by a decade, and `Option`/`Result` are already
-    spellable at concrete types. Its gates are modules — met, above — a loop construct or tail calls
-    (item 1), and a few byte primitives — indexing, building — after which HTTP parsing and rendering,
+    spellable at concrete types. Its gates are modules — met, above — a loop construct — met: `while` and `loop`, `break` and
+    `continue`, expressions all, with turns barred from reaching them so the termination theorem
+    narrowed instead of dying — and a few byte primitives — indexing, building — after which HTTP parsing and rendering,
     `bytes_text`, and `pipe_to` over `flow_next` become concrete Norn modules: most of the table.
     The general std — collections, `Flow<T>` beyond `Bytes`, and the method spelling that turns
     `request_header(&req, h)` into `req.header(h)` — waits for item 7's generics and traits.
