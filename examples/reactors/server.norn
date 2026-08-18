@@ -32,7 +32,7 @@ reactor Gate(limit: I64) {
 
     signal open = accepted - released
 
-    export signal snapshot = #Snapshot(accepted: accepted, open: open, healthy: open <= limit)
+    export signal snapshot = Snapshot(accepted: accepted, open: open, healthy: open <= limit)
 }
 
 task fn echo(conn: Connection, gate: Gate) -> ()
@@ -40,11 +40,11 @@ task fn echo(conn: Connection, gate: Gate) -> ()
 {
     await send(gate.opened, ())
     match await tcp_read(&conn) {
-        #Ok(text) => match await tcp_write(&conn, text) {
-            #Ok(_) => ()
-            #Err(_) => ()
+        Ok(text) => match await tcp_write(&conn, text) {
+            Ok(_) => ()
+            Err(_) => ()
         }
-        #Err(_) => ()
+        Err(_) => ()
     }
     await tcp_close(conn)
     await send(gate.closed, ())
@@ -54,11 +54,11 @@ task fn accept_loop(listener: Listener, gate: Gate) -> ()
     uses { net.io }
 {
     match await tcp_accept(&listener) {
-        #Ok(conn) => scope {
+        Ok(conn) => scope {
             spawn echo(conn, gate)
             await accept_loop(listener, gate)
         }
-        #Err(_) => ()
+        Err(_) => ()
     }
 }
 
@@ -73,5 +73,5 @@ task fn main() -> Result<(), IoError>
         await sleep(500)
         print(latest(gate.snapshot))
     }
-    #Ok(())
+    Ok(())
 }

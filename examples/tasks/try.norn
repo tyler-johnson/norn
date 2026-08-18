@@ -4,7 +4,7 @@
 // scope exit first — which is what cancels the child that is still waiting.
 
 fn refuse() -> Result<(), IoError> {
-    #Err(#IoError.Refused)
+    Err(IoError.Refused)
 }
 
 task fn patient() -> ()
@@ -24,5 +24,5 @@ task fn main() -> Result<(), IoError>
         print("nor is this one")
     }
     print("or this")
-    #Ok(())
+    Ok(())
 }

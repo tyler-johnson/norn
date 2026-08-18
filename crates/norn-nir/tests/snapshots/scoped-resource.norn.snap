@@ -37,7 +37,7 @@ task fn main #0()
     _7 = task builtin tcp_listen(0)
     await _7 -> _8, resume b4
   b3:
-    _5 = #Result.Err(_3.0)
+    _5 = Result.Err(_3.0)
     return _5
   b4:
     switch tag _8 [0 => b5] else b6
@@ -51,7 +51,7 @@ task fn main #0()
     _15 = task builtin sleep(1)
     await _15 -> _16, resume b8
   b6:
-    _10 = #Result.Err(_8.0)
+    _10 = Result.Err(_8.0)
     scope exit, resume b7
   b7:
     return _10
@@ -63,7 +63,7 @@ task fn main #0()
     _18 = task builtin sleep(1)
     await _18 -> _19, resume b10
   b10:
-    _20 = #Result.Ok(())
+    _20 = Result.Ok(())
     return _20
 
 fn compare #1(_0/a, _1/b)
@@ -85,7 +85,7 @@ fn compare #1(_0/a, _1/b)
 two sockets are open
 the inner socket is closed and the outer one is not
 === result ===
-#Ok(())
+Ok(())
 === trace ===
 0ms t0 spawn main root
 0ms t0 resume

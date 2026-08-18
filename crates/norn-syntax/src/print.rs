@@ -336,21 +336,6 @@ fn print_expr_bare(expr: &Expr, indent: usize) -> String {
                 args.join(", ")
             )
         }
-        ExprKind::Construct { path, args } => {
-            if args.is_empty() {
-                return format!("#{}", path.text());
-            }
-            let args: Vec<_> = args
-                .iter()
-                .map(|arg| match &arg.name {
-                    Some(name) => {
-                        format!("{}: {}", name.name, print_expr(&arg.value, indent, LAMBDA))
-                    }
-                    None => print_expr(&arg.value, indent, LAMBDA),
-                })
-                .collect();
-            format!("#{}({})", path.text(), args.join(", "))
-        }
         ExprKind::Await(inner) => format!("await {}", print_expr(inner, indent, UNARY)),
         ExprKind::Scope(block) => format!("scope {}", print_block(block, indent)),
         ExprKind::Spawn(inner) => format!("spawn {}", print_expr(inner, indent, UNARY)),
@@ -443,9 +428,15 @@ fn print_pat(pat: &Pat) -> String {
                 parts.push("..".into());
             }
             if parts.is_empty() {
-                return format!("#{}", path.text());
+                // A dotted path is a constructor on its own; a lone name needs its `()` kept,
+                // because bare it would re-parse as a binding.
+                return if path.segments.len() == 1 {
+                    format!("{}()", path.text())
+                } else {
+                    path.text()
+                };
             }
-            format!("#{}({})", path.text(), parts.join(", "))
+            format!("{}({})", path.text(), parts.join(", "))
         }
         PatKind::Or(alts) => alts.iter().map(print_pat).collect::<Vec<_>>().join(" | "),
     }

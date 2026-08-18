@@ -5,13 +5,6 @@ fn brace_literal(name: String) -> Profile {
     return user
 }
 
-fn unmarked_pattern(error: LoadError) -> I64 {
-    match error {
-        LoadError.NotFound => 1
-        _ => 2
-    }
-}
-
 fn recovers_after() -> I64 {
     return 1
 }

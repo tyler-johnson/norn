@@ -309,16 +309,6 @@ fn dump_expr(expr: &Expr) -> Node {
             }
             list("call", children)
         }
-        ExprKind::Construct { path, args } => {
-            let mut children = vec![atom(path.text())];
-            for arg in args {
-                children.push(match &arg.name {
-                    Some(name) => list("arg", vec![atom(&name.name), dump_expr(&arg.value)]),
-                    None => list("arg", vec![dump_expr(&arg.value)]),
-                });
-            }
-            list("construct", children)
-        }
         ExprKind::Await(inner) => list("await", vec![dump_expr(inner)]),
         ExprKind::Scope(block) => list("scope", vec![dump_block(block)]),
         ExprKind::Spawn(inner) => list("spawn", vec![dump_expr(inner)]),

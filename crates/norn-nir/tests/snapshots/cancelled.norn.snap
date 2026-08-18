@@ -87,7 +87,7 @@ fn Slow.finished.init #5()
 fn Slow.counts #6(_0/started, _1/finished)
     local _2
   b0:
-    _2 = #Pair(_0/started, _1/finished)
+    _2 = Pair(_0/started, _1/finished)
     return _2
 
 === graph ===
@@ -103,7 +103,7 @@ reactor Slow #0
     exports [counts]
 
 === output ===
-#Pair(started: 1, finished: 0)
+Pair(started: 1, finished: 0)
 scope closed
 === result ===
 ()

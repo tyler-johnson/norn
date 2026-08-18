@@ -50,7 +50,7 @@ fn traps_match() {
             // Exhaustiveness is checked on top-level variants only (BOOTSTRAP.md §5 M1), so a gap
             // inside a nested pattern is a runtime trap both engines must word identically.
             "nested-gap",
-            "enum Wrap {\n    One(Option<I64>)\n}\n\nfn main() -> I64 {\n    match #Wrap.One(#None) {\n        #Wrap.One(#Some(v)) => v\n    }\n}\n",
+            "enum Wrap {\n    One(Option<I64>)\n}\n\nfn main() -> I64 {\n    match Wrap.One(None) {\n        Wrap.One(Some(v)) => v\n    }\n}\n",
         ),
     ];
     for (name, source) in programs {

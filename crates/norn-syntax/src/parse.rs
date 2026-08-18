@@ -6,10 +6,11 @@
 //! 2. A postfix chain continues across a line break only for `.`; a `(`, `[`, or `?` on a fresh
 //!    line starts something new rather than silently extending the previous expression.
 //!
-//! Two more rules keep spelling out of the grammar. A `#` marks a data constructor — `#User(id: 7)`
-//! builds a value, `user(id: 7)` calls a function — so a brace is always a block and never a
-//! literal. In a pattern, a bare name always binds and only a marked path matches. Nothing anywhere
-//! depends on whether a name is capitalised.
+//! Two more rules keep spelling out of the grammar. Construction is spelled like a call —
+//! `User(id: 7)` builds the record and `user(id: 7)` calls the function, and name resolution in
+//! the checker is what tells the two apart — so a brace is always a block and never a literal. In
+//! a pattern, a bare name always binds, and a dotted or parenthesised one matches a constructor.
+//! Nothing anywhere depends on whether a name is capitalised.
 //!
 //! Errors are recorded per item and the parser resynchronises at the next top-level declaration,
 //! so one malformed function does not hide the rest of the file.
@@ -631,9 +632,9 @@ impl Parser {
                 );
                 if self.at(&TokenKind::LBrace) {
                     // The mistake a Rust or Go reader makes first.
-                    diagnostic = diagnostic
-                        .label("this brace opens a block")
-                        .note("a brace always opens a block; a record is built with `#Name(field: value)`");
+                    diagnostic = diagnostic.label("this brace opens a block").note(
+                        "a brace always opens a block; a record is built with `Name(field: value)`",
+                    );
                 }
                 return Err(self.push(diagnostic));
             }
@@ -1081,51 +1082,12 @@ impl Parser {
                     span,
                 })
             }
-            TokenKind::Hash => {
-                self.advance();
-                let path = self.path()?;
-                let (args, end) = self.construct_args()?;
-                let span = start.to(end.unwrap_or(path.span));
-                Ok(Expr {
-                    kind: ExprKind::Construct { path, args },
-                    span,
-                })
-            }
             TokenKind::Reserved(word) => Err(self.push(reserved_diagnostic(start, &word))),
             other => Err(self.error(format!(
                 "expected an expression, found {}",
                 other.describe()
             ))),
         }
-    }
-
-    /// The argument list of a data constructor, which a unit variant omits entirely: `#NotFound`
-    /// and `#NotFound()` mean the same thing.
-    fn construct_args(&mut self) -> PResult<(Vec<Arg>, Option<Span>)> {
-        if !self.at(&TokenKind::LParen) || self.peek().nl_before {
-            return Ok((Vec::new(), None));
-        }
-        self.advance();
-        let mut args = Vec::new();
-        while !self.at(&TokenKind::RParen) && !self.at_eof() {
-            let start = self.peek().span;
-            let name = match (self.peek_kind().clone(), &self.peek_at(1).kind) {
-                (TokenKind::Ident(name), TokenKind::Colon) => {
-                    let span = self.advance().span;
-                    self.advance();
-                    Some(Ident { name, span })
-                }
-                _ => None,
-            };
-            let value = self.expr()?;
-            let span = start.to(value.span);
-            args.push(Arg { name, value, span });
-            if !self.eat(&TokenKind::Comma) {
-                break;
-            }
-        }
-        let end = self.expect(TokenKind::RParen)?.span;
-        Ok((args, Some(end)))
     }
 
     /// `()`, `(expr)`, `() => e`, or `(a, b) => e`. The lambda readings are tried first and the
@@ -1320,26 +1282,19 @@ impl Parser {
                     span: start,
                 })
             }
-            // A bare name always binds. Nothing about how it is spelled changes that.
+            // A bare name binds; a dotted or parenthesised one matches a constructor. That shape
+            // is the whole distinction — nothing about how a name is spelled changes it.
             TokenKind::Ident(name) => {
-                let span = self.advance().span;
-                if self.at(&TokenKind::Dot) {
-                    return Err(self.push(
-                        Diagnostic::new(
-                            span.to(self.peek().span),
-                            "a bare name in a pattern binds",
-                        )
-                        .label("this is a binding, not a constructor")
-                        .note("to match a constructor, mark it: `#LoadError.NotFound`"),
-                    ));
+                let next = self.peek_at(1);
+                let dotted = matches!(next.kind, TokenKind::Dot);
+                let called = matches!(next.kind, TokenKind::LParen) && !next.nl_before;
+                if !dotted && !called {
+                    let span = self.advance().span;
+                    return Ok(Pat {
+                        kind: PatKind::Binding(Ident { name, span }),
+                        span,
+                    });
                 }
-                Ok(Pat {
-                    kind: PatKind::Binding(Ident { name, span }),
-                    span,
-                })
-            }
-            TokenKind::Hash => {
-                self.advance();
                 let path = self.path()?;
                 let mut span = start.to(path.span);
                 let mut args = Vec::new();

@@ -1,8 +1,8 @@
 //! Targeted tests for the grammar's ambiguous corners.
 //!
 //! The snapshot corpus proves whole files parse; these pin down the specific decisions — layout
-//! sensitivity, `await`/`?` associativity, speculative type arguments, and the `#` that separates
-//! a data constructor from a call — that a future change could silently reverse.
+//! sensitivity, `await`/`?` associativity, speculative type arguments, and the shape rules that
+//! keep spelling out of the grammar — that a future change could silently reverse.
 
 use norn_syntax::ast::{Item, StmtKind};
 use norn_syntax::{SourceFile, dump, parse, print, render_all};
@@ -104,28 +104,43 @@ fn a_semicolon_is_reported_as_a_separator_mistake() {
 }
 
 #[test]
-fn a_constructor_is_marked_and_a_call_is_not() {
-    assert_eq!(expr("#User(id: 7)"), "(construct User (arg id (int 7)))");
+fn construction_is_spelled_like_a_call() {
+    // `User(id: 7)` builds and `user(id: 7)` calls, and the grammar cannot tell — both are
+    // calls here, and name resolution in the checker is what separates them.
+    assert_eq!(expr("User(id: 7)"), "(call (path User) (arg id (int 7)))");
     assert_eq!(expr("user(id: 7)"), "(call (path user) (arg id (int 7)))");
 }
 
 #[test]
 fn capitalization_carries_no_meaning() {
-    // The same spelling parses the same way in either case; only the `#` decides.
-    assert_eq!(expr("#point(x: 1)"), "(construct point (arg x (int 1)))");
+    // The same spelling parses the same way in either case; resolution, not case, decides
+    // what a call names.
+    assert_eq!(expr("point(x: 1)"), "(call (path point) (arg x (int 1)))");
     assert_eq!(expr("Point(x: 1)"), "(call (path Point) (arg x (int 1)))");
 }
 
 #[test]
-fn a_unit_constructor_needs_no_parentheses() {
-    assert_eq!(
-        expr("#LoadError.NotFound"),
-        "(construct LoadError.NotFound)"
+fn the_constructor_sigil_is_gone() {
+    // `#` marked a data constructor before construction was spelled like a call. It is not a
+    // token any more, and a leftover one is an ordinary lexer error.
+    assert!(
+        errors("fn main() {\n    let x = #User(id: 7)\n}\n").contains("unexpected character `#`")
     );
-    // `#Foo()` means the same thing, and the printer settles on the shorter form.
-    let parsed = parse("fn main() {\n    let x = #Foo()\n}\n");
+}
+
+#[test]
+fn a_unit_variant_pattern_needs_no_parentheses() {
+    // `E.NotFound()` and `E.NotFound` mean the same thing, and the printer settles on the
+    // shorter form.
+    let parsed =
+        parse("fn main() {\n    match e {\n        E.NotFound() => 1\n        _ => 2\n    }\n}\n");
     assert!(parsed.ok());
-    assert!(print::module(&parsed.module).contains("let x = #Foo\n"));
+    assert!(print::module(&parsed.module).contains("E.NotFound => 1"));
+    // A lone name keeps its `()`: bare, it would be a binding rather than a constructor.
+    let parsed =
+        parse("fn main() {\n    match e {\n        Foo() => 1\n        _ => 2\n    }\n}\n");
+    assert!(parsed.ok());
+    assert!(print::module(&parsed.module).contains("Foo() => 1"));
 }
 
 #[test]
@@ -135,11 +150,11 @@ fn a_brace_always_opens_a_block() {
     assert!(dumped.contains("(match (path config)"), "{dumped}");
 
     // A constructor in scrutinee position needs no parentheses to survive.
-    let source = "fn main() {\n    match #Point(x: 1) {\n        _ => 1\n    }\n}\n";
+    let source = "fn main() {\n    match Point(x: 1) {\n        _ => 1\n    }\n}\n";
     let parsed = parse(source);
     assert!(parsed.ok());
     let printed = print::module(&parsed.module);
-    assert!(printed.contains("match #Point(x: 1) {"), "{printed}");
+    assert!(printed.contains("match Point(x: 1) {"), "{printed}");
     assert_eq!(printed, print::module(&parse(&printed).module));
 }
 
@@ -151,7 +166,7 @@ fn a_brace_after_an_expression_explains_itself() {
         rendered.contains("a brace always opens a block"),
         "{rendered}"
     );
-    assert!(rendered.contains("#Name(field: value)"), "{rendered}");
+    assert!(rendered.contains("Name(field: value)"), "{rendered}");
 }
 
 #[test]
@@ -163,20 +178,21 @@ fn a_bare_name_in_a_pattern_binds_whatever_its_case() {
 }
 
 #[test]
-fn a_dotted_pattern_must_be_marked() {
-    let rendered =
-        errors("fn main() {\n    match x {\n        LoadError.NotFound => 1\n    }\n}\n");
-    assert!(
-        rendered.contains("a bare name in a pattern binds"),
-        "{rendered}"
+fn a_dotted_pattern_matches_a_constructor() {
+    // The shape is the whole distinction: a bare name binds, a dotted one matches.
+    let dumped = ast(
+        "fn main() {\n    match x {\n        LoadError.NotFound => 1\n        _ => 2\n    }\n}\n",
     );
-    assert!(rendered.contains("#LoadError.NotFound"), "{rendered}");
+    assert!(
+        dumped.contains("(construct LoadError.NotFound)"),
+        "{dumped}"
+    );
 }
 
 #[test]
 fn patterns_mirror_construction() {
     let dumped = ast(
-        "fn main() {\n    match e {\n        #E.Io(code: 404, msg) => msg\n        #E.Io(..) => \"x\"\n    }\n}\n",
+        "fn main() {\n    match e {\n        E.Io(code: 404, msg) => msg\n        E.Io(..) => \"x\"\n    }\n}\n",
     );
     assert!(
         dumped.contains("(construct E.Io (arg code (int 404)) (arg (bind msg)))"),

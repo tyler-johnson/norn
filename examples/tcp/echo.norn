@@ -13,11 +13,11 @@ task fn echo(conn: Connection) -> ()
     uses { net.io }
 {
     match await tcp_read(&conn) {
-        #Ok(text) => match await tcp_write(&conn, text) {
-            #Ok(_) => ()
-            #Err(_) => ()
+        Ok(text) => match await tcp_write(&conn, text) {
+            Ok(_) => ()
+            Err(_) => ()
         }
-        #Err(_) => ()
+        Err(_) => ()
     }
     await tcp_close(conn)
 }
@@ -28,11 +28,11 @@ task fn accept_loop(listener: Listener) -> ()
     match await tcp_accept(&listener) {
         // The connection moves into the child, which is then what owns and closes it. The scope
         // wrapping the recursion is what that child may not outlive.
-        #Ok(conn) => scope {
+        Ok(conn) => scope {
             spawn echo(conn)
             await accept_loop(listener)
         }
-        #Err(_) => ()
+        Err(_) => ()
     }
 }
 
@@ -45,7 +45,7 @@ task fn main() -> Result<(), IoError>
         spawn accept_loop(listener)
         await sleep(200)
     }
-    #Ok(())
+    Ok(())
 }
 
 fn digits(n: I64) -> String {

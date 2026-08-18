@@ -3,11 +3,4 @@ error: expected a line break between statements, found `{`
   |
 4 |     let user = User { id: 7, name: name }
   |                     ^ this brace opens a block
-  = note: a brace always opens a block; a record is built with `#Name(field: value)`
-
-error: a bare name in a pattern binds
-  --> constructors.norn:10:9
-   |
-10 |         LoadError.NotFound => 1
-   |         ^^^^^^^^^^ this is a binding, not a constructor
-   = note: to match a constructor, mark it: `#LoadError.NotFound`
+  = note: a brace always opens a block; a record is built with `Name(field: value)`

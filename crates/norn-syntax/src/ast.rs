@@ -252,13 +252,6 @@ pub enum ExprKind {
         type_args: Vec<Type>,
         args: Vec<Arg>,
     },
-    /// A data constructor: `#User(id: 7)`, `#LoadError.Invalid("bad")`, `#LoadError.NotFound`.
-    /// The `#` is what separates building a value from calling a function; without it the two
-    /// forms would be spelled identically and told apart only by the case of a name.
-    Construct {
-        path: Path,
-        args: Vec<Arg>,
-    },
     Await(Box<Expr>),
     /// `scope { … }` — structured concurrency. Valued as its body, and the point at which every
     /// task spawned inside is cancelled and joined.
@@ -372,13 +365,15 @@ pub struct Pat {
 pub enum PatKind {
     Wild,
     /// Any bare name binds. What a name looks like never decides this — only its shape does, and
-    /// a bare name has no `#` and no dots.
+    /// a bare name has no dots and no argument list. (The checker carves out one exception: the
+    /// four builtin constructor names `None`, `Some`, `Ok`, and `Err` match rather than bind.)
     Binding(Ident),
     Int(i64),
     Str(String),
     Bool(bool),
-    /// The mirror of `ExprKind::Construct`: `#LoadError.Io(code, message)`, `#LoadError.NotFound`.
-    /// Arguments may be positional or named, and `..` ignores the rest.
+    /// A constructor pattern, spelled the way construction is: `LoadError.Io(code, message)`,
+    /// `LoadError.NotFound`, `User(id: 7, ..)`. A dotted path or an argument list is what marks
+    /// it; arguments may be positional or named, and `..` ignores the rest.
     Construct {
         path: Path,
         args: Vec<PatArg>,
@@ -387,7 +382,7 @@ pub enum PatKind {
     Or(Vec<Pat>),
 }
 
-/// A constructor argument in a pattern, optionally named: `#LoadError.Io(code: 404, message: m)`.
+/// A constructor argument in a pattern, optionally named: `LoadError.Io(code: 404, message: m)`.
 #[derive(Debug)]
 pub struct PatArg {
     pub name: Option<Ident>,

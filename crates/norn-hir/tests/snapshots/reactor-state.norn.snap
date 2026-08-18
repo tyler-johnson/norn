@@ -17,7 +17,7 @@ error: a reactor's input cannot hold a `Connection`
 error: a reactor's state cell cannot hold a `Session`
   --> reactor-state.norn:20:5
    |
-20 |     state current: Session = #Session(conn: seed, since: 0)
-   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `current` would own something the graph cannot close
+20 |     state current: Session = Session(conn: seed, since: 0)
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `current` would own something the graph cannot close
    = note: a reactor's state is a value that could be written down and restored, and an open descriptor is not
    = note: count what a task owns and send the reactor the count: see `examples/reactors/server.norn`

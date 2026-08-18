@@ -425,12 +425,12 @@ fn print_rvalue(program: &Program, function: &Function, rvalue: &Rvalue) -> Stri
             format!("task builtin {}({})", builtin.name(), args(operands))
         }
         Rvalue::Record(id, operands) => {
-            format!("#{}({})", program.records[*id].name, args(operands))
+            format!("{}({})", program.records[*id].name, args(operands))
         }
         Rvalue::Variant(enum_id, variant, operands) => {
             let def = &program.enums[*enum_id];
             format!(
-                "#{}.{}({})",
+                "{}.{}({})",
                 def.name,
                 def.variants[*variant].name,
                 args(operands)

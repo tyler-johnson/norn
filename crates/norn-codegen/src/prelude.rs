@@ -650,7 +650,7 @@ fn render_nested(value: &Value) -> String {
         Value::Signal(id, index) => format!("<signal {index} of {id}>"),
         Value::Record(id, fields) => {
             let layout = &RECORDS[*id];
-            let mut out = format!("#{}(", layout.name);
+            let mut out = format!("{}(", layout.name);
             for (index, field) in fields.iter().enumerate() {
                 if index > 0 {
                     out.push_str(", ");
@@ -670,9 +670,9 @@ fn render_nested(value: &Value) -> String {
             // `Option` and `Result` are written unqualified in source, so they print that way.
             let builtin = *enum_id == ENUM_OPTION || *enum_id == ENUM_RESULT;
             let mut out = if builtin {
-                format!("#{}", variant.name)
+                variant.name.to_string()
             } else {
-                format!("#{}.{}", layout.name, variant.name)
+                format!("{}.{}", layout.name, variant.name)
             };
             if fields.is_empty() {
                 return out;

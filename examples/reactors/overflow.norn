@@ -44,7 +44,7 @@ reactor Sink() {
         d = d * 10 + value
     }
 
-    export signal counts = #Counts(rejected: a, oldest: b, newest: c, waited: d)
+    export signal counts = Counts(rejected: a, oldest: b, newest: c, waited: d)
 }
 
 task fn flood(sink: Sink) -> ()

@@ -1,0 +1,27 @@
+error: `Point` is already the name of a record
+  --> constructors.norn:15:4
+   |
+15 | fn Point(x: I64) -> I64 {
+   |    ^^^^^ a call must be unambiguous
+   = note: `Point(…)` has to mean one thing, and the record `Point` already claims it
+
+error: `Some` cannot be a binding
+  --> constructors.norn:22:9
+   |
+22 |     let Some = 5
+   |         ^^^^ a built-in constructor
+   = note: `None`, `Some`, `Ok`, and `Err` always name the Option and Result constructors
+
+error: `Shape` is an enum
+  --> constructors.norn:28:5
+   |
+28 |     Shape(radius: 1)
+   |     ^^^^^
+   = note: name the variant, as in `Shape.Empty`
+
+error: `Shape.Circle` carries a payload
+  --> constructors.norn:33:5
+   |
+33 |     Shape.Circle
+   |     ^^^^^^^^^^^^ not a unit variant
+   = note: construct it with its fields, as in `Shape.Circle(centre: …, radius: …)`

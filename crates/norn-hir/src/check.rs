@@ -1,10 +1,15 @@
 //! Name resolution and type checking: AST in, typed HIR out.
 //!
 //! The checker is bidirectional. `check_expr` takes the type its position demands, when there is
-//! one, and falls back to synthesising a type when there is not. That is what lets `#None` and
-//! `#Err(e)` work without inference variables: the expectation supplies the argument the
+//! one, and falls back to synthesising a type when there is not. That is what lets `None` and
+//! `Err(e)` work without inference variables: the expectation supplies the argument the
 //! expression cannot know on its own, and where no expectation exists the checker says so rather
 //! than guessing.
+//!
+//! Construction is spelled like a call, so name resolution here is what tells `Point(x: 1)` the
+//! record from `point(x: 1)` the function: call position asks the builtins, then the `fn`s, then
+//! the type namespace — never the locals, which is why a local sharing a record's name is legal
+//! and invisible to a call.
 //!
 //! Everything the grammar admits but v0 does not implement — tasks, `await`, methods, generic
 //! arguments, first-class functions — is rejected here, by name, with the milestone that will
@@ -40,6 +45,14 @@ pub fn check(module: &ast::Module) -> Checked {
     // before any body is checked, and what that finds should not float to the top of the list.
     errors.sort_by_key(|diagnostic| diagnostic.span.start);
     Checked { program, errors }
+}
+
+/// The four constructor names that stay bare: resolved by the expected type in expressions and
+/// by the scrutinee in patterns. In exchange they are unbindable — no local, parameter, pattern
+/// binding, `fn`, or reactor member may take one — which is what keeps `None =>` from quietly
+/// becoming a catch-all binding.
+fn is_builtin_variant(name: &str) -> bool {
+    matches!(name, "None" | "Some" | "Ok" | "Err")
 }
 
 /// What a name at the head of a path refers to.
@@ -328,6 +341,14 @@ impl Checker {
         );
         self.types
             .insert("IoError".into(), TypeName::Enum(EnumId::IO_ERROR));
+        // `Option` and `Result` have their own `Ty` spellings and `resolve_ty` checks those
+        // before consulting this map, so registering them changes nothing about types. What it
+        // does is give the *value* namespace a head to resolve — `Option.None` is a variant
+        // construction — and make `enum Option` a redeclaration rather than a shadow.
+        self.types
+            .insert("Option".into(), TypeName::Enum(EnumId::OPTION));
+        self.types
+            .insert("Result".into(), TypeName::Enum(EnumId::RESULT));
 
         for item in &module.items {
             let (name, span) = match item {
@@ -470,6 +491,39 @@ impl Checker {
                         format!("`{}` is a built-in function", decl.name.name),
                     )
                     .label("cannot be redefined"),
+                );
+                continue;
+            }
+            if is_builtin_variant(&decl.name.name) {
+                self.push(
+                    Diagnostic::new(
+                        decl.name.span,
+                        format!("`{}` is a built-in constructor", decl.name.name),
+                    )
+                    .label("cannot be redefined")
+                    .note("`None`, `Some`, `Ok`, and `Err` always name the Option and Result constructors"),
+                );
+                continue;
+            }
+            // Construction is spelled like a call, so call position must be unambiguous: one
+            // name cannot both build a value and call a function.
+            let clash = match self.types.get(&decl.name.name) {
+                Some(TypeName::Record(_)) => Some("record"),
+                Some(TypeName::Enum(_)) => Some("enum"),
+                Some(TypeName::Reactor(_)) => Some("reactor"),
+                Some(TypeName::Builtin(_)) | None => None,
+            };
+            if let Some(what) = clash {
+                self.push(
+                    Diagnostic::new(
+                        decl.name.span,
+                        format!("`{}` is already the name of a {what}", decl.name.name),
+                    )
+                    .label("a call must be unambiguous")
+                    .note(format!(
+                        "`{0}(…)` has to mean one thing, and the {what} `{0}` already claims it",
+                        decl.name.name
+                    )),
                 );
                 continue;
             }
@@ -640,6 +694,17 @@ impl Checker {
                          taken: &mut HashMap<String, Span>,
                          name: &ast::Ident|
              -> bool {
+                if is_builtin_variant(&name.name) {
+                    checker.push(
+                        Diagnostic::new(
+                            name.span,
+                            format!("`{}` cannot be the name of a member", name.name),
+                        )
+                        .label("a built-in constructor")
+                        .note("`None`, `Some`, `Ok`, and `Err` always name the Option and Result constructors"),
+                    );
+                    return false;
+                }
                 if let Some(first) = taken.get(&name.name) {
                     checker.push(
                         Diagnostic::new(
@@ -868,7 +933,10 @@ impl Checker {
                     // Calling a signal is calling a function of nodes that have no value yet, for
                     // the same reason reading one is: there has been no turn.
                     for (found, span) in &scan.calls {
-                        if Builtin::from_name(found).is_some() || self.fns.contains_key(found) {
+                        if Builtin::from_name(found).is_some()
+                            || self.fns.contains_key(found)
+                            || self.types.contains_key(found)
+                        {
                             continue;
                         }
                         let Some(sort) = members.get(found) else {
@@ -912,7 +980,10 @@ impl Checker {
                     // what says so. The edge is redundant at runtime rather than wrong: whatever
                     // moved the callee's value moved one of the arguments passed to it too.
                     for (found, _) in &scan.calls {
-                        if Builtin::from_name(found).is_some() || self.fns.contains_key(found) {
+                        if Builtin::from_name(found).is_some()
+                            || self.fns.contains_key(found)
+                            || self.types.contains_key(found)
+                        {
                             continue;
                         }
                         if let Some(Sort::Signal) = members.get(found) {
@@ -1696,6 +1767,17 @@ impl Checker {
         role: LocalRole,
         span: Span,
     ) -> LocalId {
+        // The four bare constructor names are unbindable. A binding named `Some` could never be
+        // read back — the name always resolves to the constructor — so it is refused where it is
+        // written rather than left to confuse every later use. The local is still declared, so
+        // that whatever was checked against it does not cascade.
+        if is_builtin_variant(&name) {
+            self.push(
+                Diagnostic::new(span, format!("`{name}` cannot be a binding"))
+                    .label("a built-in constructor")
+                    .note("`None`, `Some`, `Ok`, and `Err` always name the Option and Result constructors"),
+            );
+        }
         let id = LocalId(self.locals.len() as u32);
         self.locals.push(LocalDef {
             name: name.clone(),
@@ -1785,7 +1867,7 @@ impl Checker {
                 ty: Ty::Bool,
                 span,
             },
-            ast::ExprKind::Path(path) => self.check_path(path),
+            ast::ExprKind::Path(path) => self.check_path(path, expected),
             ast::ExprKind::Field { base, name } => {
                 let base = self.check_expr(base, None);
                 self.field_access(base, name, span)
@@ -1796,10 +1878,7 @@ impl Checker {
                 callee,
                 type_args,
                 args,
-            } => self.check_call(callee, type_args, args, span),
-            ast::ExprKind::Construct { path, args } => {
-                self.check_construct(path, args, expected, span)
-            }
+            } => self.check_call(callee, type_args, args, expected, span),
             ast::ExprKind::Block(block) => self.check_block(block, expected, span),
             ast::ExprKind::If { cond, then, els } => self.check_if(cond, then, els, expected, span),
             ast::ExprKind::Match { scrutinee, arms } => {
@@ -2080,16 +2159,33 @@ impl Checker {
         }
     }
 
-    fn check_path(&mut self, path: &ast::Path) -> Expr {
+    fn check_path(&mut self, path: &ast::Path, expected: Option<&Ty>) -> Expr {
         let span = path.span;
         let head = &path.segments[0];
+        // A local shadows everything, including a record or enum of the same name — which is why
+        // `let Shape = …` followed by `Shape.Empty` is a field-access error on the local rather
+        // than a construction. The four builtin constructor names are the exception, and only
+        // because they are unbindable: nothing can exist for them to shadow.
         let Some(local) = self.lookup_local(&head.name) else {
+            if path.segments.len() == 1 && is_builtin_variant(&head.name) {
+                return match head.name.as_str() {
+                    "None" | "Some" => self.check_option(path, &[], expected, span),
+                    _ => self.check_result(path, &[], expected, span),
+                };
+            }
             // Inside a reactor, a name that does not resolve is very often a member that is real
             // but unreadable *here*, and saying which is the whole difference between a diagnostic
             // that teaches the rule and one that looks like a typo.
             if let Some(sort) = self.members.get(&head.name).copied() {
                 self.unreadable_member(&head.name, sort, span);
                 return self.error_expr(span);
+            }
+            // A dotted path whose head names an enum is a variant construction: `Shape.Empty`.
+            if path.segments.len() >= 2
+                && let Some(TypeName::Enum(id)) = self.types.get(&head.name)
+            {
+                let id = *id;
+                return self.check_variant_path(id, path, expected, span);
             }
             if path.segments.len() == 1 && self.fns.contains_key(&head.name) {
                 self.push(
@@ -2116,6 +2212,65 @@ impl Checker {
         };
         for segment in &path.segments[1..] {
             expr = self.field_access(expr, segment, head.span.to(segment.span));
+        }
+        expr
+    }
+
+    /// A bare dotted path whose head names an enum: `Shape.Empty`, `IoError.NotFound`.
+    ///
+    /// Only a unit variant can be built without an argument list; a payload-carrying variant is
+    /// answered with the arguments it is missing. Segments after the variant are field accesses,
+    /// which fail the way field access on an enum always does.
+    fn check_variant_path(
+        &mut self,
+        id: EnumId,
+        path: &ast::Path,
+        expected: Option<&Ty>,
+        span: Span,
+    ) -> Expr {
+        let enum_name = &path.segments[0].name;
+        let variant_name = &path.segments[1].name;
+        let variant_span = path.segments[0].span.to(path.segments[1].span);
+        let Some((index, variant)) = self.program.enums[id.index()].variant(variant_name) else {
+            let message = format!("`{enum_name}` has no variant `{variant_name}`");
+            self.push(Diagnostic::new(path.segments[1].span, message).label("unknown variant"));
+            return self.error_expr(span);
+        };
+        let fields: Vec<String> = if variant.positional {
+            variant.fields.iter().map(|_| "…".to_string()).collect()
+        } else {
+            variant
+                .fields
+                .iter()
+                .map(|f| format!("{}: …", f.name))
+                .collect()
+        };
+        // `Option.None` and friends build `Ty::Option`/`Ty::Result` values whose payload types
+        // come from the expectation, so they route through the builtin checkers.
+        if (id == EnumId::OPTION || id == EnumId::RESULT) && path.segments.len() == 2 {
+            return if id == EnumId::OPTION {
+                self.check_option(path, &[], expected, span)
+            } else {
+                self.check_result(path, &[], expected, span)
+            };
+        }
+        if !fields.is_empty() {
+            self.push(
+                Diagnostic::new(
+                    variant_span,
+                    format!("`{enum_name}.{variant_name}` carries a payload"),
+                )
+                .label("not a unit variant")
+                .note(format!(
+                    "construct it with its fields, as in `{enum_name}.{variant_name}({})`",
+                    fields.join(", ")
+                )),
+            );
+            return self.error_expr(span);
+        }
+        let mut expr = self.construct_variant(id, index, &[], Ty::Enum(id), variant_span);
+        for segment in &path.segments[2..] {
+            expr = self.field_access(expr, segment, path.segments[0].span.to(segment.span));
         }
         expr
     }
@@ -2451,6 +2606,7 @@ impl Checker {
         callee: &ast::Expr,
         type_args: &[ast::Type],
         args: &[ast::Arg],
+        expected: Option<&Ty>,
         span: Span,
     ) -> Expr {
         if !type_args.is_empty() {
@@ -2475,6 +2631,38 @@ impl Checker {
                 span,
             };
         };
+        let name = &path.last().name;
+
+        // The four bare constructor names first: they are unbindable, so nothing else can
+        // answer for them.
+        if path.segments.len() == 1 && is_builtin_variant(name) {
+            return match name.as_str() {
+                "None" | "Some" => self.check_option(path, args, expected, span),
+                _ => self.check_result(path, args, expected, span),
+            };
+        }
+
+        // `Enum.Variant(…)` is a construction spelled like a call, which is what it is.
+        if path.segments.len() == 2
+            && let Some(TypeName::Enum(id)) = self.types.get(&path.segments[0].name)
+        {
+            let id = *id;
+            let Some((index, _)) = self.program.enums[id.index()].variant(name) else {
+                let message = format!("`{}` has no variant `{name}`", path.segments[0].name);
+                self.push(Diagnostic::new(path.segments[1].span, message).label("unknown variant"));
+                return self.error_expr(span);
+            };
+            // Option and Result build `Ty::Option`/`Ty::Result` values whose payload types come
+            // from the expectation, so they route through the builtin checkers.
+            if id == EnumId::OPTION {
+                return self.check_option(path, args, expected, span);
+            }
+            if id == EnumId::RESULT {
+                return self.check_result(path, args, expected, span);
+            }
+            return self.construct_variant(id, index, args, Ty::Enum(id), span);
+        }
+
         if path.segments.len() != 1 {
             self.error(path.span, format!("unknown function `{}`", path.text()));
             return Expr {
@@ -2483,13 +2671,50 @@ impl Checker {
                 span,
             };
         }
-        let name = &path.last().name;
 
         if let Some(builtin) = Builtin::from_name(name) {
             return self.check_builtin(builtin, args, span);
         }
 
         let Some(&id) = self.fns.get(name) else {
+            // Construction is spelled like a call; resolution is what tells the two apart. A
+            // record name builds the record, and the type namespace answers before the reactor
+            // member fallback does — matching the scan in `reactor_graph`, which skips type
+            // names for the same reason.
+            if let Some(kind) = self.types.get(name) {
+                match kind {
+                    TypeName::Record(id) => {
+                        let id = *id;
+                        return self.construct_record(id, args, span);
+                    }
+                    TypeName::Enum(id) => {
+                        let example = self.program.enums[id.index()].variants.first().map_or_else(
+                            || "Variant".to_string(),
+                            |v| {
+                                if v.fields.is_empty() {
+                                    v.name.clone()
+                                } else {
+                                    format!("{}(…)", v.name)
+                                }
+                            },
+                        );
+                        self.push(
+                            Diagnostic::new(path.span, format!("`{name}` is an enum"))
+                                .note(format!("name the variant, as in `{name}.{example}`")),
+                        );
+                        return self.error_expr(span);
+                    }
+                    TypeName::Reactor(_) => {
+                        self.push(
+                            Diagnostic::new(path.span, format!("`{name}` is a reactor"))
+                                .label("not a function")
+                                .note(format!("create one with `spawn reactor {name}(…)`")),
+                        );
+                        return self.error_expr(span);
+                    }
+                    TypeName::Builtin(_) => {}
+                }
+            }
             return self.check_member_call(name, path.span, args, span);
         };
         let (params, ret) = self.signatures[id.index()].clone();
@@ -2853,87 +3078,6 @@ impl Checker {
         if failed { None } else { Some(order) }
     }
 
-    fn check_construct(
-        &mut self,
-        path: &ast::Path,
-        args: &[ast::Arg],
-        expected: Option<&Ty>,
-        span: Span,
-    ) -> Expr {
-        // The built-in constructors need the expectation to supply the argument they cannot see.
-        if path.segments.len() == 1 {
-            match path.last().name.as_str() {
-                "None" | "Some" => return self.check_option(path, args, expected, span),
-                "Ok" | "Err" => return self.check_result(path, args, expected, span),
-                _ => {}
-            }
-        }
-
-        match path.segments.len() {
-            1 => {
-                let name = &path.last().name;
-                match self.types.get(name) {
-                    Some(TypeName::Record(id)) => {
-                        let id = *id;
-                        self.construct_record(id, args, span)
-                    }
-                    Some(TypeName::Enum(_)) => {
-                        self.push(
-                            Diagnostic::new(span, format!("`{name}` is an enum"))
-                                .note("name the variant too, as in `#LoadError.NotFound`"),
-                        );
-                        Expr {
-                            kind: ExprKind::Error,
-                            ty: Ty::Error,
-                            span,
-                        }
-                    }
-                    _ => {
-                        self.error(span, format!("unknown record `{name}`"));
-                        Expr {
-                            kind: ExprKind::Error,
-                            ty: Ty::Error,
-                            span,
-                        }
-                    }
-                }
-            }
-            2 => {
-                let enum_name = &path.segments[0].name;
-                let variant_name = &path.segments[1].name;
-                let Some(TypeName::Enum(id)) = self.types.get(enum_name) else {
-                    self.error(path.segments[0].span, format!("unknown enum `{enum_name}`"));
-                    return Expr {
-                        kind: ExprKind::Error,
-                        ty: Ty::Error,
-                        span,
-                    };
-                };
-                let id = *id;
-                let Some((index, _)) = self.program.enums[id.index()].variant(variant_name) else {
-                    let message = format!("`{enum_name}` has no variant `{variant_name}`");
-                    self.push(
-                        Diagnostic::new(path.segments[1].span, message).label("unknown variant"),
-                    );
-                    return Expr {
-                        kind: ExprKind::Error,
-                        ty: Ty::Error,
-                        span,
-                    };
-                };
-                self.construct_variant(id, index, args, Ty::Enum(id), span)
-            }
-            _ => {
-                self.error(span, format!("unknown constructor `{}`", path.text()));
-                Expr {
-                    kind: ExprKind::Error,
-                    ty: Ty::Error,
-                    span,
-                }
-            }
-        }
-    }
-
     fn check_option(
         &mut self,
         path: &ast::Path,
@@ -2958,7 +3102,7 @@ impl Checker {
 
         if !some {
             if !args.is_empty() {
-                self.error(span, "`#None` takes no arguments");
+                self.error(span, "`None` takes no arguments");
                 return Expr {
                     kind: ExprKind::Error,
                     ty: Ty::Error,
@@ -2966,7 +3110,7 @@ impl Checker {
                 };
             }
             let Some(inner) = inner_expected else {
-                return self.uninferable(span, "#None", "Option<I64>");
+                return self.uninferable(span, "None", "Option<I64>");
             };
             return Expr {
                 kind: ExprKind::Construct {
@@ -2979,7 +3123,7 @@ impl Checker {
         }
 
         if args.len() != 1 || args[0].name.is_some() {
-            self.error(span, "`#Some` takes one positional argument");
+            self.error(span, "`Some` takes one positional argument");
             return Expr {
                 kind: ExprKind::Error,
                 ty: Ty::Error,
@@ -3020,7 +3164,7 @@ impl Checker {
             _ => None,
         };
 
-        let name = if is_ok { "#Ok" } else { "#Err" };
+        let name = if is_ok { "Ok" } else { "Err" };
         if args.len() != 1 || args[0].name.is_some() {
             self.error(span, format!("`{name}` takes one positional argument"));
             return Expr {
@@ -3536,7 +3680,7 @@ impl Checker {
             .iter()
             .enumerate()
             .filter(|(index, _)| !covered.contains(index))
-            .map(|(_, variant)| format!("#{name}.{}", variant.name))
+            .map(|(_, variant)| format!("{name}.{}", variant.name))
             .collect();
         if !missing.is_empty() {
             self.push(
@@ -3635,6 +3779,12 @@ impl Checker {
                 span,
             },
             ast::PatKind::Binding(name) => {
+                // The four builtin constructor names never bind: `None =>` is the arm that
+                // matches the empty Option, not a catch-all, and unbindability is what makes
+                // reading it that way safe.
+                if is_builtin_variant(&name.name) {
+                    return self.builtin_variant_pat(&name.name, &[], false, ty, span);
+                }
                 let local = self.declare_local(name.name.clone(), ty.clone(), false, name.span);
                 Pat {
                     kind: PatKind::Bind(local),
@@ -3704,55 +3854,16 @@ impl Checker {
         ty: &Ty,
         span: Span,
     ) -> Pat {
-        // Resolve the constructor against the type being matched, so `#Some(x)` and `#Ok(x)` need
-        // no qualification and pick up their payload type from the scrutinee.
-        let resolved = match (path.segments.len(), path.last().name.as_str(), ty) {
-            (1, "None", Ty::Option(_)) => Some((EnumId::OPTION, EnumId::NONE, Vec::new())),
-            (1, "Some", Ty::Option(inner)) => {
-                Some((EnumId::OPTION, EnumId::SOME, vec![(**inner).clone()]))
-            }
-            (1, "Ok", Ty::Result(ok, _)) => {
-                Some((EnumId::RESULT, EnumId::OK, vec![(**ok).clone()]))
-            }
-            (1, "Err", Ty::Result(_, err)) => {
-                Some((EnumId::RESULT, EnumId::ERR, vec![(**err).clone()]))
-            }
-            _ => None,
-        };
-
-        if let Some((enum_id, variant, types)) = resolved {
-            let names: Vec<String> = (0..types.len()).map(|i| i.to_string()).collect();
-            let name = format!("#{}", path.text());
-            let Some(sub) = self.pat_args(&names, &types, args, rest, &name, span) else {
-                return Pat {
-                    kind: PatKind::Error,
-                    span,
-                };
-            };
-            return Pat {
-                kind: PatKind::Variant {
-                    enum_id,
-                    variant,
-                    args: sub,
-                },
-                span,
-            };
+        // Resolve the builtin constructors against the type being matched, so `Some(x)` and
+        // `Ok(x)` need no qualification and pick up their payload type from the scrutinee.
+        if path.segments.len() == 1 && is_builtin_variant(&path.last().name) {
+            let name = path.last().name.clone();
+            return self.builtin_variant_pat(&name, args, rest, ty, span);
         }
 
         match path.segments.len() {
             1 => {
                 let name = path.last().name.clone();
-                if matches!(name.as_str(), "None" | "Some" | "Ok" | "Err") {
-                    let message = format!(
-                        "`#{name}` matches Option or Result, but the value is {}",
-                        self.program.ty_name(ty)
-                    );
-                    self.error(span, message);
-                    return Pat {
-                        kind: PatKind::Error,
-                        span,
-                    };
-                }
                 let Some(TypeName::Record(id)) = self.types.get(&name) else {
                     self.error(span, format!("unknown record `{name}`"));
                     return Pat {
@@ -3790,6 +3901,26 @@ impl Checker {
                     };
                 };
                 let id = *id;
+                // `Option.Some(x)` and friends: their scrutinees are `Ty::Option`/`Ty::Result`
+                // rather than `Ty::Enum`, so they route through the builtin resolution once the
+                // variant name is known to be real.
+                if id == EnumId::OPTION || id == EnumId::RESULT {
+                    if self.program.enums[id.index()]
+                        .variant(&variant_name)
+                        .is_none()
+                    {
+                        let message = format!("`{enum_name}` has no variant `{variant_name}`");
+                        self.push(
+                            Diagnostic::new(path.segments[1].span, message)
+                                .label("unknown variant"),
+                        );
+                        return Pat {
+                            kind: PatKind::Error,
+                            span,
+                        };
+                    }
+                    return self.builtin_variant_pat(&variant_name, args, rest, ty, span);
+                }
                 self.expect_pat_ty(&Ty::Enum(id), ty, span);
                 let Some((index, variant)) = self.program.enums[id.index()].variant(&variant_name)
                 else {
@@ -3827,6 +3958,55 @@ impl Checker {
                     span,
                 }
             }
+        }
+    }
+
+    /// One of the four bare constructor names in a pattern, resolved against the scrutinee — which
+    /// is what lets `Some(x)` and `Ok(x)` need no qualification and pick up their payload type.
+    fn builtin_variant_pat(
+        &mut self,
+        name: &str,
+        args: &[ast::PatArg],
+        rest: bool,
+        ty: &Ty,
+        span: Span,
+    ) -> Pat {
+        let resolved = match (name, ty) {
+            ("None", Ty::Option(_)) => Some((EnumId::OPTION, EnumId::NONE, Vec::new())),
+            ("Some", Ty::Option(inner)) => {
+                Some((EnumId::OPTION, EnumId::SOME, vec![(**inner).clone()]))
+            }
+            ("Ok", Ty::Result(ok, _)) => Some((EnumId::RESULT, EnumId::OK, vec![(**ok).clone()])),
+            ("Err", Ty::Result(_, err)) => {
+                Some((EnumId::RESULT, EnumId::ERR, vec![(**err).clone()]))
+            }
+            _ => None,
+        };
+        let Some((enum_id, variant, types)) = resolved else {
+            let message = format!(
+                "`{name}` matches Option or Result, but the value is {}",
+                self.program.ty_name(ty)
+            );
+            self.error(span, message);
+            return Pat {
+                kind: PatKind::Error,
+                span,
+            };
+        };
+        let names: Vec<String> = (0..types.len()).map(|i| i.to_string()).collect();
+        let Some(sub) = self.pat_args(&names, &types, args, rest, name, span) else {
+            return Pat {
+                kind: PatKind::Error,
+                span,
+            };
+        };
+        Pat {
+            kind: PatKind::Variant {
+                enum_id,
+                variant,
+                args: sub,
+            },
+            span,
         }
     }
 
@@ -4018,7 +4198,7 @@ impl<'a> Scan<'a> {
                     self.expr(&arg.value);
                 }
             }
-            ast::ExprKind::Construct { args, .. } | ast::ExprKind::SpawnReactor { args, .. } => {
+            ast::ExprKind::SpawnReactor { args, .. } => {
                 for arg in args {
                     self.expr(&arg.value);
                 }
@@ -4117,6 +4297,9 @@ impl<'a> Scan<'a> {
 
     fn pat(&mut self, pat: &ast::Pat) {
         match &pat.kind {
+            // The four builtin constructor names are matches, not bindings, and unbindable
+            // besides — so they never shadow a member.
+            ast::PatKind::Binding(name) if is_builtin_variant(&name.name) => {}
             ast::PatKind::Binding(name) => self.bind(&name.name),
             ast::PatKind::Construct { args, .. } => {
                 for arg in args {
@@ -4742,7 +4925,7 @@ impl Moves<'_> {
         self.errors.push(
             Diagnostic::new(span, format!("`{field}` cannot be moved out of a `{whole}`"))
                 .label("this would leave the rest of the value with no owner")
-                .note("an owned value moves whole; `match` is what takes one apart, as in `match session { #Session(conn: conn) => … }`")
+                .note("an owned value moves whole; `match` is what takes one apart, as in `match session { Session(conn: conn) => … }`")
                 .note("to read it without taking it, write `&`"),
         );
     }

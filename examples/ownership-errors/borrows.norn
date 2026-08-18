@@ -25,11 +25,11 @@ task fn names_a_borrow() -> ()
     uses { net.listen, net.io }
 {
     match await tcp_listen(0) {
-        #Ok(listener) => {
+        Ok(listener) => {
             let held = &listener
             print(listener_port(held))
         }
-        #Err(_) => ()
+        Err(_) => ()
     }
 }
 
@@ -39,8 +39,8 @@ task fn wrong_way_round(conn: Connection) -> ()
     uses { net.io }
 {
     match await tcp_read(conn) {
-        #Ok(_) => ()
-        #Err(_) => ()
+        Ok(_) => ()
+        Err(_) => ()
     }
     await tcp_close(&conn)
 }
@@ -49,8 +49,8 @@ task fn serve(conn: &Connection) -> ()
     uses { net.io }
 {
     match await tcp_read(conn) {
-        #Ok(_) => ()
-        #Err(_) => ()
+        Ok(_) => ()
+        Err(_) => ()
     }
 }
 

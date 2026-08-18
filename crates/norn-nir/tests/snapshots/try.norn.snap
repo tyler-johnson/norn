@@ -7,8 +7,8 @@ fn refuse #0()
     local _0
     local _1
   b0:
-    _0 = #IoError.Refused()
-    _1 = #Result.Err(_0)
+    _0 = IoError.Refused()
+    _1 = Result.Err(_0)
     return _1
 
 task fn patient #1()
@@ -48,18 +48,18 @@ task fn main #2()
     _0 = _7
     scope exit, resume b5
   b3:
-    _6 = #Result.Err(_4.0)
+    _6 = Result.Err(_4.0)
     scope exit, resume b4
   b4:
     return _6
   b5:
     _8 = builtin print("or this")
-    _9 = #Result.Ok(())
+    _9 = Result.Ok(())
     return _9
 
 === output ===
 === result ===
-#Err(#IoError.Refused)
+Err(IoError.Refused)
 === trace ===
 0ms t0 spawn main root
 0ms t0 resume

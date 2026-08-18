@@ -61,20 +61,20 @@ task fn main #1()
     _7 = task builtin sleep(50)
     await _7 -> _8, resume b4
   b3:
-    _4 = #Result.Err(_2.0)
+    _4 = Result.Err(_2.0)
     return _4
   b4:
     _5 = _8
     scope exit, resume b5
   b5:
     _9 = builtin print("the scope closed the socket on its way out")
-    _10 = #Result.Ok(())
+    _10 = Result.Ok(())
     return _10
 
 === output ===
 the scope closed the socket on its way out
 === result ===
-#Ok(())
+Ok(())
 === trace ===
 0ms t0 spawn main root
 0ms t0 resume

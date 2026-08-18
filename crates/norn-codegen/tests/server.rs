@@ -51,7 +51,7 @@ fn the_native_server_counts_what_it_is_holding_open() {
         .expect("the server prints its final snapshot");
     assert_eq!(
         snapshot.trim_end(),
-        "#Snapshot(accepted: 2, open: 0, healthy: true)",
+        "Snapshot(accepted: 2, open: 0, healthy: true)",
         "the reactor did not see both connections open and close"
     );
 

@@ -87,7 +87,7 @@ fn a_reactor_counts_what_the_server_is_holding_open() {
         .recv_timeout(Duration::from_secs(10))
         .expect("the server prints its final snapshot");
     assert_eq!(
-        snapshot, "#Snapshot(accepted: 2, open: 0, healthy: true)",
+        snapshot, "Snapshot(accepted: 2, open: 0, healthy: true)",
         "the reactor did not see both connections open and close"
     );
 

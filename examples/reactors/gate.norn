@@ -58,7 +58,7 @@ reactor Gate(limit: I64)
     signal open = accepted - released
     signal healthy = open <= limit
 
-    export signal snapshot = #Snapshot(
+    export signal snapshot = Snapshot(
         accepted: accepted, rejected: rejected, open: open, healthy: healthy
     )
 }

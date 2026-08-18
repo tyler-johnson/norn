@@ -642,7 +642,7 @@ impl Interpreter<'_> {
             Value::Signal(id, index) => format!("<signal {index} of {id}>"),
             Value::Record(id, fields) => {
                 let layout = &self.program.records[*id];
-                let mut out = format!("#{}(", layout.name);
+                let mut out = format!("{}(", layout.name);
                 for (index, field) in fields.iter().enumerate() {
                     if index > 0 {
                         out.push_str(", ");
@@ -664,9 +664,9 @@ impl Interpreter<'_> {
                 let builtin =
                     *enum_id == EnumId::OPTION.index() || *enum_id == EnumId::RESULT.index();
                 let mut out = if builtin {
-                    format!("#{}", variant.name)
+                    variant.name.to_string()
                 } else {
-                    format!("#{}.{}", layout.name, variant.name)
+                    format!("{}.{}", layout.name, variant.name)
                 };
                 if fields.is_empty() {
                     return out;

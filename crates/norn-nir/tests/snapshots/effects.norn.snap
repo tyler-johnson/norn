@@ -31,11 +31,11 @@ task fn deliver #0(_0/id)
     _4 = _0/id eq 2
     branch _4 ? b2 : b3
   b2:
-    _5 = #Outcome.Failed()
+    _5 = Outcome.Failed()
     _3 = _5
     goto b4
   b3:
-    _6 = #Outcome.Delivered(_0/id)
+    _6 = Outcome.Delivered(_0/id)
     _3 = _6
     goto b4
   b4:
@@ -147,7 +147,7 @@ fn Mailbox.failed.init #6()
 fn Mailbox.report #7(_0/pending, _1/delivered, _2/failed)
     local _3
   b0:
-    _3 = #Report(_0/pending, _1/delivered, _2/failed)
+    _3 = Report(_0/pending, _1/delivered, _2/failed)
     return _3
 
 === graph ===
@@ -164,7 +164,7 @@ reactor Mailbox #0
     exports [report]
 
 === output ===
-#Report(pending: 0, delivered: 2, failed: 1)
+Report(pending: 0, delivered: 2, failed: 1)
 === result ===
 ()
 === trace ===

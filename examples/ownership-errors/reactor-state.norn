@@ -17,7 +17,7 @@ reactor Pool(seed: Connection) {
     input arrived: Connection [capacity: 8, overflow: drop_oldest]
     input departed: () [capacity: 8, overflow: reject]
 
-    state current: Session = #Session(conn: seed, since: 0)
+    state current: Session = Session(conn: seed, since: 0)
     state seen: I64 = 0
 
     on arrived(conn) {

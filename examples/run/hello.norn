@@ -10,6 +10,6 @@ fn render(greeting: Greeting) -> String {
 }
 
 fn main() {
-    let greeting = #Greeting(salutation: "Hello", subject: "world")
+    let greeting = Greeting(salutation: "Hello", subject: "world")
     print(render(greeting))
 }

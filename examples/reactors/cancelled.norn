@@ -36,7 +36,7 @@ reactor Slow()
         finished = finished + 1
     }
 
-    export signal counts = #Pair(started: started, finished: finished)
+    export signal counts = Pair(started: started, finished: finished)
 }
 
 task fn main() -> ()

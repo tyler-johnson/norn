@@ -66,7 +66,7 @@ fn rejected(directory: &str) {
 fn declaration_order_does_not_matter() {
     let source = "\
 fn first() -> Wrapper {
-    #Wrapper(inner: second())
+    Wrapper(inner: second())
 }
 
 fn second() -> I64 {
@@ -139,7 +139,7 @@ task fn main(session: Session) -> ()
     uses { net.io }
 {
     match session {
-        #Session(conn: conn, opened: _) => await tcp_close(conn)
+        Session(conn: conn, opened: _) => await tcp_close(conn)
     }
 }
 ",

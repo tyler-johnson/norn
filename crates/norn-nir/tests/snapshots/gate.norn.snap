@@ -147,7 +147,7 @@ fn Gate.healthy #8(_0/open, _1/limit)
 fn Gate.snapshot #9(_0/accepted, _1/rejected, _2/open, _3/healthy)
     local _4
   b0:
-    _4 = #Snapshot(_0/accepted, _1/rejected, _2/open, _3/healthy)
+    _4 = Snapshot(_0/accepted, _1/rejected, _2/open, _3/healthy)
     return _4
 
 === graph ===
@@ -168,7 +168,7 @@ reactor Gate #0
 
 === output ===
 3
-#Snapshot(accepted: 3, rejected: 1, open: 2, healthy: true)
+Snapshot(accepted: 3, rejected: 1, open: 2, healthy: true)
 === result ===
 ()
 === trace ===

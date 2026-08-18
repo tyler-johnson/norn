@@ -13,8 +13,8 @@ error: `User` has no field `nickname`
 error: missing field: name
   --> mismatches.norn:18:12
    |
-18 |     return #User(id: 1)
-   |            ^^^^^^^^^^^^
+18 |     return User(id: 1)
+   |            ^^^^^^^^^^^
 
 error: `-` does not apply to String
   --> mismatches.norn:22:12
@@ -31,8 +31,8 @@ error: unknown name `elsewhere`
 error: arguments are either all named or all positional
   --> mismatches.norn:30:12
    |
-30 |     return #User(1, name: "a")
-   |            ^^^^^^^^^^^^^^^^^^^
+30 |     return User(1, name: "a")
+   |            ^^^^^^^^^^^^^^^^^^
    = note: mixing the two forms would need a precedence rule nobody should have to learn
 
 error: `total` is not declared `mut`

@@ -10,12 +10,12 @@ fn wrong_return() -> String {
 }
 
 fn wrong_field() -> I64 {
-    let user = #User(id: 1, name: "a")
+    let user = User(id: 1, name: "a")
     return user.nickname
 }
 
 fn missing_field() -> User {
-    return #User(id: 1)
+    return User(id: 1)
 }
 
 fn wrong_operand() -> I64 {
@@ -27,7 +27,7 @@ fn unknown_name() -> I64 {
 }
 
 fn mixed_arguments() -> User {
-    return #User(1, name: "a")
+    return User(1, name: "a")
 }
 
 fn not_mutable() -> I64 {

@@ -22,9 +22,9 @@ task fn deliver(id: I64) -> Outcome
 {
     await sleep(id)
     if id == 2 {
-        #Outcome.Failed
+        Outcome.Failed
     } else {
-        #Outcome.Delivered(id)
+        Outcome.Delivered(id)
     }
 }
 
@@ -46,16 +46,16 @@ reactor Mailbox()
     on settled(outcome) {
         pending = pending - 1
         match outcome {
-            #Outcome.Delivered(_) => {
+            Outcome.Delivered(_) => {
                 delivered = delivered + 1
             }
-            #Outcome.Failed => {
+            Outcome.Failed => {
                 failed = failed + 1
             }
         }
     }
 
-    export signal report = #Report(pending: pending, delivered: delivered, failed: failed)
+    export signal report = Report(pending: pending, delivered: delivered, failed: failed)
 }
 
 task fn main() -> ()

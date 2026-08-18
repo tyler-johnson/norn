@@ -29,7 +29,7 @@ reactor Gate(limit: I64) {
     signal open = accepted - released
     signal healthy: Bool = open <= limit
 
-    export signal snapshot = #Snapshot(open: open, healthy: healthy)
+    export signal snapshot = Snapshot(open: open, healthy: healthy)
 }
 
 // `uses` on a reactor is the authority its effects need, and the spawner's set must cover it.
@@ -50,15 +50,15 @@ reactor Mailbox(retries: I64)
     on delivered(result) {
         pending = pending - 1
         match result {
-            #DeliveryResult.Ok => ()
-            #DeliveryResult.Failed(_) => {
+            DeliveryResult.Ok => ()
+            DeliveryResult.Failed(_) => {
                 failed = failed + 1
             }
         }
     }
 
     export signal depth = pending
-    export signal report = #Report(pending: pending, failed: failed, retries: retries)
+    export signal report = Report(pending: pending, failed: failed, retries: retries)
 }
 
 task fn drive(limit: I64) -> ()

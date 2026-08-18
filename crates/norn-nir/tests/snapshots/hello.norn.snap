@@ -20,7 +20,7 @@ fn main #1()
     local _2
     local _3
   b0:
-    _1 = #Greeting("Hello", "world")
+    _1 = Greeting("Hello", "world")
     _0/greeting = _1
     _2 = call render#0(_0/greeting)
     _3 = builtin print(_2)

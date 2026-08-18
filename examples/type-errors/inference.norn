@@ -6,17 +6,17 @@ enum Failure {
 }
 
 fn no_expectation() -> I64 {
-    let value = #None
+    let value = None
     return 1
 }
 
 fn wrong_error_type() -> Result<I64, Failure> {
     let value = fails()?
-    return #Ok(value)
+    return Ok(value)
 }
 
 fn fails() -> Result<I64, String> {
-    return #Err("no")
+    return Err("no")
 }
 
 fn not_a_result() -> I64 {
@@ -26,7 +26,7 @@ fn not_a_result() -> I64 {
 
 fn missing_arm(failure: Failure) -> I64 {
     match failure {
-        #Failure.Broken => 1
+        Failure.Broken => 1
     }
 }
 

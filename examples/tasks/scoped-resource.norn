@@ -22,7 +22,7 @@ task fn main() -> Result<(), IoError>
 
     print("the inner socket is closed and the outer one is not")
     await sleep(1)
-    #Ok(())
+    Ok(())
 }
 
 // Ports are chosen by the operating system, so the trace can say whether they differ but never

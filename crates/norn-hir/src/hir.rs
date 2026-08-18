@@ -501,7 +501,7 @@ pub enum LocalRole {
     Message,
 }
 
-/// Which aggregate a `#`-marked constructor builds.
+/// Which aggregate a constructor expression builds.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Ctor {
     Record(RecordId),

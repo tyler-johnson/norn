@@ -1,0 +1,34 @@
+module type_errors.constructors
+
+record Point {
+    x: I64
+    y: I64
+}
+
+enum Shape {
+    Empty
+    Circle { centre: Point, radius: I64 }
+}
+
+// Construction is spelled like a call, so one name cannot both build a value and call a
+// function.
+fn Point(x: I64) -> I64 {
+    return x
+}
+
+// The four bare constructor names never bind, which is what keeps `None =>` from quietly
+// becoming a catch-all.
+fn shadow() -> I64 {
+    let Some = 5
+    return 5
+}
+
+// An enum alone is not a constructor; the variant is.
+fn enum_alone() -> Shape {
+    Shape(radius: 1)
+}
+
+// A payload-carrying variant cannot be built bare.
+fn bare_variant() -> Shape {
+    Shape.Circle
+}

@@ -45,7 +45,7 @@ reactor Gate(limit: I64) {
     }
 
     // Named, not called: this is the graph's value, published after the turn settles.
-    export signal report = #Report(
+    export signal report = Report(
         count: count,
         rejected: rejected,
         full: is_full,

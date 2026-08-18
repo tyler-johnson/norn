@@ -12,8 +12,8 @@ task fn wait_for_client(listener: Listener) -> ()
     uses { net.io }
 {
     match await tcp_accept(&listener) {
-        #Ok(_) => print("a client arrived")
-        #Err(_) => print("the listener failed")
+        Ok(_) => print("a client arrived")
+        Err(_) => print("the listener failed")
     }
 }
 
@@ -26,5 +26,5 @@ task fn main() -> Result<(), IoError>
         await sleep(50)
     }
     print("the scope closed the socket on its way out")
-    #Ok(())
+    Ok(())
 }

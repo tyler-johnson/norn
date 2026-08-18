@@ -108,12 +108,12 @@ enum Outer {
 
 fn pick(value: Outer) -> I64 {
     match value {
-        #Outer.Wrap(#Inner.A) => 1
+        Outer.Wrap(Inner.A) => 1
     }
 }
 
 fn main() -> I64 {
-    pick(#Outer.Wrap(#Inner.B))
+    pick(Outer.Wrap(Inner.B))
 }
 ";
     let parsed = parse(source);

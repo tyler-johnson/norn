@@ -132,7 +132,7 @@ fn Gate.warn #6(_0/count, _1/limit, _2/headroom, _3/is_full)
 fn Gate.report #7(_0/count, _1/rejected, _2/is_full, _3/warn)
     local _4
   b0:
-    _4 = #Report(_0/count, _1/rejected, _2/is_full, _3/warn)
+    _4 = Report(_0/count, _1/rejected, _2/is_full, _3/warn)
     return _4
 
 === graph ===
@@ -150,7 +150,7 @@ reactor Gate #0
     exports [report]
 
 === output ===
-#Report(count: 3, rejected: 2, full: false, warn: true)
+Report(count: 3, rejected: 2, full: false, warn: true)
 === result ===
 ()
 === trace ===

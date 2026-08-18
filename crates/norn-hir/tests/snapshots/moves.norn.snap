@@ -51,7 +51,7 @@ error: `conn` cannot be moved out of a `Session`
    |
 67 |     await tcp_close(session.conn)
    |                     ^^^^^^^^^^^^ this would leave the rest of the value with no owner
-   = note: an owned value moves whole; `match` is what takes one apart, as in `match session { #Session(conn: conn) => … }`
+   = note: an owned value moves whole; `match` is what takes one apart, as in `match session { Session(conn: conn) => … }`
    = note: to read it without taking it, write `&`
 
 error: `closing` has already been moved

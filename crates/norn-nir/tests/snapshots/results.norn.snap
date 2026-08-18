@@ -19,8 +19,8 @@ fn port_of #0(_0/raw)
     _2 = _0/raw lt 1
     branch _2 ? b1 : b2
   b1:
-    _3 = #ConfigError.OutOfRange("port", _0/raw)
-    _4 = #Result.Err(_3)
+    _3 = ConfigError.OutOfRange("port", _0/raw)
+    _4 = Result.Err(_3)
     return _4
   b2:
     _1 = ()
@@ -29,14 +29,14 @@ fn port_of #0(_0/raw)
     _6 = _0/raw gt 65535
     branch _6 ? b4 : b5
   b4:
-    _7 = #ConfigError.OutOfRange("port", _0/raw)
-    _8 = #Result.Err(_7)
+    _7 = ConfigError.OutOfRange("port", _0/raw)
+    _8 = Result.Err(_7)
     return _8
   b5:
     _5 = ()
     goto b6
   b6:
-    _9 = #Result.Ok(_0/raw)
+    _9 = Result.Ok(_0/raw)
     return _9
 
 fn host_of #1(_0/raw)
@@ -49,12 +49,12 @@ fn host_of #1(_0/raw)
     _2 = _0/raw eq ""
     branch _2 ? b1 : b2
   b1:
-    _3 = #ConfigError.Missing("host")
-    _4 = #Result.Err(_3)
+    _3 = ConfigError.Missing("host")
+    _4 = Result.Err(_3)
     _1 = _4
     goto b3
   b2:
-    _5 = #Result.Ok(_0/raw)
+    _5 = Result.Ok(_0/raw)
     _1 = _5
     goto b3
   b3:
@@ -80,16 +80,16 @@ fn load #2(_0/raw_port, _1/raw_host)
     _7 = call host_of#1(_1/raw_host)
     switch tag _7 [0 => b3] else b4
   b2:
-    _6 = #Result.Err(_4.0)
+    _6 = Result.Err(_4.0)
     return _6
   b3:
     _8 = _7.0
     _3/host = _8
-    _10 = #Config(_2/port, _3/host)
-    _11 = #Result.Ok(_10)
+    _10 = Config(_2/port, _3/host)
+    _11 = Result.Ok(_10)
     return _11
   b4:
-    _9 = #Result.Err(_7.0)
+    _9 = Result.Err(_7.0)
     return _9
 
 fn report #3(_0/result)
@@ -166,10 +166,10 @@ fn first_word #4(_0/text)
     _3 = _2.0
     _1/index = _3
     _5 = call prefix#6(_0/text, _1/index)
-    _6 = #Option.Some(_5)
+    _6 = Option.Some(_5)
     return _6
   b2:
-    _4 = #Option.None()
+    _4 = Option.None()
     return _4
 
 fn index_of_space #5(_0/text)
@@ -181,11 +181,11 @@ fn index_of_space #5(_0/text)
     _2 = _0/text eq "hello world"
     branch _2 ? b1 : b2
   b1:
-    _3 = #Option.Some(5)
+    _3 = Option.Some(5)
     _1 = _3
     goto b3
   b2:
-    _4 = #Option.None()
+    _4 = Option.None()
     _1 = _4
     goto b3
   b3:
@@ -283,7 +283,7 @@ fn main #8()
     _13 = call first_word#4("indivisible")
     _14 = call describe_word#7(_13)
     _15 = builtin print(_14)
-    _16 = #ConfigError.OutOfRange("port", 70000)
+    _16 = ConfigError.OutOfRange("port", 70000)
     _17 = builtin print(_16)
     _18 = call load#2(443, "example.com")
     switch tag _18 [0 => b1] else b2
@@ -292,10 +292,10 @@ fn main #8()
     _0/config = _19
     _21 = "checked " concat _0/config.1
     _22 = builtin print(_21)
-    _23 = #Result.Ok(())
+    _23 = Result.Ok(())
     return _23
   b2:
-    _20 = #Result.Err(_18.0)
+    _20 = Result.Err(_18.0)
     return _20
 
 fn digits #9(_0/n)
@@ -425,7 +425,7 @@ port is out of range: 0
 missing host
 first word: hello
 no space found
-#ConfigError.OutOfRange(field: "port", value: 70000)
+ConfigError.OutOfRange(field: "port", value: 70000)
 checked example.com
 === result ===
-#Ok(())
+Ok(())

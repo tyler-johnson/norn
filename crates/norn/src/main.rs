@@ -222,8 +222,8 @@ fn cmd_run(args: &[String]) -> Result<ExitCode, String> {
     }
     match outcome.value {
         Ok(value) => {
-            // A `main` returning a `Result` reports rather than prints: `#Err` is a failed run,
-            // and the `#Ok` wrapper is ceremony the reader does not need to see.
+            // A `main` returning a `Result` reports rather than prints: `Err` is a failed run,
+            // and the `Ok` wrapper is ceremony the reader does not need to see.
             let result = match &value {
                 norn_nir::Value::Variant(enum_id, tag, fields)
                     if *enum_id == norn_hir::hir::EnumId::RESULT.index() =>

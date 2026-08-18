@@ -679,7 +679,7 @@ impl Lowerer<'_> {
 
         self.switch_to(fail_block);
         if enum_id == norn_hir::hir::EnumId::RESULT.index() {
-            // Rebuild `#Err(e)` at the function's own error type, which the checker has already
+            // Rebuild `Err(e)` at the function's own error type, which the checker has already
             // proved is the same type.
             let error = value.field(0);
             let rebuilt = Place::local(self.temp());

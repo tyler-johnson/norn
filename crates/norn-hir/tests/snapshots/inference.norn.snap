@@ -1,8 +1,8 @@
-error: cannot tell what type `#None` builds here
+error: cannot tell what type `None` builds here
  --> inference.norn:9:17
   |
-9 |     let value = #None
-  |                 ^^^^^ no expected type at this position
+9 |     let value = None
+  |                 ^^^^ no expected type at this position
   = note: annotate the binding or the return type, as in `let x: Option<I64> = …`
 
 error: this fails with String, but the function fails with Failure
@@ -18,7 +18,7 @@ error: `?` applies to Result and Option, not I64
 23 |     let value = 1?
    |                 ^^
 
-error: this `match` does not cover #Failure.Missing
+error: this `match` does not cover Failure.Missing
   --> inference.norn:28:5
    |
 28 |     match failure {

@@ -225,7 +225,7 @@ fn Sink.d.init #9()
 fn Sink.counts #10(_0/a, _1/b, _2/c, _3/d)
     local _4
   b0:
-    _4 = #Counts(_0/a, _1/b, _2/c, _3/d)
+    _4 = Counts(_0/a, _1/b, _2/c, _3/d)
     return _4
 
 === graph ===
@@ -247,7 +247,7 @@ reactor Sink #0
     exports [counts]
 
 === output ===
-#Counts(rejected: 12, oldest: 34, newest: 14, waited: 1234)
+Counts(rejected: 12, oldest: 34, newest: 14, waited: 1234)
 === result ===
 ()
 === trace ===

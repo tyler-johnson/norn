@@ -24,8 +24,8 @@ task fn reads_a_closed_socket(conn: Connection) -> ()
 {
     await tcp_close(conn)
     match await tcp_read(&conn) {
-        #Ok(_) => ()
-        #Err(_) => ()
+        Ok(_) => ()
+        Err(_) => ()
     }
 }
 
@@ -54,8 +54,8 @@ task fn moves_on_one_branch(conn: Connection, tidy: Bool) -> ()
         await tcp_close(conn)
     }
     match await tcp_read(&conn) {
-        #Ok(_) => ()
-        #Err(_) => ()
+        Ok(_) => ()
+        Err(_) => ()
     }
 }
 

@@ -19,7 +19,7 @@
     (signal open (binary - (path accepted) (path released)))
     (signal healthy (ty Bool) (binary <= (path open) (path limit)))
     (signal snapshot export
-      (construct Snapshot (arg open (path open)) (arg healthy (path healthy)))))
+      (call (path Snapshot) (arg open (path open)) (arg healthy (path healthy)))))
   (reactor Mailbox
     (params (param retries I64))
     (uses clock net.io)
@@ -44,7 +44,8 @@
             (block (assign (path failed) (binary + (path failed) (int 1))))))))
     (signal depth export (path pending))
     (signal report export
-      (construct Report
+      (call
+        (path Report)
         (arg pending (path pending))
         (arg failed (path failed))
         (arg retries (path retries)))))
@@ -82,7 +83,7 @@ reactor Gate(limit: I64) {
     }
     signal open = accepted - released
     signal healthy: Bool = open <= limit
-    export signal snapshot = #Snapshot(open: open, healthy: healthy)
+    export signal snapshot = Snapshot(open: open, healthy: healthy)
 }
 
 reactor Mailbox(retries: I64)
@@ -99,14 +100,14 @@ reactor Mailbox(retries: I64)
     on delivered(result) {
         pending = pending - 1
         match result {
-            #DeliveryResult.Ok => ()
-            #DeliveryResult.Failed(_) => {
+            DeliveryResult.Ok => ()
+            DeliveryResult.Failed(_) => {
                 failed = failed + 1
             }
         }
     }
     export signal depth = pending
-    export signal report = #Report(pending: pending, failed: failed, retries: retries)
+    export signal report = Report(pending: pending, failed: failed, retries: retries)
 }
 
 task fn drive(limit: I64) -> ()
