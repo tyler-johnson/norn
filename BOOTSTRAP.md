@@ -159,8 +159,10 @@ Alternatives considered:
 ### Excluded, deliberately
 
 Generics; traits; a borrow checker (`&T` is permitted only as a non-escaping parameter, enforced
-syntactically); dynamic subgraphs (`switch`); macros and derives; modules beyond a single file; a
-multi-threaded work-stealing scheduler; capability *inference*.
+syntactically); dynamic subgraphs (`switch`); macros and derives; a multi-threaded work-stealing
+scheduler; capability *inference*. Modules were on this list — "beyond a single file" — until the
+post-M6 module work landed them: a program is now a graph of files, subdirectories included, and
+§8 item 12 records the surface that settled.
 
 "Enforced syntactically" turned out to mean something sharper than a rule: `resolve_ty` produces a
 reference type only in parameter position and `declare_local` refuses to name one, so there is no
@@ -422,6 +424,7 @@ norn/
 │   ├── tasks/               programs whose NIR, output, and trace are golden  (M2)
 │   ├── tcp/                 the echo server                                   (M2)
 │   ├── http/                the hello server and the file server              (M6)
+│   ├── modules/             the multi-file program: entry, library, subdirectory
 │   ├── reactors/            programs whose graph and turn trace are golden    (M3)
 │   ├── reactor-errors/      reactors that must not check                      (M3)
 │   ├── ownership-errors/    programs that must not check, about ownership     (M4)
@@ -477,13 +480,21 @@ Ordered roughly by when it becomes worth doing, not by importance:
     that shape reasonable — in v0 a flow comes from a file or a request body and is consumed only
     by `pipe_to` and `http_respond_flow`, wholly inside the runtime. `coalesce_latest` remains a
     §10 gap rather than M6 work: it is an overflow policy, not a wire feature.
-12. **Modules, `use`, and the standard library that dissolves the builtins.** Earlier than its
+12. **Modules — landed — and the standard library that dissolves the builtins.** Earlier than its
     position suggests: modules gate the standard library, and item 7 does not — the ordering
-    below explains why. The grammar already carries both halves of the spelling — a file may open
-    with `module bytes`, and `use` parses — but the checker answers `use` with "nothing to import
-    yet", and §4 excludes modules beyond a single file. What is missing is resolution across
-    files: one file's declarations nameable from another, single files first, nothing clever
-    about paths.
+    below explains why. The module half is done, and this entry records the surface that settled.
+    A file *is* a module and carries no name of its own — the `module <name>` header is gone from
+    the language, the filename is the identity, and the importing file names it by path. Imports
+    are full ECMAScript syntax and semantics with the Node specifier convention:
+    `import { digits, pad as p } from "./fmt"` and `import * as fmt from "./fmt"`, specifiers
+    quoted and resolved relative to the importing file, `.norn` implied, subdirectories in,
+    cycles legal (no module initialisers means no order to violate). `export` before `fn`,
+    `task fn`, `struct`, `enum`, or `reactor` marks what a file offers; everything else is
+    file-private. Bare specifiers — `"std/fs"`, no leading `./` — parse but are reserved for the
+    standard library: the package lane exists with zero syntax change left to make. `use` and
+    `module` are no longer keywords (the `uses { … }` capability clause is untouched);
+    `import` is one, `as` was promoted out of the reserved list, and `from` is contextual,
+    still bindable everywhere else.
 
     The decision this entry records, made after M6: the standard library follows Rust's model,
     not Go's. Users should think in terms of libraries, so the builtin table is scaffolding with
@@ -498,8 +509,8 @@ Ordered roughly by when it becomes worth doing, not by importance:
 
     The absorption comes in two waves with different gates. The proto-std needs no generics —
     Go's `net/http` predates Go's generics by a decade, and `Option`/`Result` are already
-    spellable at concrete types. Its gates are modules, a loop construct or tail calls (item 1),
-    and a few byte primitives — indexing, building — after which HTTP parsing and rendering,
+    spellable at concrete types. Its gates are modules — met, above — a loop construct or tail calls
+    (item 1), and a few byte primitives — indexing, building — after which HTTP parsing and rendering,
     `bytes_text`, and `pipe_to` over `flow_next` become concrete Norn modules: most of the table.
     The general std — collections, `Flow<T>` beyond `Bytes`, and the method spelling that turns
     `request_header(&req, h)` into `req.header(h)` — waits for item 7's generics and traits.

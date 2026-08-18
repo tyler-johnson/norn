@@ -785,14 +785,12 @@ The parallel region is scoped. Inputs must be immutably borrowed for the duratio
 The following sketch watches a configuration file, exposes current configuration as a signal, opens an HTTP server, makes outbound requests, streams files, and maintains reactive metrics. It is illustrative rather than a frozen syntax proposal.
 
 ```
-module service
-
-use std.fs
-use std.http
-use std.json
-use std.log
-use std.process
-use std.time
+import * as fs from "std/fs"
+import * as http from "std/http"
+import * as json from "std/json"
+import * as log from "std/log"
+import * as process from "std/process"
+import * as time from "std/time"
 
 struct Config {
     greeting: String
