@@ -1,0 +1,20 @@
+error: expected an import list or `* as` after `import`, found `fmt`
+ --> imports.norn:3:8
+  |
+3 | import fmt from "./fmt"
+  |        ^^^
+  = note: imports are written `import { digits } from "./fmt"` or `import * as fmt from "./fmt"`
+
+error: expected `from "…"` naming the module's file, found `of`
+ --> imports.norn:9:19
+  |
+9 | import { digits } of "./fmt"
+  |                   ^^
+  = note: imports are written `import { digits } from "./fmt"` or `import * as fmt from "./fmt"`
+
+error: an import list cannot be empty
+  --> imports.norn:15:9
+   |
+15 | import {} from "./fmt"
+   |         ^ nothing named
+   = note: name something to import, or drop the line

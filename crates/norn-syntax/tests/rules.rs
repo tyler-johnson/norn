@@ -246,6 +246,100 @@ fn an_empty_file_is_an_empty_module() {
 }
 
 #[test]
+fn a_named_import_lists_its_items() {
+    let dumped = ast("import { digits, pad as p } from \"./fmt\"\n");
+    assert!(
+        dumped.contains("(import \"./fmt\" (item digits) (item pad p))"),
+        "{dumped}"
+    );
+}
+
+#[test]
+fn a_namespace_import_binds_one_name() {
+    let dumped = ast("import * as fmt from \"./fmt\"\n");
+    assert!(dumped.contains("(import \"./fmt\" (star fmt))"), "{dumped}");
+}
+
+#[test]
+fn an_import_list_may_span_lines() {
+    let dumped = ast("import {\n    digits\n    pad as p,\n} from \"./fmt\"\n");
+    assert!(
+        dumped.contains("(import \"./fmt\" (item digits) (item pad p))"),
+        "{dumped}"
+    );
+}
+
+#[test]
+fn imports_round_trip() {
+    let source = "import { digits, pad as p } from \"./fmt\"\nimport * as strings from \"./util/strings\"\n\nfn main() {}\n";
+    let parsed = parse(source);
+    assert!(parsed.ok(), "{}", errors(source));
+    assert_eq!(print::module(&parsed.module), source);
+}
+
+#[test]
+fn an_import_without_a_clause_teaches_both_forms() {
+    let rendered = errors("import fmt from \"./fmt\"\n");
+    assert!(
+        rendered.contains("expected an import list or `* as` after `import`"),
+        "{rendered}"
+    );
+    assert!(rendered.contains("import * as fmt from"), "{rendered}");
+}
+
+#[test]
+fn an_import_without_from_teaches_the_shape() {
+    // The habit being caught is the old dotted `use std.fs` spelling: no `from`, no string.
+    let rendered = errors("import { digits } of \"./fmt\"\n");
+    assert!(
+        rendered.contains("expected `from \"…\"` naming the module's file"),
+        "{rendered}"
+    );
+    let rendered = errors("import { digits } from fmt\n");
+    assert!(
+        rendered.contains("expected `from \"…\"` naming the module's file"),
+        "{rendered}"
+    );
+}
+
+#[test]
+fn an_empty_import_list_is_refused() {
+    let rendered = errors("import {} from \"./fmt\"\n");
+    assert!(
+        rendered.contains("an import list cannot be empty"),
+        "{rendered}"
+    );
+}
+
+#[test]
+fn recovery_passes_a_broken_import() {
+    let parsed = parse("import { from \"./fmt\"\n\nfn fine() -> I64 {\n    return 1\n}\n");
+    assert!(!parsed.ok());
+    let names: Vec<_> = parsed
+        .module
+        .items
+        .iter()
+        .map(|item| match item {
+            norn_syntax::ast::Item::Fn(decl) => decl.name.name.clone(),
+            _ => String::new(),
+        })
+        .collect();
+    assert_eq!(names, vec!["fine"]);
+}
+
+#[test]
+fn from_is_not_a_keyword() {
+    // ES treats `from` contextually and so does Norn: `matching.norn` binds `from` and `to` as
+    // pattern variables, and an import must not take the word away from them.
+    let dumped =
+        ast("fn main() {\n    match x {\n        Range(from, to) => from + to\n    }\n}\n");
+    assert!(dumped.contains("(bind from)"), "{dumped}");
+    assert!(dumped.contains("(bind to)"), "{dumped}");
+    let dumped = ast("fn main() {\n    let from = 1\n    let x = from\n}\n");
+    assert!(dumped.contains("(let from"), "{dumped}");
+}
+
+#[test]
 fn spawn_takes_a_whole_call() {
     // Not just the callee: `spawn f(x)` starts `f(x)`, and nothing else would be worth writing.
     assert_eq!(

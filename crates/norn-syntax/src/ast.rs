@@ -39,14 +39,36 @@ impl Path {
 #[derive(Debug)]
 pub struct Module {
     pub name: Option<Path>,
-    pub uses: Vec<UseDecl>,
+    pub imports: Vec<ImportDecl>,
     pub items: Vec<Item>,
     pub span: Span,
 }
 
+/// `import { digits, pad as p } from "./fmt"` or `import * as fmt from "./fmt"`.
+///
+/// The specifier is any string literal: path policy — bare specifiers, a written `.norn`,
+/// self-import — belongs to the checker, so that `norn check` on disk and an in-memory test agree.
 #[derive(Debug)]
-pub struct UseDecl {
-    pub path: Path,
+pub struct ImportDecl {
+    pub specifier: String,
+    pub specifier_span: Span,
+    pub kind: ImportKind,
+    pub span: Span,
+}
+
+#[derive(Debug)]
+pub enum ImportKind {
+    /// `import { digits, pad as p } from "./fmt"`
+    Named(Vec<ImportItem>),
+    /// `import * as fmt from "./fmt"`
+    Namespace(Ident),
+}
+
+/// One name in an import list, optionally rebound: `pad as p`.
+#[derive(Debug)]
+pub struct ImportItem {
+    pub name: Ident,
+    pub alias: Option<Ident>,
     pub span: Span,
 }
 

@@ -1,9 +1,9 @@
 module tasks
 
-use std.fs
-use std.http
-use std.json
-use std.time
+import * as fs from "std/fs"
+import * as http from "std/http"
+import * as json from "std/json"
+import { seconds, mebibytes as mib } from "std/time"
 
 struct Config {
     greeting: String

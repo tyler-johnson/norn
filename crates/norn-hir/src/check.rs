@@ -262,11 +262,11 @@ impl Checker {
     // ---------------------------------------------------------------- program
 
     fn run(&mut self, module: &ast::Module) {
-        if let Some(decl) = module.uses.first() {
+        if let Some(decl) = module.imports.first() {
             self.push(
-                Diagnostic::new(decl.span, "`use` has nothing to import yet")
-                    .label("no module system")
-                    .note("modules and imports arrive with the standard library; see BOOTSTRAP.md"),
+                Diagnostic::new(decl.span, "`import` has nothing to resolve yet")
+                    .label("no module loader")
+                    .note("multi-file programs arrive with the loader; see BOOTSTRAP.md"),
             );
         }
 

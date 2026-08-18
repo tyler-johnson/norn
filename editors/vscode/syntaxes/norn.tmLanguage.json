@@ -10,7 +10,10 @@
       "include": "#strings"
     },
     {
-      "include": "#namespace"
+      "include": "#import-decl"
+    },
+    {
+      "include": "#module-decl"
     },
     {
       "include": "#fn-decl"
@@ -151,8 +154,46 @@
         }
       ]
     },
-    "namespace": {
-      "match": "\\b(module|use)\\s+([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*)",
+    "import-decl": {
+      "comment": "`import { digits, pad as p } from \"./fmt\"` and `import * as fmt from \"./fmt\"`. `from` is contextual — a keyword only on this line — which is why it is coloured here rather than in `#keywords`.",
+      "begin": "\\b(import)\\b",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.control.import.norn"
+        }
+      },
+      "end": "$",
+      "patterns": [
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#strings"
+        },
+        {
+          "name": "keyword.control.import.norn",
+          "match": "\\b(?:from|as)\\b"
+        },
+        {
+          "name": "keyword.operator.namespace.norn",
+          "match": "\\*"
+        },
+        {
+          "name": "variable.other.import.norn",
+          "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b"
+        },
+        {
+          "name": "punctuation.section.block.norn",
+          "match": "[{}]"
+        },
+        {
+          "name": "punctuation.separator.norn",
+          "match": ","
+        }
+      ]
+    },
+    "module-decl": {
+      "match": "\\b(module)\\s+([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*)",
       "captures": {
         "1": {
           "name": "keyword.control.import.norn"
@@ -519,7 +560,7 @@
     "reserved": {
       "comment": "Words held for a later milestone. The lexer refuses them as names, so showing them as errors is the truth rather than a warning.",
       "name": "invalid.illegal.reserved.norn",
-      "match": "\\b(?:as|blocking|break|const|continue|delay|event|for|impl|in|interface|loop|macro|pub|source|static|trait|type|where|while)\\b"
+      "match": "\\b(?:blocking|break|const|continue|delay|event|for|impl|in|interface|loop|macro|pub|source|static|trait|type|where|while)\\b"
     },
     "keywords": {
       "patterns": [
@@ -555,7 +596,7 @@
         },
         {
           "name": "keyword.other.norn",
-          "match": "\\b(?:let|uses|module|use)\\b"
+          "match": "\\b(?:let|uses)\\b"
         }
       ]
     },

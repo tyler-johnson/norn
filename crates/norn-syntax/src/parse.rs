@@ -126,7 +126,7 @@ impl Parser {
     fn module(&mut self) -> Module {
         let start = self.peek().span;
         let mut name = None;
-        let mut uses = Vec::new();
+        let mut imports = Vec::new();
         let mut items = Vec::new();
 
         if self.at(&TokenKind::Kw(Kw::Module)) {
@@ -139,7 +139,7 @@ impl Parser {
 
         while !self.at_eof() {
             let before = self.pos;
-            match self.top_level(&mut uses, &mut items) {
+            match self.top_level(&mut imports, &mut items) {
                 Ok(()) => {}
                 Err(Bail) => self.recover(),
             }
@@ -152,26 +152,21 @@ impl Parser {
         let end = self.peek().span;
         Module {
             name,
-            uses,
+            imports,
             items,
             span: start.to(end),
         }
     }
 
-    fn top_level(&mut self, uses: &mut Vec<UseDecl>, items: &mut Vec<Item>) -> PResult<()> {
-        if !self.at_eof() && !self.peek().nl_before && (!uses.is_empty() || !items.is_empty()) {
+    fn top_level(&mut self, imports: &mut Vec<ImportDecl>, items: &mut Vec<Item>) -> PResult<()> {
+        if !self.at_eof() && !self.peek().nl_before && (!imports.is_empty() || !items.is_empty()) {
             let found = self.peek_kind().describe();
             return Err(self.error(format!(
                 "expected a line break before {found}, found it on the same line as the previous declaration"
             )));
         }
         match self.peek_kind().clone() {
-            TokenKind::Kw(Kw::Use) => {
-                let start = self.advance().span;
-                let path = self.path()?;
-                let span = start.to(path.span);
-                uses.push(UseDecl { path, span });
-            }
+            TokenKind::Kw(Kw::Import) => imports.push(self.import_decl()?),
             TokenKind::Kw(Kw::Struct) => items.push(Item::Struct(self.struct_decl()?)),
             TokenKind::Kw(Kw::Enum) => items.push(Item::Enum(self.enum_decl()?)),
             TokenKind::Kw(Kw::Fn) | TokenKind::Kw(Kw::Task) => {
@@ -205,12 +200,84 @@ impl Parser {
                         format!("expected a declaration, found {}", other.describe()),
                     )
                     .note(
-                        "a file contains `use`, `struct`, `enum`, `fn`, `task fn`, and `reactor` declarations",
+                        "a file contains `import`, `struct`, `enum`, `fn`, `task fn`, and `reactor` declarations",
                     ),
                 ));
             }
         }
         Ok(())
+    }
+
+    /// `import { digits, pad as p } from "./fmt"`, or `import * as fmt from "./fmt"`.
+    ///
+    /// The clause must open on the same line as `import`, mirroring the call and payload rules;
+    /// the braced list itself may span lines. `from` is a contextual word rather than a keyword —
+    /// it stays bindable everywhere else — so it is matched here by spelling.
+    fn import_decl(&mut self) -> PResult<ImportDecl> {
+        let start = self.advance().span;
+        let kind = if self.at(&TokenKind::LBrace) && !self.peek().nl_before {
+            self.advance();
+            if self.at(&TokenKind::RBrace) {
+                let span = self.peek().span;
+                return Err(self.push(
+                    Diagnostic::new(span, "an import list cannot be empty")
+                        .label("nothing named")
+                        .note("name something to import, or drop the line"),
+                ));
+            }
+            let mut items = Vec::new();
+            while !self.at(&TokenKind::RBrace) && !self.at_eof() {
+                let name = self.ident()?;
+                let mut span = name.span;
+                let alias = if self.eat(&TokenKind::Kw(Kw::As)) {
+                    let alias = self.ident()?;
+                    span = span.to(alias.span);
+                    Some(alias)
+                } else {
+                    None
+                };
+                items.push(ImportItem { name, alias, span });
+                self.separator(&TokenKind::RBrace, "import")?;
+            }
+            self.expect(TokenKind::RBrace)?;
+            ImportKind::Named(items)
+        } else if self.at(&TokenKind::Star) && !self.peek().nl_before {
+            self.advance();
+            self.expect(TokenKind::Kw(Kw::As))?;
+            ImportKind::Namespace(self.ident()?)
+        } else {
+            let found = self.peek_kind().describe();
+            let span = self.peek().span;
+            return Err(self.push(import_teach(Diagnostic::new(
+                span,
+                format!("expected an import list or `* as` after `import`, found {found}"),
+            ))));
+        };
+        let from_ok = matches!(self.peek_kind(), TokenKind::Ident(name) if name == "from");
+        if !from_ok {
+            let found = self.peek_kind().describe();
+            let span = self.peek().span;
+            return Err(self.push(import_teach(Diagnostic::new(
+                span,
+                format!("expected `from \"…\"` naming the module's file, found {found}"),
+            ))));
+        }
+        self.advance();
+        let TokenKind::Str(specifier) = self.peek_kind().clone() else {
+            let found = self.peek_kind().describe();
+            let span = self.peek().span;
+            return Err(self.push(import_teach(Diagnostic::new(
+                span,
+                format!("expected `from \"…\"` naming the module's file, found {found}"),
+            ))));
+        };
+        let specifier_span = self.advance().span;
+        Ok(ImportDecl {
+            specifier,
+            specifier_span,
+            kind,
+            span: start.to(specifier_span),
+        })
     }
 
     /// Skip forward to the next plausible top-level declaration.
@@ -222,7 +289,7 @@ impl Parser {
             let token = self.peek();
             let starts_decl = matches!(
                 token.kind,
-                TokenKind::Kw(Kw::Use)
+                TokenKind::Kw(Kw::Import)
                     | TokenKind::Kw(Kw::Struct)
                     | TokenKind::Kw(Kw::Enum)
                     | TokenKind::Kw(Kw::Fn)
@@ -1361,6 +1428,14 @@ impl Parser {
             other => Err(self.error(format!("expected a pattern, found {}", other.describe()))),
         }
     }
+}
+
+/// The note every malformed import shares: both spellings, so the reader can pick the one they
+/// meant rather than being told only what was found.
+fn import_teach(diagnostic: Diagnostic) -> Diagnostic {
+    diagnostic.note(
+        "imports are written `import { digits } from \"./fmt\"` or `import * as fmt from \"./fmt\"`",
+    )
 }
 
 fn reserved_diagnostic(span: Span, word: &str) -> Diagnostic {

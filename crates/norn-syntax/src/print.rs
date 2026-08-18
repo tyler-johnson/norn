@@ -19,12 +19,12 @@ pub fn module(module: &Module) -> String {
     if let Some(name) = &module.name {
         out.push_str(&format!("module {}\n", name.text()));
     }
-    if !module.uses.is_empty() {
+    if !module.imports.is_empty() {
         if !out.is_empty() {
             out.push('\n');
         }
-        for decl in &module.uses {
-            out.push_str(&format!("use {}\n", decl.path.text()));
+        for decl in &module.imports {
+            out.push_str(&print_import(decl));
         }
     }
     for item in &module.items {
@@ -34,6 +34,25 @@ pub fn module(module: &Module) -> String {
         out.push_str(&print_item(item));
     }
     out
+}
+
+/// One line whichever form it takes; the specifier is re-escaped through the same string printing
+/// every literal gets.
+fn print_import(decl: &ImportDecl) -> String {
+    let specifier = print_string(&decl.specifier);
+    match &decl.kind {
+        ImportKind::Named(items) => {
+            let items: Vec<_> = items
+                .iter()
+                .map(|item| match &item.alias {
+                    Some(alias) => format!("{} as {}", item.name.name, alias.name),
+                    None => item.name.name.clone(),
+                })
+                .collect();
+            format!("import {{ {} }} from {specifier}\n", items.join(", "))
+        }
+        ImportKind::Namespace(name) => format!("import * as {} from {specifier}\n", name.name),
+    }
 }
 
 fn print_item(item: &Item) -> String {

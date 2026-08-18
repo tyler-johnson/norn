@@ -73,8 +73,21 @@ pub fn module(module: &Module) -> String {
     if let Some(name) = &module.name {
         children.push(list("module-name", vec![atom(name.text())]));
     }
-    for decl in &module.uses {
-        children.push(list("use", vec![atom(decl.path.text())]));
+    for decl in &module.imports {
+        let mut parts = vec![atom(format!("{:?}", decl.specifier))];
+        match &decl.kind {
+            ImportKind::Named(items) => {
+                for item in items {
+                    let mut names = vec![atom(&item.name.name)];
+                    if let Some(alias) = &item.alias {
+                        names.push(atom(&alias.name));
+                    }
+                    parts.push(list("item", names));
+                }
+            }
+            ImportKind::Namespace(name) => parts.push(list("star", vec![atom(&name.name)])),
+        }
+        children.push(list("import", parts));
     }
     for item in &module.items {
         children.push(dump_item(item));

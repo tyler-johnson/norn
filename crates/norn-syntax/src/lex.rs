@@ -10,7 +10,8 @@ use crate::span::Span;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Kw {
     Module,
-    Use,
+    Import,
+    As,
     Struct,
     Enum,
     Fn,
@@ -42,7 +43,8 @@ impl Kw {
     /// the compiler's finger next to the line that also needs the new word.
     pub const ALL: &'static [Kw] = &[
         Kw::Module,
-        Kw::Use,
+        Kw::Import,
+        Kw::As,
         Kw::Struct,
         Kw::Enum,
         Kw::Fn,
@@ -71,7 +73,8 @@ impl Kw {
     pub fn text(self) -> &'static str {
         match self {
             Kw::Module => "module",
-            Kw::Use => "use",
+            Kw::Import => "import",
+            Kw::As => "as",
             Kw::Struct => "struct",
             Kw::Enum => "enum",
             Kw::Fn => "fn",
@@ -102,7 +105,6 @@ impl Kw {
 /// Words the language will need in a later milestone. They are rejected as identifiers now so that
 /// M0 programs do not have to be rewritten when reactors and structured concurrency land.
 pub const RESERVED: &[&str] = &[
-    "as",
     "blocking",
     "break",
     "const",
@@ -360,7 +362,8 @@ impl<'a> Lexer<'a> {
         }
         let kw = match word {
             "module" => Some(Kw::Module),
-            "use" => Some(Kw::Use),
+            "import" => Some(Kw::Import),
+            "as" => Some(Kw::As),
             "struct" => Some(Kw::Struct),
             "enum" => Some(Kw::Enum),
             "fn" => Some(Kw::Fn),

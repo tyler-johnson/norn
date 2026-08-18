@@ -1,0 +1,19 @@
+module errors.imports
+
+import fmt from "./fmt"
+
+fn recovers_after_the_clause() -> I64 {
+    return 1
+}
+
+import { digits } of "./fmt"
+
+fn recovers_after_from() -> I64 {
+    return 2
+}
+
+import {} from "./fmt"
+
+fn recovers_after_the_empty_list() -> I64 {
+    return 3
+}
