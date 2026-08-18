@@ -8,8 +8,8 @@ out.
 
 | | |
 |---|---|
-| **Status** | Active plan |
-| **Goal** | `norn build service.norn -o service` produces a native binary running a real HTTP service |
+| **Status** | Goal reached — M0–M6 settled; what remains is §8 |
+| **Goal** | `norn build service.norn -o service` produces a native binary running a real HTTP service — demonstrated by `examples/http/files.norn` |
 | **Host language** | Rust (stable, 1.97+) |
 | **Target** | aarch64-linux initially; nothing in the design is arch-specific |
 
@@ -150,7 +150,9 @@ Alternatives considered:
 
   `Shared<T>` is deferred for the same reason: with ordinary values copyable it is a representation
   choice with no observable effect, and an inert type in the language is worse than an absent one.
-  `Bytes` is deferred to M6, where `Flow<Bytes>` gives it work to do.
+  `Bytes` arrived with M6, where `Flow<Bytes>` gives it work to do — with copying slices, because a
+  clone-everything engine cannot make zero-copy observable. The borrowed representation waits with
+  §8 item 6, alongside everything else that needs values to have layout.
 - **Effects** — `uses { ... }` as a checked annotation.
 - **I/O** — TCP, timers, files, HTTP/1.1, `Flow<Bytes>` with genuine demand signalling.
 
@@ -351,7 +353,38 @@ tests, asserting the same structural claims against a real clock.
 
 Minimal HTTP/1.1 in `norn-rt`, `Flow<Bytes>` with demand-driven transfer, `pipe_to`.
 
-*Done when:* the worked example in `DESIGN.md` §10 compiles and runs as a native binary.
+The done-when is stated against v0-spelled examples rather than against `DESIGN.md` §10's service.
+That sketch leans on closures, `for await` and loops, generics, method resolution, the event
+operators, route patterns with bound parameters, and JSON — fifteen-odd constructs that are M7 or
+later — so passing it would mean building the rest of the language first. §10 stays as the
+aspirational sketch; the programs making M6's claims are `examples/http/hello.norn` and
+`examples/http/files.norn`, the second being §5's streaming upload and download respelled with
+free functions and `match` dispatch on the method.
+
+The wire, settled: request line plus headers, strict CRLF, an 8 KiB head cap; bodies delimited by
+`Content-Length` only, `Transfer-Encoding` rejected outright; every response carries
+`Content-Length` and `Connection: close`. Chunked bodies, keep-alive, and an HTTP client are
+deferred (§8). One consequence is worth naming: every v0 flow knows its length up front — a file's
+size, a body's `Content-Length` — so a close-delimited transfer has no representation and nothing
+pretends to implement one. Malformed input is an `Err(IoError…)` value, never a trap: the peer is
+not something the program can be blamed for.
+
+In the model, a flow is a resource-table entry, so affinity, scope ownership, close-on-cancel,
+and the `open`/`close` trace lines all come from machinery M4 built, and the
+nothing-a-reactor-holds-is-affine rule covers flows with no new rule. `pipe_to` is a runtime-owned
+state machine with at most one ≤4 KiB chunk in flight — the demand claim, observable as one `pipe`
+trace line per delivered chunk — rather than Norn-level recursion over some `flow_next`, which
+would grow a frame per chunk on a large transfer; v0 has no `flow_next` at all, and a flow is
+consumed only by `pipe_to` and `http_respond_flow`. `http_read_request` consumes the Connection
+and converts its table entry into a Request in place, same id and same descriptor, which is what
+keeps the trace's open/close pairing 1:1.
+
+*Done when:* `examples/http/hello.norn` and `examples/http/files.norn` run identically under
+`norn run` and as `norn build` binaries: a PUT streams a multi-chunk body to disk through
+`pipe_to` and lands byte for byte; a GET streams the file back with the declared length; a missing
+file is a 404; and an upload abandoned mid-body — promised long, delivered short, held open
+through shutdown — is cancelled with its request, its body flow, and its half-written file all
+closed, the trace pairing every `open` with a `close`.
 
 ## 6 · Turn traces as the test harness
 
@@ -388,6 +421,7 @@ norn/
 │   ├── run/                 programs that must check, lower, and run
 │   ├── tasks/               programs whose NIR, output, and trace are golden  (M2)
 │   ├── tcp/                 the echo server                                   (M2)
+│   ├── http/                the hello server and the file server              (M6)
 │   ├── reactors/            programs whose graph and turn trace are golden    (M3)
 │   ├── reactor-errors/      reactors that must not check                      (M3)
 │   ├── ownership-errors/    programs that must not check, about ownership     (M4)
@@ -426,8 +460,20 @@ Ordered roughly by when it becomes worth doing, not by importance:
 6. **Move checking for ordinary values, and `Shared<T>`.** Both wait on a typed value
    representation. M5's backend deliberately kept the interpreter's dynamically tagged, `Rc`-shared
    values, so copying still costs a reference-count bump; the backend that gives values layout is
-   where the cost first becomes measurable, and where these two stop being inert.
+   where the cost first becomes measurable, and where these two stop being inert. Zero-copy `Bytes`
+   slices wait here too — M6's `bytes_slice` copies, because a clone-everything representation
+   cannot make sharing observable — and so does `+` on `Bytes`, which is only worth having once
+   concatenation has a cost model to answer to.
 7. **Generics and traits.** Required before a real standard library.
 8. **Capability inference, test handlers.** `uses { ... }` is checked but not inferred in v0.
 9. **Derives and constrained attributes.** `@derive(Json)`, `@http_api` — `DESIGN.md` §8 stage 2.
 10. **Durable state projections, supervision policy.**
+11. **The rest of HTTP, and general flows.** M6's wire is deliberately narrow, and each narrowing
+    is a deferral: chunked transfer encoding and keep-alive (v0 bodies are `Content-Length` and
+    every response says `Connection: close`); an HTTP client (`http_get` — M6 is server-only);
+    route patterns with bound parameters (`files.norn` dispatches on `match request_method(&req)`
+    because there is nothing to bind a path segment to). General flow sources and sinks wait here
+    too, along with a `flow_next` for consuming a flow from Norn code once a loop construct makes
+    that shape reasonable — in v0 a flow comes from a file or a request body and is consumed only
+    by `pipe_to` and `http_respond_flow`, wholly inside the runtime. `coalesce_latest` remains a
+    §10 gap rather than M6 work: it is an overflow policy, not a wire feature.
