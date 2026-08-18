@@ -58,6 +58,14 @@ fn traps_match() {
             "bytes-slice-range",
             "fn main() -> () {\n    let cut = bytes_slice(bytes(\"abc\"), 1, 9)\n    print(cut)\n}\n",
         ),
+        (
+            "byte-index-range",
+            "fn main() -> () {\n    let data = bytes(\"abc\")\n    print(data[9])\n}\n",
+        ),
+        (
+            "byte-index-negative",
+            "fn main() -> () {\n    let data = bytes(\"abc\")\n    print(data[0 - 1])\n}\n",
+        ),
     ];
     for (name, source) in programs {
         let (nir, main) = common::build_source(name, source);

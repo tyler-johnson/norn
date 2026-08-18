@@ -1,0 +1,12 @@
+error: only `Bytes` can be indexed in v0, not String
+ --> bytes.norn:2:12
+  |
+2 |     return name[0]
+  |            ^^^^^^^
+  = note: collections and their indexing arrive with the standard library
+
+error: expected I64, found String
+ --> bytes.norn:6:17
+  |
+6 |     return data["0"]
+  |                 ^^^

@@ -1,0 +1,7 @@
+fn index_a_string(name: String) -> I64 {
+    return name[0]
+}
+
+fn index_with_a_string(data: Bytes) -> I64 {
+    return data["0"]
+}

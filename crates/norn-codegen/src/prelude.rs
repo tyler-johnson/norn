@@ -134,6 +134,7 @@ pub enum Builtin {
     BytesLen,
     BytesSlice,
     BytesText,
+    BytesAt,
     FileCreate,
     FlowOfFile,
     PipeTo,
@@ -164,6 +165,7 @@ impl Builtin {
             Builtin::BytesLen => "bytes_len",
             Builtin::BytesSlice => "bytes_slice",
             Builtin::BytesText => "bytes_text",
+            Builtin::BytesAt => "bytes_at",
             Builtin::FileCreate => "file_create",
             Builtin::FlowOfFile => "flow_of_file",
             Builtin::PipeTo => "pipe_to",
@@ -561,6 +563,18 @@ fn eval_builtin(
             // A slice copies in v0, deliberately matching the interpreter; the cheap
             // representation waits for typed layout.
             Value::Bytes(data[start as usize..end as usize].into())
+        }
+        Builtin::BytesAt => {
+            let data = blob("bytes_at", &args[0])?;
+            let index = integer("bytes_at", &args[1])?;
+            let len = data.len() as i64;
+            if index < 0 || index >= len {
+                return Err(Trap::new(
+                    format!("byte index out of range: {index} of {len}"),
+                    func,
+                ));
+            }
+            Value::Int(data[index as usize] as i64)
         }
         Builtin::BytesText => match std::str::from_utf8(&blob("bytes_text", &args[0])?) {
             Ok(text) => Value::Variant(

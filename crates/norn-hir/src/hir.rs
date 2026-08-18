@@ -704,6 +704,10 @@ pub enum Builtin {
     BytesLen,
     BytesSlice,
     BytesText,
+    /// `data[i]`. Carried by syntax alone: not in `ALL` and not in `from_name`, so `bytes_at`
+    /// stays a name users may define, and the checker's desugar of an index expression is the
+    /// only way to spell it.
+    BytesAt,
     FileCreate,
     FlowOfFile,
     PipeTo,
@@ -718,9 +722,10 @@ pub enum Builtin {
 }
 
 impl Builtin {
-    /// Every builtin, for consumers that need the list rather than one entry — the editor grammar
-    /// test is the first. It sits beside the exhaustive matches below so that adding a variant puts
-    /// the compiler's finger next to the line that also needs the new name.
+    /// Every nameable builtin, for consumers that need the list rather than one entry — the editor
+    /// grammar test is the first. It sits beside the exhaustive matches below so that adding a
+    /// variant puts the compiler's finger next to the line that also needs the new name.
+    /// `BytesAt` is absent on purpose: its only spelling is `data[i]`.
     pub const ALL: &'static [Builtin] = &[
         Builtin::Print,
         Builtin::ListenerPort,
@@ -796,6 +801,7 @@ impl Builtin {
             Builtin::BytesLen => "bytes_len",
             Builtin::BytesSlice => "bytes_slice",
             Builtin::BytesText => "bytes_text",
+            Builtin::BytesAt => "bytes_at",
             Builtin::FileCreate => "file_create",
             Builtin::FlowOfFile => "flow_of_file",
             Builtin::PipeTo => "pipe_to",
@@ -823,6 +829,7 @@ impl Builtin {
             | Builtin::BytesLen
             | Builtin::BytesSlice
             | Builtin::BytesText
+            | Builtin::BytesAt
             | Builtin::RequestMethod
             | Builtin::RequestPath
             | Builtin::RequestHeader => true,
@@ -863,6 +870,7 @@ impl Builtin {
             | Builtin::BytesLen
             | Builtin::BytesSlice
             | Builtin::BytesText
+            | Builtin::BytesAt
             | Builtin::PipeTo
             | Builtin::RequestMethod
             | Builtin::RequestPath
@@ -917,6 +925,7 @@ impl Builtin {
             Builtin::BytesLen => (vec![Ty::Bytes], Ty::I64),
             Builtin::BytesSlice => (vec![Ty::Bytes, Ty::I64, Ty::I64], Ty::Bytes),
             Builtin::BytesText => (vec![Ty::Bytes], Ty::Option(Box::new(Ty::Str))),
+            Builtin::BytesAt => (vec![Ty::Bytes, Ty::I64], Ty::I64),
             Builtin::FileCreate => (vec![Ty::Str], task(fallible(file()))),
             Builtin::FlowOfFile => (vec![Ty::Str], task(fallible(flow()))),
             Builtin::PipeTo => (vec![flow(), file()], task(fallible(Ty::I64))),

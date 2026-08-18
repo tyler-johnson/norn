@@ -23,6 +23,19 @@ fn main() -> () {
         None => print("a torn character is not text")
     }
 
+    // `data[i]` reads one octet as an I64. Out of range traps, like `bytes_slice`.
+    print(data[0])
+    print(data[bytes_len(data) - 1])
+
+    // An index and a loop together: the sum of every byte.
+    let mut sum = 0
+    let mut i = 0
+    while i < bytes_len(data) {
+        sum = sum + data[i]
+        i = i + 1
+    }
+    print(sum)
+
     // Equality is by content, and ordering is lexicographic.
     print(bytes_slice(data, 7, 11) == bytes("norn"))
     print(bytes("abc") < bytes("abd"))

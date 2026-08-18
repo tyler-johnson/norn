@@ -2666,17 +2666,7 @@ impl Checker {
                 self.check_match(scrutinee, arms, expected, span)
             }
             ast::ExprKind::Try(inner) => self.check_try(inner, span),
-            ast::ExprKind::Index { .. } => {
-                self.push(
-                    Diagnostic::new(span, "indexing is not available yet")
-                        .note("collections arrive with the standard library"),
-                );
-                Expr {
-                    kind: ExprKind::Error,
-                    ty: Ty::Error,
-                    span,
-                }
-            }
+            ast::ExprKind::Index { base, index } => self.check_index(base, index, span),
             ast::ExprKind::Await(inner) => self.check_await(inner, span),
             ast::ExprKind::Scope(block) => self.check_scope(block, expected, span),
             ast::ExprKind::Spawn(inner) => self.check_spawn(inner, span),
@@ -3283,6 +3273,36 @@ impl Checker {
                 index,
             },
             ty,
+            span,
+        }
+    }
+
+    /// `data[i]` — sugar for the hidden `bytes_at` builtin, and `Bytes` is the one type it works
+    /// on in v0. A `&Bytes` indexes too: borrows are erased before the runtime, so the expansion
+    /// is the same expression `check_builtin` would build for a pure two-argument builtin.
+    fn check_index(&mut self, base: &ast::Expr, index: &ast::Expr, span: Span) -> Expr {
+        let base = self.check_expr(base, None);
+        if base.ty.is_error() {
+            return self.error_expr(span);
+        }
+        if *base.ty.owned() != Ty::Bytes {
+            let message = format!(
+                "only `Bytes` can be indexed in v0, not {}",
+                self.program.ty_name(&base.ty)
+            );
+            self.push(
+                Diagnostic::new(span, message)
+                    .note("collections and their indexing arrive with the standard library"),
+            );
+            return self.error_expr(span);
+        }
+        let index = self.check_expr(index, Some(&Ty::I64));
+        Expr {
+            kind: ExprKind::Builtin {
+                builtin: Builtin::BytesAt,
+                args: vec![base, index],
+            },
+            ty: Ty::I64,
             span,
         }
     }

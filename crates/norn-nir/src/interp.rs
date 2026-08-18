@@ -546,6 +546,17 @@ impl Interpreter<'_> {
                 // observable, so the cheap representation waits for typed layout (§8).
                 Value::Bytes(data[start as usize..end as usize].into())
             }
+            Builtin::BytesAt => {
+                let data = blob("bytes_at", &args[0])?;
+                let index = integer("bytes_at", &args[1])?;
+                let len = data.len() as i64;
+                if index < 0 || index >= len {
+                    return Err(
+                        self.trap(frame, format!("byte index out of range: {index} of {len}"))
+                    );
+                }
+                Value::Int(data[index as usize] as i64)
+            }
             Builtin::BytesText => {
                 let data = blob("bytes_text", &args[0])?;
                 match std::str::from_utf8(&data) {
