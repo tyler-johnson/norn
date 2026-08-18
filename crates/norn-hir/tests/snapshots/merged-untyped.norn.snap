@@ -1,0 +1,10 @@
+error: `queued` is declared here, so `id` needs the message type
+ --> merged-untyped.norn:7:15
+  |
+7 |     on queued(id) [capacity: 8, overflow: reject] {
+  |               ^^ no type on the message
+ --> merged-untyped.norn:7:19
+  |
+7 |     on queued(id) [capacity: 8, overflow: reject] {
+  |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this queue clause declares the input
+  = note: write `on queued(id: …) [capacity: …, overflow: …]`, or drop the clause and let an `input queued` member declare it

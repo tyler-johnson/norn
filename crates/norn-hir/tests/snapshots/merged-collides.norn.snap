@@ -1,0 +1,9 @@
+error: `queued` is declared twice in `Mailbox`
+ --> merged-collides.norn:9:8
+  |
+9 |     on queued(id: I64) [capacity: 8, overflow: reject] {
+  |        ^^^^^^ duplicate member
+ --> merged-collides.norn:5:11
+  |
+5 |     input queued: I64 [capacity: 8, overflow: reject]
+  |           ^^^^^^ first declared here

@@ -1,0 +1,14 @@
+// Both spellings declare the name, so using both for one input declares it twice. The merged form
+// is sugar for the split one, not a second thing that can sit alongside it.
+
+reactor Mailbox() {
+    input queued: I64 [capacity: 8, overflow: reject]
+
+    state pending: I64 = 0
+
+    on queued(id: I64) [capacity: 8, overflow: reject] {
+        pending = pending + id
+    }
+
+    export signal depth = pending
+}

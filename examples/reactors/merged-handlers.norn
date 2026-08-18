@@ -1,0 +1,88 @@
+// A reactor whose boundary is written once: every input here is declared by the `on` that answers
+// it, and there is not an `input` member in the file.
+//
+// The merged form is sugar, and this example is the proof that it is *only* sugar. It is
+// `examples/reactors/effects.norn` with the two `input` declarations folded into their handlers and
+// nothing else changed, so the trace it produces has to be the same shape: the queue policies are
+// the ones written on the handlers, the plans are the ones the graph computes, and the two engines
+// agree on the result.
+//
+// A queue clause is the discriminator. `on queued(id: I64) [capacity: 8, overflow: reject]`
+// declares the input `queued` carrying an `I64`; `on tick() [capacity: 1, overflow: drop_oldest]`
+// declares one carrying `()`, because a handler with no parameter has no message to name.
+
+enum Outcome {
+    Delivered(I64)
+    Failed
+}
+
+record Report {
+    pending: I64
+    delivered: I64
+    failed: I64
+    swept: I64
+}
+
+task fn deliver(id: I64) -> Outcome
+    uses { clock }
+{
+    await sleep(id)
+    if id == 2 {
+        Outcome.Failed
+    } else {
+        Outcome.Delivered(id)
+    }
+}
+
+reactor Mailbox()
+    uses { clock }
+{
+    state pending: I64 = 0
+    state delivered: I64 = 0
+    state failed: I64 = 0
+    state swept: I64 = 0
+
+    // The message type sits where the message is bound, so nothing has to be read twice to know
+    // what `id` is.
+    on queued(id: I64) [capacity: 8, overflow: reject] {
+        pending = pending + 1
+        after deliver(id) -> settled
+    }
+
+    // `settled` is declared by the handler that consumes it even though what sends it is an
+    // `after` written above: an input is a name in the reactor, not a line in a sequence.
+    on settled(outcome: Outcome) [capacity: 8, overflow: reject] {
+        pending = pending - 1
+        match outcome {
+            Outcome.Delivered(_) => {
+                delivered = delivered + 1
+            }
+            Outcome.Failed => {
+                failed = failed + 1
+            }
+        }
+    }
+
+    // No parameter and a queue clause: an input carrying `()`.
+    on tick() [capacity: 1, overflow: drop_oldest] {
+        swept = swept + 1
+    }
+
+    export signal report = Report(
+        pending: pending, delivered: delivered, failed: failed, swept: swept
+    )
+}
+
+task fn main() -> ()
+    uses { clock }
+{
+    scope {
+        let mailbox = spawn reactor Mailbox()
+        await send(mailbox.queued, 1)
+        await send(mailbox.queued, 2)
+        await send(mailbox.queued, 3)
+        await send(mailbox.tick, ())
+        await sleep(50)
+        print(latest(mailbox.report))
+    }
+}

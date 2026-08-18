@@ -790,7 +790,7 @@
       }
     },
     "on-decl": {
-      "comment": "`on opened(message)`. The name is the input being responded to, not a function being defined, but it is the same kind of anchor and reads best coloured as one.",
+      "comment": "`on opened(message)`, and `on opened(message: I64) [capacity: \u2026, overflow: \u2026]` when the handler declares the input it answers. The name is the input being responded to, not a function being defined, but it is the same kind of anchor and reads best coloured as one.",
       "begin": "\\b(on)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(\\()",
       "beginCaptures": {
         "1": {
@@ -823,6 +823,36 @@
         },
         {
           "include": "#reserved"
+        },
+        {
+          "comment": "`message: I64` \u2014 an annotation here declares the input's message type, so the word after the colon is a type rather than another parameter. Must precede the bare-name rule below, which would otherwise claim it.",
+          "begin": "\\b([A-Za-z_][A-Za-z0-9_]*)\\s*(:)",
+          "beginCaptures": {
+            "1": {
+              "patterns": [
+                {
+                  "include": "#reserved"
+                },
+                {
+                  "name": "variable.parameter.norn",
+                  "match": ".+"
+                }
+              ]
+            },
+            "2": {
+              "name": "punctuation.separator.type.norn"
+            }
+          },
+          "end": "(?=\\))",
+          "applyEndPatternLast": true,
+          "patterns": [
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#type"
+            }
+          ]
         },
         {
           "name": "variable.parameter.norn",

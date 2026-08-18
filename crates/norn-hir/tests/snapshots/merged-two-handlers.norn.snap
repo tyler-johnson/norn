@@ -1,0 +1,10 @@
+error: `queued` already has a handler
+  --> merged-two-handlers.norn:12:8
+   |
+12 |     on queued(id) {
+   |        ^^^^^^ second `on` for one input
+  --> merged-two-handlers.norn:8:8
+   |
+ 8 |     on queued(id: I64) [capacity: 8, overflow: reject] {
+   |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the input
+   = note: one input is one handler: two would need an order between them, and a turn has none

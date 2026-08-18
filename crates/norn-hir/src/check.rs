@@ -743,7 +743,12 @@ impl Checker {
                 params.push((param.name.name.clone(), ty));
             }
 
-            for member in &decl.members {
+            // Positions of `on` members that meant to declare an input and did not: a type with no
+            // queue clause, a clause with no type, or a name already taken. Each has been reported
+            // once already, and pairing them again as "has no input" would bury the diagnostic
+            // that says what to write.
+            let mut undeclared: Vec<usize> = Vec::new();
+            for (position, member) in decl.members.iter().enumerate() {
                 match &member.kind {
                     ast::MemberKind::Input { name, ty, queue } => {
                         if !claim(self, &mut taken, name) {
@@ -807,7 +812,89 @@ impl Checker {
                             span: member.span,
                         });
                     }
-                    ast::MemberKind::On { .. } => {}
+                    // A queue clause is what makes an `on` a declaration: with one, this member
+                    // *is* the input, and does everything the `Input` arm above does. Without one
+                    // it declares nothing, so it claims nothing — the `input` it answers to owns
+                    // the name.
+                    ast::MemberKind::On {
+                        input,
+                        params,
+                        queue,
+                        ..
+                    } => {
+                        let Some(queue) = queue else {
+                            if let Some(param) = params.iter().find(|p| p.ty.is_some()) {
+                                self.push(
+                                    Diagnostic::new(
+                                        param.span,
+                                        format!(
+                                            "a type here declares `{}`, so it needs a queue policy",
+                                            input.name
+                                        ),
+                                    )
+                                    .label("no queue policy")
+                                    .note(format!(
+                                        "an input is a bounded mailbox: write `on {name}({bound}: …) [capacity: …, overflow: …]`, or drop the type and let an `input {name}` member declare it",
+                                        name = input.name,
+                                        bound = param.name.name,
+                                    )),
+                                );
+                                undeclared.push(position);
+                            }
+                            continue;
+                        };
+                        if !claim(self, &mut taken, input) {
+                            undeclared.push(position);
+                            continue;
+                        }
+                        // The parameter *defines* the message type here rather than being checked
+                        // against one, so an untyped parameter leaves nothing to declare.
+                        let ty = match params.first() {
+                            None => Ty::Unit,
+                            Some(param) => match &param.ty {
+                                Some(ty) => {
+                                    let ty = self.resolve_ty(ty);
+                                    self.reactor_ty(ty, "input", &input.name, param.span)
+                                }
+                                None => {
+                                    self.push(
+                                        Diagnostic::new(
+                                            param.span,
+                                            format!(
+                                                "`{}` is declared here, so `{}` needs the message type",
+                                                input.name, param.name.name
+                                            ),
+                                        )
+                                        .label("no type on the message")
+                                        .secondary(queue.span, "this queue clause declares the input")
+                                        .note(format!(
+                                            "write `on {name}({bound}: …) [capacity: …, overflow: …]`, or drop the clause and let an `input {name}` member declare it",
+                                            name = input.name,
+                                            bound = param.name.name,
+                                        )),
+                                    );
+                                    Ty::Error
+                                }
+                            },
+                        };
+                        let capacity = self.capacity(&queue.capacity);
+                        let overflow = self.overflow(&queue.overflow);
+                        let handler = self.declare_lifted(
+                            format!("{}.on.{}", decl.name.name, input.name),
+                            member.span,
+                        );
+                        inputs.push(InputDef {
+                            name: input.name.clone(),
+                            ty,
+                            capacity,
+                            overflow,
+                            handler,
+                            plan: Vec::new(),
+                            // The declaring half of the member, not the body: a diagnostic that
+                            // points at "the input" should not underline the whole handler.
+                            span: input.span.to(queue.span),
+                        });
+                    }
                 }
             }
 
@@ -815,11 +902,17 @@ impl Checker {
             // an input with no handler can never do anything, and a handler for no input responds
             // to a message that cannot arrive.
             let mut handled: Vec<usize> = Vec::new();
-            for member in &decl.members {
+            for (position, member) in decl.members.iter().enumerate() {
                 let ast::MemberKind::On { input, .. } = &member.kind else {
                     continue;
                 };
+                // A member that meant to declare and did not still *handles* whatever the name
+                // turns out to mean, so it pairs as usual — it just says nothing more about it.
+                let reported = undeclared.contains(&position);
                 let Some(index) = inputs.iter().position(|i| i.name == input.name) else {
+                    if reported {
+                        continue;
+                    }
                     let known: Vec<&str> = inputs.iter().map(|i| i.name.as_str()).collect();
                     let mut diagnostic = Diagnostic::new(
                         input.span,
@@ -834,6 +927,9 @@ impl Checker {
                     continue;
                 };
                 if handled.contains(&index) {
+                    if reported {
+                        continue;
+                    }
                     self.push(
                         Diagnostic::new(
                             input.span,
@@ -996,6 +1092,7 @@ impl Checker {
                     input,
                     params,
                     body,
+                    ..
                 } => {
                     let Some(index) = self.program.reactors[id.index()].input(&input.name) else {
                         continue;
@@ -1003,7 +1100,7 @@ impl Checker {
                     // The handler's own message binding shadows any member of the same name.
                     let mut scan = Scan::new(&members);
                     for param in params {
-                        scan.bind(&param.name);
+                        scan.bind(&param.name.name);
                     }
                     scan.block(body);
                     for (found, span) in &scan.writes {
@@ -1123,6 +1220,7 @@ impl Checker {
                 input,
                 params,
                 body,
+                ..
             } = &member.kind
             else {
                 continue;
@@ -1162,12 +1260,17 @@ impl Checker {
     /// One binding, or none when the message is `()`: an occurrence with no payload has nothing to
     /// name. Destructuring several names out of one message needs patterns in a parameter position,
     /// which nothing else in v0 has.
-    fn bind_message(&mut self, input: &str, params: &[ast::Ident], ty: &Ty, span: Span) {
+    ///
+    /// In the split form this is a rule the handler is checked against. In the merged form it is
+    /// the *definition* — `declare_reactors` read the message type off the parameter, so an `on`
+    /// with no parameter is what makes an input carry `()` — and checking it here is then a
+    /// tautology that costs nothing and keeps one code path.
+    fn bind_message(&mut self, input: &str, params: &[ast::HandlerParam], ty: &Ty, span: Span) {
         let wanted = if *ty == Ty::Unit { 0 } else { 1 };
         if params.len() == wanted {
             if let Some(param) = params.first() {
                 self.declare_role(
-                    param.name.clone(),
+                    param.name.name.clone(),
                     ty.clone(),
                     false,
                     LocalRole::Message,
@@ -1196,7 +1299,7 @@ impl Checker {
         self.push(diagnostic);
         for param in params {
             self.declare_role(
-                param.name.clone(),
+                param.name.name.clone(),
                 Ty::Error,
                 false,
                 LocalRole::Message,

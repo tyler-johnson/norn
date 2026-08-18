@@ -1,0 +1,6 @@
+error: a type here declares `queued`, so it needs a queue policy
+ --> merged-unbounded.norn:8:15
+  |
+8 |     on queued(id: I64) {
+  |               ^^^^^^^ no queue policy
+  = note: an input is a bounded mailbox: write `on queued(id: …) [capacity: …, overflow: …]`, or drop the type and let an `input queued` member declare it

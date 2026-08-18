@@ -462,20 +462,40 @@ impl Parser {
                 self.advance();
                 let input = self.ident()?;
                 self.expect(TokenKind::LParen)?;
+                // `param_list`'s loop with the annotation made optional: a bare name binds the
+                // message of an input declared elsewhere, and a typed one declares the input here.
                 let mut params = Vec::new();
                 while !self.at(&TokenKind::RParen) && !self.at_eof() {
-                    params.push(self.ident()?);
+                    let name = self.ident()?;
+                    let ty = if self.eat(&TokenKind::Colon) {
+                        Some(self.ty()?)
+                    } else {
+                        None
+                    };
+                    let span = match &ty {
+                        Some(ty) => name.span.to(ty.span),
+                        None => name.span,
+                    };
+                    params.push(HandlerParam { name, ty, span });
                     if !self.eat(&TokenKind::Comma) {
                         break;
                     }
                 }
                 self.expect(TokenKind::RParen)?;
+                // The queue clause is the discriminator: written here, this member declares the
+                // input; absent, the input is declared by an `input` member of the same name.
+                let queue = if self.at(&TokenKind::LBracket) {
+                    Some(self.queue_clause()?)
+                } else {
+                    None
+                };
                 let body = self.block()?;
                 let span = start.to(body.span);
                 Ok(Member {
                     kind: MemberKind::On {
                         input,
                         params,
+                        queue,
                         body,
                     },
                     span,

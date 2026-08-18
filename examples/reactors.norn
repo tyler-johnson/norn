@@ -61,6 +61,33 @@ reactor Mailbox(retries: I64)
     export signal report = Report(pending: pending, failed: failed, retries: retries)
 }
 
+// The merged spelling: an `on` that carries a queue clause declares the input it responds to. The
+// parameter's type is the message type — written where the message is bound rather than one member
+// away — and `on opened()` with a clause declares an input carrying `()`.
+reactor Meter(window: I64) {
+    on sampled(value: F64) [capacity: 32, overflow: drop_oldest] {
+        total = total + value
+        seen = seen + 1
+    }
+
+    on reset() [capacity: 1, overflow: reject] {
+        total = 0.0
+        seen = 0
+    }
+
+    // Both spellings are legal in one reactor: this input is declared here and answered below.
+    input trimmed: Trim [capacity: 4, overflow: wait]
+
+    state total: F64 = 0.0
+    state seen: I64 = 0
+
+    on trimmed(bound) {
+        seen = seen - bound.count
+    }
+
+    export signal mean = total / window
+}
+
 task fn drive(limit: I64) -> ()
     uses { clock }
 {

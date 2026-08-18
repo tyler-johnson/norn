@@ -1,0 +1,13 @@
+// The mirror of `merged-untyped.norn`: a type on the parameter declares the input here, and an
+// input is a bounded mailbox. Either add the queue policy, or drop the type and let a separate
+// `input` member declare it.
+
+reactor Mailbox() {
+    state pending: I64 = 0
+
+    on queued(id: I64) {
+        pending = pending + id
+    }
+
+    export signal depth = pending
+}

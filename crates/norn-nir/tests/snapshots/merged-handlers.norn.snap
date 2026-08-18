@@ -1,0 +1,258 @@
+=== nir ===
+record Report #0 (pending, delivered, failed, swept)
+enum Option #0 (None/0, Some/1)
+enum Result #1 (Ok/1, Err/1)
+enum IoError #2 (NotFound/0, Denied/0, InUse/0, Refused/0, Closed/0, Other/1)
+enum Outcome #3 (Delivered/1, Failed/0)
+
+reactor Mailbox #0
+    node 0 pending state slot 0 init Mailbox.pending.init#2 <- []
+    node 1 delivered state slot 1 init Mailbox.delivered.init#3 <- []
+    node 2 failed state slot 2 init Mailbox.failed.init#4 <- []
+    node 3 swept state slot 3 init Mailbox.swept.init#5 <- []
+    node 4 report signal Mailbox.report#9 export <- [pending, delivered, failed, swept]
+    order [pending, delivered, failed, swept, report]
+    input 0 queued capacity 8 overflow reject handler Mailbox.on.queued#6
+        plan [pending, report]
+    input 1 settled capacity 8 overflow reject handler Mailbox.on.settled#7
+        plan [pending, delivered, failed, report]
+    input 2 tick capacity 1 overflow drop_oldest handler Mailbox.on.tick#8
+        plan [swept, report]
+    exports [report]
+
+task fn deliver #0(_0/id)
+    local _1
+    local _2
+    local _3
+    local _4
+    local _5
+    local _6
+  b0:
+    _1 = task builtin sleep(_0/id)
+    await _1 -> _2, resume b1
+  b1:
+    _4 = _0/id eq 2
+    branch _4 ? b2 : b3
+  b2:
+    _5 = Outcome.Failed()
+    _3 = _5
+    goto b4
+  b3:
+    _6 = Outcome.Delivered(_0/id)
+    _3 = _6
+    goto b4
+  b4:
+    return _3
+
+task fn main #1()
+    local _0/mailbox
+    local _1
+    local _2
+    local _3
+    local _4
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+    local _10
+    local _11
+    local _12
+    local _13
+    local _14
+    local _15
+    local _16
+    local _17
+    local _18
+    local _19
+  b0:
+    scope enter
+    _2 = spawn reactor Mailbox#0()
+    _0/mailbox = _2
+    _3 = input 0 of _0/mailbox
+    _4 = task builtin send(_3, 1)
+    await _4 -> _5, resume b1
+  b1:
+    _6 = input 0 of _0/mailbox
+    _7 = task builtin send(_6, 2)
+    await _7 -> _8, resume b2
+  b2:
+    _9 = input 0 of _0/mailbox
+    _10 = task builtin send(_9, 3)
+    await _10 -> _11, resume b3
+  b3:
+    _12 = input 2 of _0/mailbox
+    _13 = task builtin send(_12, ())
+    await _13 -> _14, resume b4
+  b4:
+    _15 = task builtin sleep(50)
+    await _15 -> _16, resume b5
+  b5:
+    _17 = export 0 of _0/mailbox
+    _18 = builtin latest(_17)
+    _19 = builtin print(_18)
+    _1 = _19
+    scope exit, resume b6
+  b6:
+    return _1
+
+fn Mailbox.pending.init #2()
+  b0:
+    return 0
+
+fn Mailbox.delivered.init #3()
+  b0:
+    return 0
+
+fn Mailbox.failed.init #4()
+  b0:
+    return 0
+
+fn Mailbox.swept.init #5()
+  b0:
+    return 0
+
+fn Mailbox.on.queued #6(_0/id, _1/pending, _2/delivered, _3/failed, _4/swept)
+    local _5
+    local _6
+  b0:
+    _5 = _1/pending add.i 1
+    _1/pending = _5
+    set slot 0 = _1/pending
+    _6 = task deliver#0(_0/id)
+    emit _6 -> input 1
+    return ()
+
+fn Mailbox.on.settled #7(_0/outcome, _1/pending, _2/delivered, _3/failed, _4/swept)
+    local _5
+    local _6
+    local _7
+    local _8
+  b0:
+    _5 = _1/pending sub.i 1
+    _1/pending = _5
+    set slot 0 = _1/pending
+    goto b2
+  b1:
+    return _6
+  b2:
+    switch tag _0/outcome [0 => b6] else b3
+  b3:
+    switch tag _0/outcome [1 => b8] else b4
+  b4:
+    trap "no match arm applied"
+  b5:
+    _7 = _2/delivered add.i 1
+    _2/delivered = _7
+    set slot 1 = _2/delivered
+    _6 = ()
+    goto b1
+  b6:
+    goto b5
+  b7:
+    _8 = _3/failed add.i 1
+    _3/failed = _8
+    set slot 2 = _3/failed
+    _6 = ()
+    goto b1
+  b8:
+    goto b7
+
+fn Mailbox.on.tick #8(_0/pending, _1/delivered, _2/failed, _3/swept)
+    local _4
+  b0:
+    _4 = _3/swept add.i 1
+    _3/swept = _4
+    set slot 3 = _3/swept
+    return ()
+
+fn Mailbox.report #9(_0/pending, _1/delivered, _2/failed, _3/swept)
+    local _4
+  b0:
+    _4 = Report(_0/pending, _1/delivered, _2/failed, _3/swept)
+    return _4
+
+=== graph ===
+reactor Mailbox #0
+    node 0 pending state slot 0 init Mailbox.pending.init#2 <- []
+    node 1 delivered state slot 1 init Mailbox.delivered.init#3 <- []
+    node 2 failed state slot 2 init Mailbox.failed.init#4 <- []
+    node 3 swept state slot 3 init Mailbox.swept.init#5 <- []
+    node 4 report signal Mailbox.report#9 export <- [pending, delivered, failed, swept]
+    order [pending, delivered, failed, swept, report]
+    input 0 queued capacity 8 overflow reject handler Mailbox.on.queued#6
+        plan [pending, report]
+    input 1 settled capacity 8 overflow reject handler Mailbox.on.settled#7
+        plan [pending, delivered, failed, report]
+    input 2 tick capacity 1 overflow drop_oldest handler Mailbox.on.tick#8
+        plan [swept, report]
+    exports [report]
+
+=== output ===
+Report(pending: 0, delivered: 2, failed: 1, swept: 1)
+=== result ===
+()
+=== trace ===
+0ms t0 spawn main root
+0ms t0 resume
+0ms t0 scope enter 1
+0ms R0 create Mailbox in t0
+0ms R0 publish 0
+0ms t0 park timer 50ms
+0ms R0 turn 0 queued
+0ms R0 commit pending
+0ms R0 recompute report
+0ms R0 publish 1
+0ms t1 spawn deliver in t0
+0ms R0 effect deliver t1 -> settled
+0ms t1 resume
+0ms t1 park timer 1ms
+0ms R0 turn 1 queued
+0ms R0 commit pending
+0ms R0 recompute report
+0ms R0 publish 2
+0ms t2 spawn deliver in t0
+0ms R0 effect deliver t2 -> settled
+0ms t2 resume
+0ms t2 park timer 2ms
+0ms R0 turn 2 queued
+0ms R0 commit pending
+0ms R0 recompute report
+0ms R0 publish 3
+0ms t3 spawn deliver in t0
+0ms R0 effect deliver t3 -> settled
+0ms t3 resume
+0ms t3 park timer 3ms
+0ms R0 turn 3 tick
+0ms R0 commit swept
+0ms R0 recompute report
+0ms R0 publish 4
+1ms -- clock
+1ms t1 resume
+1ms t1 done
+1ms R0 turn 4 settled
+1ms R0 commit pending
+1ms R0 commit delivered
+1ms R0 recompute report
+1ms R0 publish 5
+2ms -- clock
+2ms t2 resume
+2ms t2 done
+2ms R0 turn 5 settled
+2ms R0 commit pending
+2ms R0 commit failed
+2ms R0 recompute report
+2ms R0 publish 6
+3ms -- clock
+3ms t3 resume
+3ms t3 done
+3ms R0 turn 6 settled
+3ms R0 commit pending
+3ms R0 commit delivered
+3ms R0 recompute report
+3ms R0 publish 7
+50ms -- clock
+50ms t0 resume
+50ms R0 stop
+50ms t0 scope exit 1
+50ms t0 done

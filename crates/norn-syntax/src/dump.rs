@@ -208,13 +208,26 @@ fn dump_member(member: &Member) -> Node {
         MemberKind::On {
             input,
             params,
+            queue,
             body,
         } => {
             let mut children = vec![atom(&input.name)];
             children.push(list(
                 "params",
-                params.iter().map(|p| atom(&p.name)).collect(),
+                params
+                    .iter()
+                    .map(|p| match &p.ty {
+                        Some(ty) => list("param", vec![atom(&p.name.name), dump_type(ty)]),
+                        None => atom(&p.name.name),
+                    })
+                    .collect(),
             ));
+            if let Some(queue) = queue {
+                children.push(list(
+                    "queue",
+                    vec![dump_expr(&queue.capacity), atom(&queue.overflow.name)],
+                ));
+            }
             children.push(dump_block(body));
             list("on", children)
         }

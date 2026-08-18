@@ -111,6 +111,17 @@ Alternatives considered:
   `uses { … }` applies to a reactor as well as to a task: it is the authority the reactor's effects
   need, and the spawner's set must cover it.
 
+  An input has two spellings, and a queue clause on an `on` is the discriminator between them.
+  `on queued(id: I64) [capacity: 8, overflow: reject] { … }` declares the input and answers it in
+  one member; `input queued: I64 [capacity: 8, overflow: reject]` plus `on queued(id) { … }` splits
+  the same thing across two. The merged form exists because the pairing is a bijection the checker
+  enforces in both directions, so writing it twice buys three failure modes and no expressiveness,
+  and because the message type belongs where the message is bound. The split form survives because
+  M7's operator vocabulary — `hold`, `scan`, `merge`, and the `event` nodes they run on — consumes
+  an input that no `on` responds to, and a grammar with no way to write one would make M7 a
+  breaking change rather than an addition. The cost, stated rather than discovered later: a
+  reactor's boundary is no longer scannable under a single leading `input`.
+
   A signal is also *callable* from anywhere inside its own reactor: `is_full(count + 1, limit)`
   applies the lifted body to arguments written at the call site. Naming a signal reuses its value,
   calling one reuses its definition, and only the second is legal in an `on` handler — a call has no

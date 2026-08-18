@@ -1,0 +1,17 @@
+// One input is one handler, whichever form declared it: two would need an order between them, and
+// a turn has none. Here the first `on` declares `queued` and the second answers it.
+
+reactor Mailbox() {
+    state pending: I64 = 0
+    state seen: I64 = 0
+
+    on queued(id: I64) [capacity: 8, overflow: reject] {
+        pending = pending + id
+    }
+
+    on queued(id) {
+        seen = seen + 1
+    }
+
+    export signal depth = pending
+}

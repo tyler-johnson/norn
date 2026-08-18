@@ -158,13 +158,32 @@ fn print_member(member: &Member) -> String {
         MemberKind::On {
             input,
             params,
+            queue,
             body,
         } => {
-            let params: Vec<_> = params.iter().map(|p| p.name.clone()).collect();
+            let params: Vec<_> = params
+                .iter()
+                .map(|p| match &p.ty {
+                    Some(ty) => format!("{}: {}", p.name.name, print_type(ty)),
+                    None => p.name.name.clone(),
+                })
+                .collect();
+            // The queue clause is what distinguishes the merged form from the split one, so it is
+            // printed rather than normalised away: `norn fmt` must not rewrite one form as the
+            // other.
+            let queue = match queue {
+                Some(queue) => format!(
+                    " [capacity: {}, overflow: {}]",
+                    print_expr(&queue.capacity, 1, LAMBDA),
+                    queue.overflow.name
+                ),
+                None => String::new(),
+            };
             format!(
-                "on {}({}) {}",
+                "on {}({}){} {}",
                 input.name,
                 params.join(", "),
+                queue,
                 print_block(body, 1)
             )
         }

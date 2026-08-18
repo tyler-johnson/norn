@@ -462,21 +462,30 @@ A reactor may produce a typed description of work:
 ```
 // Effect after commit
 reactor Mailbox() {
-    input send: OutgoingMessage
+    input delivery_finished: DeliveryResult [capacity: 256, overflow: wait]
 
     state pending = Map<MessageId, DeliveryState>()
 
-    on send(message) {
+    on send(message: OutgoingMessage) [capacity: 256, overflow: wait] {
         pending = pending.insert(message.id, Queued)
 
         after deliver(message) -> delivery_finished
     }
 
-    on delivery_finished(id, result) {
-        pending = pending.update(id, DeliveryState.from(result))
+    on delivery_finished(result) {
+        pending = pending.update(result.id, DeliveryState.from(result))
     }
 }
 ```
+
+Both spellings of an input appear here, and the queue clause is what tells them apart: an `on` that
+carries one *declares* the input it answers, taking the message type from its parameter, while an
+`on` without one answers an input declared elsewhere. The merged form is sugar and nothing more —
+`send` above means exactly what an `input send: OutgoingMessage [capacity: 256, overflow: wait]`
+plus a handler would mean. It exists because the pairing is a bijection: an input needs a handler,
+a handler needs an input, and writing the boundary twice invents failure modes rather than
+expressing anything. The split form stays because an input with no handler is what M7's operator
+vocabulary will consume.
 
 The exact syntax is open — v0 spells the result channel `-> delivery_finished` rather than `.returns(…)`, since it has no method resolution — but the semantics are not: the state indicating that delivery is queued becomes stable before delivery begins. A completion becomes a later input. This supports tracing and deterministic tests without claiming that an email or HTTP call can be rolled back.
 

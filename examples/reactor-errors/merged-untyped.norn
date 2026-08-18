@@ -1,0 +1,12 @@
+// A queue clause declares the input, and an input's message type is written on the parameter that
+// binds it. Without the type there is nothing to declare, so the clause has nothing to attach to.
+
+reactor Mailbox() {
+    state pending: I64 = 0
+
+    on queued(id) [capacity: 8, overflow: reject] {
+        pending = pending + id
+    }
+
+    export signal depth = pending
+}

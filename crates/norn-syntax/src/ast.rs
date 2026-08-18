@@ -146,11 +146,27 @@ pub enum MemberKind {
     },
     /// `on opened() { … }` — the only place state is assigned and the only place an effect is
     /// requested.
+    ///
+    /// A queue clause here means this member *declares* the input as well as handling it:
+    /// `on queued(id: I64) [capacity: 8, overflow: reject] { … }` is the merged spelling of an
+    /// `input` and its `on`. The parser accepts every combination of typed parameter and queue
+    /// clause; which of them cohere is a checker question, not a grammar one.
     On {
         input: Ident,
-        params: Vec<Ident>,
+        params: Vec<HandlerParam>,
+        queue: Option<Queue>,
         body: Block,
     },
+}
+
+/// One parameter of an `on` handler: the name the message is bound to, and — in the merged form —
+/// the type that *declares* what the input carries. `Param` cannot serve here, because its type is
+/// not optional.
+#[derive(Debug)]
+pub struct HandlerParam {
+    pub name: Ident,
+    pub ty: Option<Type>,
+    pub span: Span,
 }
 
 /// `[capacity: 64, overflow: reject]`. There is no default: an unbounded queue is the one thing
