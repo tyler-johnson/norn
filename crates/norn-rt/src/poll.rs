@@ -87,6 +87,33 @@ enum Backing {
     /// accepted v0 behaviour rather than a thread pool nothing else needs yet.
     File(std::fs::File),
     Flow(FlowEntry),
+    /// An HTTP request being served. `http_read_request` converts a `Connection` entry into this
+    /// in place — same `ResourceId`, kind flipped — so the trace's `open`/`close` pairing stays
+    /// 1:1 with descriptors rather than with protocol states.
+    Request(RequestEntry),
+}
+
+/// One HTTP exchange on one socket, every phase's progress in one place, because the task driving
+/// it re-asks from the top after every park.
+struct RequestEntry {
+    stream: TcpStream,
+    /// Bytes read while hunting for the head's terminating blank line.
+    gathered: Vec<u8>,
+    head: Option<crate::http::Head>,
+    /// Body bytes the stream still owes, beyond `body_leftover`.
+    body_remaining: u64,
+    /// Body bytes that arrived in the same reads as the head.
+    body_leftover: Vec<u8>,
+    body_taken: bool,
+    respond: Respond,
+}
+
+/// The response bytes going out, and how far they have gone. Queued once; a re-ask that finds
+/// them queued just keeps pushing.
+#[derive(Default)]
+struct Respond {
+    data: Vec<u8>,
+    written: usize,
 }
 
 /// A flow in flight. Every v0 flow knows its length up front — a file's size, a request body's
@@ -111,6 +138,9 @@ struct FlowEntry {
 
 enum FlowSource {
     File(std::fs::File),
+    /// The body of the request behind this id. The flow has no descriptor of its own: its
+    /// readiness is bytes arriving on the request's stream, which is what `pollable_fd` resolves.
+    RequestBody(ResourceId),
 }
 
 struct Entry {
@@ -127,7 +157,9 @@ impl Backing {
             Backing::File(file) => Some(file.as_raw_fd()),
             Backing::Flow(flow) => match &flow.source {
                 FlowSource::File(file) => Some(file.as_raw_fd()),
+                FlowSource::RequestBody(_) => None,
             },
+            Backing::Request(request) => Some(request.stream.as_raw_fd()),
         }
     }
 }
@@ -136,6 +168,14 @@ struct Interest {
     task: TaskId,
     fd: RawFd,
     write: bool,
+}
+
+/// What one attempt to gather a request head produced.
+pub enum GatherProgress {
+    /// The head is parsed and the entry is a request; the accessors may be asked.
+    Ready,
+    /// More bytes have to arrive first; park reading.
+    Wait,
 }
 
 /// One observable step of a flow-to-sink transfer, as `pipe_step` reports it.
@@ -311,7 +351,7 @@ impl Readiness {
             self.entries[flow.index()] = Some(slot);
             return Err(io::Error::from(io::ErrorKind::InvalidInput));
         };
-        let outcome = self.flow_progress(&mut state, sink);
+        let outcome = self.flow_progress(flow, &mut state, sink);
         self.entries[flow.index()] = Some(Entry {
             kind: slot.kind,
             backing: Backing::Flow(state),
@@ -321,6 +361,7 @@ impl Readiness {
 
     fn flow_progress(
         &mut self,
+        flow: ResourceId,
         state: &mut FlowEntry,
         sink: ResourceId,
     ) -> io::Result<PipeProgress> {
@@ -364,6 +405,18 @@ impl Readiness {
                     state.buffered = chunk;
                     state.buffered_written = 0;
                 }
+                FlowSource::RequestBody(request) => {
+                    let request = *request;
+                    match self.request_body_read(request, want)? {
+                        Some(chunk) => {
+                            state.remaining -= chunk.len() as u64;
+                            state.buffered = chunk;
+                            state.buffered_written = 0;
+                        }
+                        // Parking names the flow; `pollable_fd` resolves it to the stream.
+                        None => return Ok(PipeProgress::ParkRead(flow)),
+                    }
+                }
             }
         }
     }
@@ -378,6 +431,189 @@ impl Readiness {
                     Err(err) => return Err(err),
                 }
             },
+            Backing::Request(request) => loop {
+                match request.stream.write(data) {
+                    Ok(wrote) => return Ok(Some(wrote)),
+                    Err(err) if err.kind() == io::ErrorKind::WouldBlock => return Ok(None),
+                    Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
+                    Err(err) => return Err(err),
+                }
+            },
+            _ => Err(io::Error::from(io::ErrorKind::InvalidInput)),
+        }
+    }
+
+    // ---------------------------------------------------------------- requests
+
+    /// Read towards a complete request head. The first ask converts the `Connection` entry into a
+    /// `Request` in place — same id, same descriptor, kind flipped — which is what keeps the
+    /// trace's `open`/`close` lines paired 1:1. Re-asks find whatever was gathered so far.
+    pub fn request_read_step(&mut self, id: ResourceId) -> io::Result<GatherProgress> {
+        let slot = self
+            .entries
+            .get_mut(id.index())
+            .ok_or_else(|| io::Error::from(io::ErrorKind::NotConnected))?;
+        if matches!(
+            slot.as_ref().map(|entry| &entry.backing),
+            Some(Backing::Connection { .. })
+        ) {
+            let taken = slot.take().expect("just matched");
+            let Backing::Connection { stream, .. } = taken.backing else {
+                unreachable!("just matched a connection");
+            };
+            *slot = Some(Entry {
+                kind: ResourceKind::Request,
+                backing: Backing::Request(RequestEntry {
+                    stream,
+                    gathered: Vec::new(),
+                    head: None,
+                    body_remaining: 0,
+                    body_leftover: Vec::new(),
+                    body_taken: false,
+                    respond: Respond::default(),
+                }),
+            });
+        }
+        let Some(Entry {
+            backing: Backing::Request(request),
+            ..
+        }) = slot
+        else {
+            return Err(io::Error::from(io::ErrorKind::InvalidInput));
+        };
+        if request.head.is_some() {
+            return Ok(GatherProgress::Ready);
+        }
+        let mut buffer = [0u8; 4096];
+        loop {
+            match request.stream.read(&mut buffer) {
+                // The peer went away with the head unfinished.
+                Ok(0) => return Err(io::Error::from(io::ErrorKind::UnexpectedEof)),
+                Ok(read) => {
+                    request.gathered.extend_from_slice(&buffer[..read]);
+                    match crate::http::parse_head(&request.gathered) {
+                        crate::http::HeadParse::Incomplete => continue,
+                        // Malformed input is an `Err` value at the language level, never a trap:
+                        // the peer is not something the program can be blamed for.
+                        crate::http::HeadParse::Invalid(_) => {
+                            return Err(io::Error::from(io::ErrorKind::InvalidData));
+                        }
+                        crate::http::HeadParse::Complete(head, consumed) => {
+                            let mut leftover = request.gathered.split_off(consumed);
+                            // Anything past the declared body would be a pipelined next request,
+                            // which `Connection: close` has already declined.
+                            leftover.truncate(head.content_length as usize);
+                            request.body_remaining = head.content_length - leftover.len() as u64;
+                            request.body_leftover = leftover;
+                            request.gathered = Vec::new();
+                            request.head = Some(head);
+                            return Ok(GatherProgress::Ready);
+                        }
+                    }
+                }
+                Err(err) if err.kind() == io::ErrorKind::WouldBlock => {
+                    return Ok(GatherProgress::Wait);
+                }
+                Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
+                Err(err) => return Err(err),
+            }
+        }
+    }
+
+    fn request(&mut self, id: ResourceId) -> io::Result<&mut RequestEntry> {
+        match &mut self.entry(id)?.backing {
+            Backing::Request(request) => Ok(request),
+            _ => Err(io::Error::from(io::ErrorKind::InvalidInput)),
+        }
+    }
+
+    pub fn request_head(&mut self, id: ResourceId) -> io::Result<&crate::http::Head> {
+        self.request(id)?
+            .head
+            .as_ref()
+            .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))
+    }
+
+    /// Open the request's body as a flow entry. `Ok(None)` means it was already taken, which the
+    /// caller reports as a trap: two flows over one stream would each see half the bytes.
+    pub fn request_body_flow(&mut self, id: ResourceId) -> io::Result<Option<ResourceId>> {
+        let request = self.request(id)?;
+        if request.body_taken {
+            return Ok(None);
+        }
+        request.body_taken = true;
+        let remaining = request.body_remaining;
+        let leftover = std::mem::take(&mut request.body_leftover);
+        Ok(Some(self.push(
+            ResourceKind::Flow,
+            Backing::Flow(FlowEntry {
+                source: FlowSource::RequestBody(id),
+                remaining,
+                // Body bytes that arrived with the head seed the buffer, so the first chunk may
+                // be delivered without touching the stream again.
+                buffered: leftover,
+                buffered_written: 0,
+                transferred: 0,
+            }),
+        )))
+    }
+
+    /// Body bytes off the request's stream, up to `want`. `Ok(None)` means nothing has arrived.
+    fn request_body_read(&mut self, id: ResourceId, want: usize) -> io::Result<Option<Vec<u8>>> {
+        let request = self.request(id)?;
+        let mut chunk = vec![0u8; want];
+        loop {
+            match request.stream.read(&mut chunk) {
+                // The peer stopped short of the length it declared.
+                Ok(0) => return Err(io::Error::from(io::ErrorKind::UnexpectedEof)),
+                Ok(read) => {
+                    chunk.truncate(read);
+                    return Ok(Some(chunk));
+                }
+                Err(err) if err.kind() == io::ErrorKind::WouldBlock => return Ok(None),
+                Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
+                Err(err) => return Err(err),
+            }
+        }
+    }
+
+    /// Queue response bytes, once. A re-ask that finds bytes queued keeps pushing what is there —
+    /// the caller rebuilds the same bytes every attempt, and only the first build lands.
+    pub fn respond_queue(&mut self, id: ResourceId, data: Vec<u8>) -> io::Result<()> {
+        let request = self.request(id)?;
+        if request.respond.data.is_empty() {
+            request.respond.data = data;
+        }
+        Ok(())
+    }
+
+    /// Push queued response bytes. `Ok(Some(()))` when everything queued has gone out.
+    pub fn respond_step(&mut self, id: ResourceId) -> io::Result<Option<()>> {
+        let request = self.request(id)?;
+        loop {
+            if request.respond.written >= request.respond.data.len() {
+                return Ok(Some(()));
+            }
+            match request
+                .stream
+                .write(&request.respond.data[request.respond.written..])
+            {
+                Ok(0) => return Err(io::Error::from(io::ErrorKind::WriteZero)),
+                Ok(wrote) => request.respond.written += wrote,
+                Err(err) if err.kind() == io::ErrorKind::WouldBlock => return Ok(None),
+                Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
+                Err(err) => return Err(err),
+            }
+        }
+    }
+
+    /// How many bytes a flow still promises to deliver — the `Content-Length` of a response whose
+    /// body it becomes.
+    pub fn flow_len(&mut self, id: ResourceId) -> io::Result<u64> {
+        match &self.entry(id)?.backing {
+            Backing::Flow(flow) => {
+                Ok(flow.remaining + (flow.buffered.len() - flow.buffered_written) as u64)
+            }
             _ => Err(io::Error::from(io::ErrorKind::InvalidInput)),
         }
     }
@@ -404,9 +640,7 @@ impl Readiness {
     }
 
     pub fn watch(&mut self, id: ResourceId, write: bool, task: TaskId) -> io::Result<()> {
-        let Some(fd) = self.entry(id)?.backing.fd() else {
-            return Err(io::Error::from(io::ErrorKind::InvalidInput));
-        };
+        let fd = self.pollable_fd(id)?;
         self.interests.retain(|interest| interest.task != task);
         self.interests.push(Interest { task, fd, write });
         Ok(())
@@ -414,6 +648,25 @@ impl Readiness {
 
     pub fn clear(&mut self, task: TaskId) {
         self.interests.retain(|interest| interest.task != task);
+    }
+
+    /// The descriptor whose readiness stands for this resource's. Everything owns its own except
+    /// a request-body flow, whose bytes arrive on the request's stream.
+    fn pollable_fd(&mut self, id: ResourceId) -> io::Result<RawFd> {
+        let entry = self.entry(id)?;
+        if let Some(fd) = entry.backing.fd() {
+            return Ok(fd);
+        }
+        if let Backing::Flow(FlowEntry {
+            source: FlowSource::RequestBody(request),
+            ..
+        }) = entry.backing
+        {
+            if let Some(fd) = self.entry(request)?.backing.fd() {
+                return Ok(fd);
+            }
+        }
+        Err(io::Error::from(io::ErrorKind::InvalidInput))
     }
 
     /// Wait for readiness, up to `timeout` milliseconds, and return the tasks that may now proceed.

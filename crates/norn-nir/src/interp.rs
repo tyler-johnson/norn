@@ -485,6 +485,50 @@ impl Interpreter<'_> {
                     }
                 }
             }
+            Builtin::RequestMethod => {
+                let id = resource("request_method", &args[0])?;
+                match impure(cx, "request_method")?.request_method(id) {
+                    Ok(method) => Value::Str(method.into()),
+                    // Unreachable from a checked program — the borrow keeps the request alive —
+                    // but the wording is ABI all the same, mirrored in the prelude.
+                    Err(err) => {
+                        return Err(self.trap(frame, format!("`request_method`: {}", err.kind())));
+                    }
+                }
+            }
+            Builtin::RequestPath => {
+                let id = resource("request_path", &args[0])?;
+                match impure(cx, "request_path")?.request_path(id) {
+                    Ok(path) => Value::Str(path.into()),
+                    Err(err) => {
+                        return Err(self.trap(frame, format!("`request_path`: {}", err.kind())));
+                    }
+                }
+            }
+            Builtin::RequestHeader => {
+                let id = resource("request_header", &args[0])?;
+                let name = text("request_header", &args[1])?;
+                match impure(cx, "request_header")?.request_header(id, &name) {
+                    Ok(Some(value)) => Value::Variant(
+                        EnumId::OPTION.index(),
+                        EnumId::SOME,
+                        Rc::new(vec![Value::Str(value.into())]),
+                    ),
+                    Ok(None) => {
+                        Value::Variant(EnumId::OPTION.index(), EnumId::NONE, Rc::new(Vec::new()))
+                    }
+                    Err(err) => {
+                        return Err(self.trap(frame, format!("`request_header`: {}", err.kind())));
+                    }
+                }
+            }
+            Builtin::RequestBody => {
+                let id = resource("request_body", &args[0])?;
+                match impure(cx, "request_body")?.request_body(id) {
+                    Ok(flow) => Value::Resource(ResourceKind::Flow, flow),
+                    Err(trap) => return Err(trap),
+                }
+            }
             Builtin::Bytes => Value::Bytes(text("bytes", &args[0])?.into_bytes().into()),
             Builtin::BytesLen => Value::Int(blob("bytes_len", &args[0])?.len() as i64),
             Builtin::BytesSlice => {
@@ -584,6 +628,38 @@ impl Interpreter<'_> {
                 let sink = resource(name, &args[1])?;
                 match cx.pipe(flow, sink) {
                     Poll::Ready(outcome) => Poll::Ready(fallible(outcome.map(Value::Int))),
+                    Poll::Pending => Poll::Pending,
+                }
+            }
+            Builtin::HttpReadRequest => match cx.http_read_request(resource(name, &args[0])?) {
+                Poll::Ready(outcome) => Poll::Ready(fallible(
+                    outcome.map(|id| Value::Resource(ResourceKind::Request, id)),
+                )),
+                Poll::Pending => Poll::Pending,
+            },
+            Builtin::HttpRespond => {
+                let request = resource(name, &args[0])?;
+                let status = status(name, &args[1])?;
+                let body = text(name, &args[2])?;
+                match cx.http_respond(request, status, &body) {
+                    Poll::Ready(outcome) => Poll::Ready(fallible(outcome.map(|()| Value::Unit))),
+                    Poll::Pending => Poll::Pending,
+                }
+            }
+            Builtin::HttpRespondEmpty => {
+                let request = resource(name, &args[0])?;
+                let status = status(name, &args[1])?;
+                match cx.http_respond(request, status, "") {
+                    Poll::Ready(outcome) => Poll::Ready(fallible(outcome.map(|()| Value::Unit))),
+                    Poll::Pending => Poll::Pending,
+                }
+            }
+            Builtin::HttpRespondFlow => {
+                let request = resource(name, &args[0])?;
+                let status = status(name, &args[1])?;
+                let flow = resource(name, &args[2])?;
+                match cx.http_respond_flow(request, status, flow) {
+                    Poll::Ready(outcome) => Poll::Ready(fallible(outcome.map(|()| Value::Unit))),
                     Poll::Pending => Poll::Pending,
                 }
             }
@@ -806,6 +882,20 @@ fn resource(builtin: &str, value: &Value) -> Result<ResourceId, Trap> {
             "runtime",
         )),
     }
+}
+
+/// A status code the wire can carry: HTTP's status line is exactly three digits. The trap is
+/// unreachable through the differential oracle — reaching it needs a socket — so the wording is
+/// pinned by being the same source string here and in the prelude.
+fn status(builtin: &str, value: &Value) -> Result<i64, Trap> {
+    let status = integer(builtin, value)?;
+    if !(100..=999).contains(&status) {
+        return Err(Trap::new(
+            format!("`{builtin}` status must be 100..=999, found {status}"),
+            "runtime",
+        ));
+    }
+    Ok(status)
 }
 
 fn blob(builtin: &str, value: &Value) -> Result<Rc<[u8]>, Trap> {

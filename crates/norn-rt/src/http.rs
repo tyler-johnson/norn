@@ -1,9 +1,9 @@
 //! An HTTP/1.1 request head, parsed and printed — the pure half of M6's HTTP surface.
 //!
-//! Nothing here touches a socket or the resource table: bytes in, structure out, so every wire
-//! decision is unit-testable without a connection. The stateful side — gathering a head across
-//! reads, streaming a body, stepping a response — lives in `poll.rs`, and the `Cx` methods that
-//! orchestrate it live beside it in `lib.rs`.
+//! The parsing and printing here touch no socket and no resource table: bytes in, structure out,
+//! so every wire decision is unit-testable without a connection. The stateful side — gathering a
+//! head across reads, streaming a body, stepping a response — lives in `poll.rs`; the `Cx`
+//! methods at the bottom of this file orchestrate it and carry the protocol policy.
 //!
 //! The v0 wire is deliberately small: request line plus headers, strict CRLF, bodies delimited by
 //! `Content-Length` only, and `Connection: close` on every response. `Transfer-Encoding` is
@@ -149,6 +149,146 @@ pub fn reason(status: i64) -> &'static str {
         405 => "Method Not Allowed",
         500 => "Internal Server Error",
         _ => "",
+    }
+}
+
+// ---------------------------------------------------------------- the Cx surface
+//
+// The HTTP methods a task body can ask for, beside the protocol they speak — the same by-concern
+// split that puts scope methods in `scope.rs`. The stateful stepping they orchestrate lives in
+// `poll.rs`; what lives here is the protocol policy: what gets built, what gets closed, and when.
+
+use std::io;
+
+use crate::poll::{GatherProgress, ResourceId};
+use crate::{Cx, Poll, Trap};
+
+impl<'e, V: Clone> Cx<'_, 'e, V> {
+    /// Read a request head off a connection. Consumes the connection in the language and converts
+    /// its table entry in place, so the id — and the trace's `open` line — carries over. Failure
+    /// closes the socket: the caller gave it up by asking, and an `Err` is all it gets back.
+    pub fn http_read_request(&mut self, connection: ResourceId) -> Poll<io::Result<ResourceId>> {
+        match self.core.readiness.request_read_step(connection) {
+            Ok(GatherProgress::Ready) => {
+                self.finish_wait();
+                Poll::Ready(Ok(connection))
+            }
+            Ok(GatherProgress::Wait) => self.park_on(connection, false),
+            Err(err) => {
+                self.finish_wait();
+                self.close(connection);
+                Poll::Ready(Err(err))
+            }
+        }
+    }
+
+    pub fn request_method(&mut self, request: ResourceId) -> io::Result<String> {
+        Ok(self.core.readiness.request_head(request)?.method.clone())
+    }
+
+    pub fn request_path(&mut self, request: ResourceId) -> io::Result<String> {
+        Ok(self.core.readiness.request_head(request)?.path.clone())
+    }
+
+    pub fn request_header(
+        &mut self,
+        request: ResourceId,
+        name: &str,
+    ) -> io::Result<Option<String>> {
+        Ok(self
+            .core
+            .readiness
+            .request_head(request)?
+            .header(name)
+            .map(str::to_string))
+    }
+
+    /// Open the request's body as a scope-owned flow, seeded with whatever body bytes arrived
+    /// alongside the head. A second take is a trap — two flows over one stream would each see
+    /// half the bytes — and the trap is built here so both engines word it identically.
+    pub fn request_body(&mut self, request: ResourceId) -> Result<ResourceId, Trap> {
+        match self.core.readiness.request_body_flow(request) {
+            Ok(Some(flow)) => {
+                self.take_ownership(flow);
+                Ok(flow)
+            }
+            Ok(None) => Err(Trap::new("the request body was already taken", "runtime")),
+            Err(err) => Err(Trap::new(
+                format!("`request_body`: {}", err.kind()),
+                "runtime",
+            )),
+        }
+    }
+
+    /// Send a whole response — head and body in one buffer — and close the request. `Connection:
+    /// close` is on the wire, so closing is not a policy choice; it is keeping the promise.
+    pub fn http_respond(
+        &mut self,
+        request: ResourceId,
+        status: i64,
+        body: &str,
+    ) -> Poll<io::Result<()>> {
+        let mut data = render_head(status, body.len() as u64).into_bytes();
+        data.extend_from_slice(body.as_bytes());
+        if let Err(err) = self.core.readiness.respond_queue(request, data) {
+            return self.respond_failed(request, err);
+        }
+        match self.core.readiness.respond_step(request) {
+            Ok(Some(())) => {
+                self.finish_wait();
+                self.close(request);
+                Poll::Ready(Ok(()))
+            }
+            Ok(None) => self.park_on(request, true),
+            Err(err) => self.respond_failed(request, err),
+        }
+    }
+
+    /// Send a response whose body is a flow: the head goes out first, then the body rides the
+    /// pipe machinery — one chunk in flight, one trace line per chunk — and completion closes
+    /// request and flow alike.
+    pub fn http_respond_flow(
+        &mut self,
+        request: ResourceId,
+        status: i64,
+        flow: ResourceId,
+    ) -> Poll<io::Result<()>> {
+        let length = match self.core.readiness.flow_len(flow) {
+            Ok(length) => length,
+            Err(err) => {
+                self.close(flow);
+                return self.respond_failed(request, err);
+            }
+        };
+        if let Err(err) = self
+            .core
+            .readiness
+            .respond_queue(request, render_head(status, length).into_bytes())
+        {
+            self.close(flow);
+            return self.respond_failed(request, err);
+        }
+        match self.core.readiness.respond_step(request) {
+            Ok(Some(())) => {}
+            Ok(None) => return self.park_on(request, true),
+            Err(err) => {
+                self.close(flow);
+                return self.respond_failed(request, err);
+            }
+        }
+        match self.pipe(flow, request) {
+            Poll::Ready(Ok(_)) => Poll::Ready(Ok(())),
+            Poll::Ready(Err(err)) => Poll::Ready(Err(err)),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+
+    /// A response that cannot continue: the caller consumed the request, so the socket has no
+    /// owner left with a way to reach it, and closing it here is what keeps the table clean.
+    fn respond_failed(&mut self, request: ResourceId, err: io::Error) -> Poll<io::Result<()>> {
+        self.finish_wait();
+        self.close(request);
+        Poll::Ready(Err(err))
     }
 }
 

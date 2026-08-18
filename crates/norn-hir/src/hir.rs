@@ -69,6 +69,9 @@ pub enum Resource {
     Connection,
     /// A write-only sink on the filesystem, from `file_create`.
     File,
+    /// An HTTP request being served: the socket after `http_read_request` has consumed the
+    /// Connection and parsed a head on it. Responding consumes it back.
+    Request,
     /// A finite stream of bytes with demand-driven transfer. Its type is spelled `Flow<Bytes>` —
     /// the only element type in v0 — and the only things that consume one are `pipe_to` and
     /// `http_respond_flow`.
@@ -81,6 +84,7 @@ impl Resource {
             Resource::Listener => "Listener",
             Resource::Connection => "Connection",
             Resource::File => "File",
+            Resource::Request => "Request",
             Resource::Flow => "Flow<Bytes>",
         }
     }
@@ -686,6 +690,14 @@ pub enum Builtin {
     FileCreate,
     FlowOfFile,
     PipeTo,
+    HttpReadRequest,
+    RequestMethod,
+    RequestPath,
+    RequestHeader,
+    RequestBody,
+    HttpRespond,
+    HttpRespondEmpty,
+    HttpRespondFlow,
 }
 
 impl Builtin {
@@ -710,6 +722,14 @@ impl Builtin {
         Builtin::FileCreate,
         Builtin::FlowOfFile,
         Builtin::PipeTo,
+        Builtin::HttpReadRequest,
+        Builtin::RequestMethod,
+        Builtin::RequestPath,
+        Builtin::RequestHeader,
+        Builtin::RequestBody,
+        Builtin::HttpRespond,
+        Builtin::HttpRespondEmpty,
+        Builtin::HttpRespondFlow,
     ];
 
     pub fn from_name(name: &str) -> Option<Builtin> {
@@ -731,6 +751,14 @@ impl Builtin {
             "file_create" => Some(Builtin::FileCreate),
             "flow_of_file" => Some(Builtin::FlowOfFile),
             "pipe_to" => Some(Builtin::PipeTo),
+            "http_read_request" => Some(Builtin::HttpReadRequest),
+            "request_method" => Some(Builtin::RequestMethod),
+            "request_path" => Some(Builtin::RequestPath),
+            "request_header" => Some(Builtin::RequestHeader),
+            "request_body" => Some(Builtin::RequestBody),
+            "http_respond" => Some(Builtin::HttpRespond),
+            "http_respond_empty" => Some(Builtin::HttpRespondEmpty),
+            "http_respond_flow" => Some(Builtin::HttpRespondFlow),
             _ => None,
         }
     }
@@ -754,6 +782,14 @@ impl Builtin {
             Builtin::FileCreate => "file_create",
             Builtin::FlowOfFile => "flow_of_file",
             Builtin::PipeTo => "pipe_to",
+            Builtin::HttpReadRequest => "http_read_request",
+            Builtin::RequestMethod => "request_method",
+            Builtin::RequestPath => "request_path",
+            Builtin::RequestHeader => "request_header",
+            Builtin::RequestBody => "request_body",
+            Builtin::HttpRespond => "http_respond",
+            Builtin::HttpRespondEmpty => "http_respond_empty",
+            Builtin::HttpRespondFlow => "http_respond_flow",
         }
     }
 
@@ -769,7 +805,10 @@ impl Builtin {
             | Builtin::Bytes
             | Builtin::BytesLen
             | Builtin::BytesSlice
-            | Builtin::BytesText => true,
+            | Builtin::BytesText
+            | Builtin::RequestMethod
+            | Builtin::RequestPath
+            | Builtin::RequestHeader => true,
             Builtin::Print
             | Builtin::Sleep
             | Builtin::TcpListen
@@ -781,7 +820,14 @@ impl Builtin {
             | Builtin::Latest
             | Builtin::FileCreate
             | Builtin::FlowOfFile
-            | Builtin::PipeTo => false,
+            | Builtin::PipeTo
+            | Builtin::HttpReadRequest
+            // `request_body` computes nothing, but it opens a traced resource, and a turn must
+            // not be able to make the resource table move.
+            | Builtin::RequestBody
+            | Builtin::HttpRespond
+            | Builtin::HttpRespondEmpty
+            | Builtin::HttpRespondFlow => false,
         }
     }
 
@@ -800,7 +846,15 @@ impl Builtin {
             | Builtin::BytesLen
             | Builtin::BytesSlice
             | Builtin::BytesText
-            | Builtin::PipeTo => &[],
+            | Builtin::PipeTo
+            | Builtin::RequestMethod
+            | Builtin::RequestPath
+            | Builtin::RequestHeader
+            | Builtin::RequestBody => &[],
+            Builtin::HttpReadRequest
+            | Builtin::HttpRespond
+            | Builtin::HttpRespondEmpty
+            | Builtin::HttpRespondFlow => &[Capability::NetIo],
             Builtin::FileCreate => &[Capability::FsWrite],
             Builtin::FlowOfFile => &[Capability::FsRead],
             Builtin::Sleep => &[Capability::Clock],
@@ -823,6 +877,7 @@ impl Builtin {
         let connection = || Ty::Resource(Resource::Connection);
         let file = || Ty::Resource(Resource::File);
         let flow = || Ty::Resource(Resource::Flow);
+        let request = || Ty::Resource(Resource::Request);
         let borrowed = |ty: Ty| Ty::Ref(Box::new(ty));
         let io_error = || Ty::Enum(EnumId::IO_ERROR);
         let task = |ty: Ty| Ty::Task(Box::new(ty));
@@ -848,6 +903,19 @@ impl Builtin {
             Builtin::FileCreate => (vec![Ty::Str], task(fallible(file()))),
             Builtin::FlowOfFile => (vec![Ty::Str], task(fallible(flow()))),
             Builtin::PipeTo => (vec![flow(), file()], task(fallible(Ty::I64))),
+            Builtin::HttpReadRequest => (vec![connection()], task(fallible(request()))),
+            Builtin::RequestMethod => (vec![borrowed(request())], Ty::Str),
+            Builtin::RequestPath => (vec![borrowed(request())], Ty::Str),
+            Builtin::RequestHeader => (
+                vec![borrowed(request()), Ty::Str],
+                Ty::Option(Box::new(Ty::Str)),
+            ),
+            Builtin::RequestBody => (vec![borrowed(request())], flow()),
+            Builtin::HttpRespond => (vec![request(), Ty::I64, Ty::Str], task(fallible(Ty::Unit))),
+            Builtin::HttpRespondEmpty => (vec![request(), Ty::I64], task(fallible(Ty::Unit))),
+            Builtin::HttpRespondFlow => {
+                (vec![request(), Ty::I64, flow()], task(fallible(Ty::Unit)))
+            }
         }
     }
 }

@@ -1,0 +1,70 @@
+// An HTTP hello server: the echo server's shape, speaking a real protocol.
+//
+// `http_read_request` consumes the Connection — the socket becomes a Request, same descriptor,
+// and the head is parsed by the runtime. `http_respond` consumes the Request back: every v0
+// response says `Connection: close`, so answering and closing are one act, and no cleanup is
+// written anywhere in this file.
+//
+// As in the echo server, `main` prints the port the operating system chose so a client can find
+// it, and the accept loop recurses because v0 has no `loop`.
+
+task fn serve(conn: Connection) -> ()
+    uses { net.io }
+{
+    match await http_read_request(conn) {
+        Ok(req) => match await http_respond(req, 200, "hello from norn\n") {
+            Ok(_) => ()
+            Err(_) => ()
+        }
+        // A malformed head is an Err value, and the runtime has already closed the socket.
+        Err(_) => ()
+    }
+}
+
+task fn accept_loop(listener: Listener) -> ()
+    uses { net.io }
+{
+    match await tcp_accept(&listener) {
+        Ok(conn) => scope {
+            spawn serve(conn)
+            await accept_loop(listener)
+        }
+        Err(_) => ()
+    }
+}
+
+task fn main() -> Result<(), IoError>
+    uses { clock, net.listen, net.io }
+{
+    let listener = await tcp_listen(0)?
+    print(digits(listener_port(&listener)))
+    scope {
+        spawn accept_loop(listener)
+        await sleep(200)
+    }
+    Ok(())
+}
+
+fn digits(n: I64) -> String {
+    if n < 10 {
+        digit(n)
+    } else {
+        digits(n / 10) + digit(n % 10)
+    }
+}
+
+fn digit(n: I64) -> String {
+    match n {
+        0 => "0"
+        1 => "1"
+        2 => "2"
+        3 => "3"
+        4 => "4"
+        5 => "5"
+        6 => "6"
+        7 => "7"
+        8 => "8"
+        9 => "9"
+        _ => "?"
+    }
+}
