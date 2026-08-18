@@ -145,6 +145,37 @@ fn verify_pure(program: &Program, id: FnId, handler: bool) {
             _ => {}
         }
     }
+
+    // Belt and braces like everything above, plus one thing only this layer can check: the block
+    // graph must be acyclic, whether the cycle came from a loop the checker somehow missed or from
+    // a back edge a future lowering introduces by accident. Not a lower-block-id test — match
+    // lowering legitimately jumps backward to pre-allocated join blocks — but a real cycle check,
+    // depth-first with an on-stack mark.
+    #[derive(Clone, Copy, PartialEq)]
+    enum Mark {
+        White,
+        Grey,
+        Black,
+    }
+    let mut marks = vec![Mark::White; function.blocks.len()];
+    let mut stack = vec![(0usize, 0usize)];
+    marks[0] = Mark::Grey;
+    while let Some((block, next)) = stack.pop() {
+        let successors = function.blocks[block].term.successors();
+        if next >= successors.len() {
+            marks[block] = Mark::Black;
+            continue;
+        }
+        stack.push((block, next + 1));
+        match marks[successors[next]] {
+            Mark::Grey => bad("a loop"),
+            Mark::Black => {}
+            Mark::White => {
+                marks[successors[next]] = Mark::Grey;
+                stack.push((successors[next], 0));
+            }
+        }
+    }
 }
 
 fn lower_fn(program: &hir::Program, def: &hir::FnDef) -> Function {

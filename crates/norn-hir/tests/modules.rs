@@ -496,3 +496,28 @@ fn a_cross_file_impurity_travels_as_a_note() {
     assert!(out.contains("`lib.loud` calls it in lib.norn"), "{out}");
     assert!(!out.contains("--> lib.norn"), "{out}");
 }
+
+#[test]
+fn a_cross_file_loop_travels_as_a_note() {
+    // The termination rule's twin of the impurity case above: the loop is legal where it stands,
+    // and only becomes an error because a turn can reach it — from another file.
+    let out = rendered(&[
+        (
+            "main.norn",
+            "import { spell } from \"./lib\"\n\nreactor Meter() {\n    input go: () [capacity: 1, overflow: reject]\n    state n: I64 = 0\n    on go() {\n        n = n + 1\n    }\n    signal echo = spell(n)\n}\n\ntask fn main() -> () {\n    scope {\n        let meter = spawn reactor Meter()\n        await send(meter.go, ())\n    }\n}\n",
+        ),
+        (
+            "lib.norn",
+            "export fn spell(n: I64) -> I64 {\n    let mut rest = n\n    while rest > 9 {\n        rest = rest / 10\n    }\n    rest\n}\n",
+        ),
+    ]);
+    assert!(
+        out.contains("this reaches `lib.spell`, which contains a `while`"),
+        "{out}"
+    );
+    assert!(
+        out.contains("a loop is not provably finite, and `lib.spell` contains one in lib.norn"),
+        "{out}"
+    );
+    assert!(!out.contains("--> lib.norn"), "{out}");
+}

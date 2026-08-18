@@ -1,0 +1,11 @@
+error: this reaches `digits`, which contains a `while`
+  --> loop-reachable.norn:14:5
+   |
+14 |     signal spelled: String = digits(n)
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ a turn must end
+  --> loop-reachable.norn:20:5
+   |
+20 |     while rest > 9 {
+   |     ^^^^^^^^^^^^^^^^ a loop is not provably finite
+   = note: turn-reachable code has neither loops nor recursion, which is what makes every turn provably terminating
+   = note: compute the value with a bounded expression, or move the work into a `task fn` and request it with `after`

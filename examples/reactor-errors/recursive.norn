@@ -1,5 +1,5 @@
-// v0 has no loop construct, so recursion is the only way a pure function can fail to return. One
-// pass over the call graph therefore makes every turn provably terminating.
+// Turn-reachable code has neither loops nor recursion, and recursion is this half: one pass over
+// the call graph makes every turn provably terminating.
 
 reactor Summing(upto: I64) {
     input bumped: () [capacity: 8, overflow: reject]

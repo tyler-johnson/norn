@@ -1,0 +1,25 @@
+// The reachable half of the termination rule. The signal body looks innocent — it calls an
+// ordinary `fn`, and an ordinary `fn` may loop all it likes — but a turn must end, so nothing a
+// turn reaches may contain a loop, exactly as nothing it reaches may recurse.
+
+reactor Meter() {
+    input bumped: () [capacity: 8, overflow: reject]
+
+    state n: I64 = 0
+
+    on bumped() {
+        n = n + 1
+    }
+
+    signal spelled: String = digits(n)
+}
+
+fn digits(n: I64) -> String {
+    let mut rest = n
+    let mut out = ""
+    while rest > 9 {
+        rest = rest / 10
+        out = out + "#"
+    }
+    out
+}

@@ -1970,12 +1970,12 @@ impl Checker {
     /// is checked over the functions a turn can reach, which is the same walk termination needs.
     ///
     /// A turn has to terminate, and `DESIGN.md` §14 leaves open how strict that should be — total
-    /// functions, cost annotations, cooperative budgets. v0 can answer it with a theorem instead:
-    /// there is no `while`, no `for`, and no `loop`, so recursion is the only way a pure function
-    /// can fail to return. One pass over the call graph therefore makes every turn provably
-    /// terminating, with no annotation burden and no runtime budget.
-    ///
-    /// This expires the day loops arrive, and should be replaced rather than extended when they do.
+    /// functions, cost annotations, cooperative budgets. The answer is still a theorem, narrowed
+    /// from the language to the turn-reachable subgraph: code a turn can reach may contain neither
+    /// recursion nor loops, so a turn is a finite tree of calls over bounded expressions and must
+    /// return. One pass over the call graph proves it, with no annotation burden and no runtime
+    /// budget — loops and recursion live in `fn`s and `task fn`s, which is where every corpus
+    /// shape already wants them.
     fn check_turns(&mut self) {
         let mut turn_fns: Vec<(FnId, Span, usize)> = Vec::new();
         for (index, reactor) in self.program.reactors.iter().enumerate() {
@@ -2010,6 +2010,12 @@ impl Checker {
             .fns
             .iter()
             .map(|def| impure_builtin(&def.body))
+            .collect();
+        let loops: Vec<Option<(&'static str, Span)>> = self
+            .program
+            .fns
+            .iter()
+            .map(|def| first_loop(&def.body))
             .collect();
 
         for (function, span, owner) in turn_fns {
@@ -2049,6 +2055,36 @@ impl Checker {
                 );
             }
 
+            // The other half of the termination rule. The direct guard already refused a loop
+            // written in the turn itself, so only a loop reached through a call is news here —
+            // hence the same `culprit != function` shape the impurity report has.
+            if let Some((culprit, what, at)) = reachable_loop(&calls, &loops, function)
+                && culprit != function
+            {
+                let name = self.program.fns[culprit.index()].name.clone();
+                let mut diagnostic = Diagnostic::new(
+                    span,
+                    format!("this reaches `{name}`, which contains a `{what}`"),
+                )
+                .label("a turn must end");
+                // As with impurity: a secondary span renders against *this* file's text, so one
+                // that points into another module travels as a note instead.
+                let culprit_owner = self.fn_owner[culprit.index()];
+                diagnostic = if culprit_owner == owner {
+                    diagnostic.secondary(at, "a loop is not provably finite")
+                } else {
+                    diagnostic.note(format!(
+                        "a loop is not provably finite, and `{name}` contains one in {}",
+                        self.names[culprit_owner]
+                    ))
+                };
+                self.push(
+                    diagnostic
+                        .note("turn-reachable code has neither loops nor recursion, which is what makes every turn provably terminating")
+                        .note("compute the value with a bounded expression, or move the work into a `task fn` and request it with `after`"),
+                );
+            }
+
             let Some(cycle) = reachable_cycle(&calls, function) else {
                 continue;
             };
@@ -2074,7 +2110,7 @@ impl Checker {
                 ))
             };
             diagnostic = diagnostic
-                .note("v0 has no loop construct, so recursion is the only way a pure function can fail to return — which is what makes termination provable rather than hoped for")
+                .note("turn-reachable code has neither loops nor recursion, which is what makes termination provable rather than hoped for")
                 .note("compute the value with a bounded expression, or move the work into a `task fn` and request it with `after`");
             self.push(diagnostic);
         }
@@ -5684,6 +5720,47 @@ fn reachable_impurity(
     while let Some(function) = queue.pop_front() {
         if let Some((builtin, span)) = impurities[function.index()] {
             return Some((function, builtin, span));
+        }
+        for &callee in &calls[function.index()] {
+            if !seen[callee.index()] {
+                seen[callee.index()] = true;
+                queue.push_back(callee);
+            }
+        }
+    }
+    None
+}
+
+/// The first loop an expression contains, if any: which word to blame, and where.
+fn first_loop(expr: &Expr) -> Option<(&'static str, Span)> {
+    let mut found = None;
+    walk(expr, &mut |expr| {
+        if found.is_some() {
+            return;
+        }
+        match &expr.kind {
+            ExprKind::While { .. } => found = Some(("while", expr.span)),
+            ExprKind::Loop { .. } => found = Some(("loop", expr.span)),
+            _ => {}
+        }
+    });
+    found
+}
+
+/// The nearest function reachable from `start` that contains a loop — `reachable_impurity`'s
+/// shape, for the same reason: the function closest to the turn is the call the reader has to
+/// look at.
+fn reachable_loop(
+    calls: &[Vec<FnId>],
+    loops: &[Option<(&'static str, Span)>],
+    start: FnId,
+) -> Option<(FnId, &'static str, Span)> {
+    let mut seen = vec![false; calls.len()];
+    let mut queue = std::collections::VecDeque::from([start]);
+    seen[start.index()] = true;
+    while let Some(function) = queue.pop_front() {
+        if let Some((what, span)) = loops[function.index()] {
+            return Some((function, what, span));
         }
         for &callee in &calls[function.index()] {
             if !seen[callee.index()] {

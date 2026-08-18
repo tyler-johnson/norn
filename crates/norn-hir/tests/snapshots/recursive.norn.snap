@@ -7,5 +7,5 @@ error: `sum` is recursive, and a turn must end
    |
 16 | fn sum(n: I64) -> I64 {
    | ^^^^^^^^^^^^^^^^^^^^^^^ the cycle is sum → sum
-   = note: v0 has no loop construct, so recursion is the only way a pure function can fail to return — which is what makes termination provable rather than hoped for
+   = note: turn-reachable code has neither loops nor recursion, which is what makes termination provable rather than hoped for
    = note: compute the value with a bounded expression, or move the work into a `task fn` and request it with `after`
