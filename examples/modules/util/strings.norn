@@ -1,0 +1,6 @@
+// A module in a subdirectory: `main.norn` names it `"./util/strings"`, and this file could name
+// its neighbours with `"../fmt"` — specifiers are paths, resolved from the importing file.
+
+export fn shout(text: String) -> String {
+    text + "!"
+}

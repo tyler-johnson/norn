@@ -1,0 +1,181 @@
+=== nir ===
+struct Report #0 (label, value)
+enum Option #0 (None/0, Some/1)
+enum Result #1 (Ok/1, Err/1)
+enum IoError #2 (NotFound/0, Denied/0, InUse/0, Refused/0, Closed/0, Other/1)
+enum Shape #3 (Empty/0, Dot/1)
+
+reactor fmt.Counter #0
+    node 0 step param slot 0 arg 0 <- []
+    node 1 total state slot 1 init fmt.Counter.total.init#7 <- []
+    node 2 count signal fmt.Counter.count#8 export <- [total]
+    order [step, total, count]
+    input 0 bump capacity 8 overflow reject handler fmt.Counter.on.bump#6
+        plan [total, count]
+    exports [count]
+
+fn measure #0(_0/shape)
+    local _1/size
+    local _2
+    local _3
+    local _4
+  b0:
+    goto b2
+  b1:
+    return _2
+  b2:
+    switch tag _0/shape [0 => b6] else b3
+  b3:
+    switch tag _0/shape [1 => b8] else b4
+  b4:
+    trap "no match arm applied"
+  b5:
+    _2 = 0
+    goto b1
+  b6:
+    goto b5
+  b7:
+    _3 = Shape.Dot(_1/size)
+    _4 = call fmt.area#3(_3)
+    _2 = _4
+    goto b1
+  b8:
+    _1/size = _0/shape.0
+    goto b7
+
+task fn main #1()
+    local _0/report
+    local _1/counter
+    local _2
+    local _3
+    local _4
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+    local _10
+    local _11
+    local _12
+    local _13
+    local _14
+    local _15
+    local _16
+    local _17
+    local _18
+    local _19
+    local _20
+    local _21
+    local _22
+    local _23
+    local _24
+    local _25
+    local _26
+  b0:
+    _2 = Report("width", 12)
+    _0/report = _2
+    _3 = call fmt.describe#2(_0/report)
+    _4 = builtin print(_3)
+    _5 = builtin print(_0/report.1)
+    _6 = call strings.shout#5("modules")
+    _7 = builtin print(_6)
+    _8 = Shape.Dot(3)
+    _9 = call measure#0(_8)
+    _10 = builtin print(_9)
+    _11 = Shape.Empty()
+    _12 = call measure#0(_11)
+    _13 = builtin print(_12)
+    scope enter
+    _15 = spawn reactor fmt.Counter#0(2)
+    _1/counter = _15
+    _16 = input 0 of _1/counter
+    _17 = task builtin send(_16, ())
+    await _17 -> _18, resume b1
+  b1:
+    _19 = input 0 of _1/counter
+    _20 = task builtin send(_19, ())
+    await _20 -> _21, resume b2
+  b2:
+    _22 = task builtin sleep(10)
+    await _22 -> _23, resume b3
+  b3:
+    _24 = export 0 of _1/counter
+    _25 = builtin latest(_24)
+    _26 = builtin print(_25)
+    _14 = _26
+    scope exit, resume b4
+  b4:
+    return _14
+
+fn fmt.describe #2(_0/report)
+    local _1
+  b0:
+    _1 = call fmt.pad#4(_0/report.0)
+    return _1
+
+fn fmt.area #3(_0/shape)
+    local _1/size
+    local _2
+    local _3
+  b0:
+    goto b2
+  b1:
+    return _2
+  b2:
+    switch tag _0/shape [0 => b6] else b3
+  b3:
+    switch tag _0/shape [1 => b8] else b4
+  b4:
+    trap "no match arm applied"
+  b5:
+    _2 = 0
+    goto b1
+  b6:
+    goto b5
+  b7:
+    _3 = _1/size mul.i _1/size
+    _2 = _3
+    goto b1
+  b8:
+    _1/size = _0/shape.0
+    goto b7
+
+fn fmt.pad #4(_0/text)
+    local _1
+    local _2
+  b0:
+    _1 = "[" concat _0/text
+    _2 = _1 concat "]"
+    return _2
+
+fn strings.shout #5(_0/text)
+    local _1
+  b0:
+    _1 = _0/text concat "!"
+    return _1
+
+fn fmt.Counter.on.bump #6(_0/step, _1/total)
+    local _2
+  b0:
+    _2 = _1/total add.i _0/step
+    _1/total = _2
+    set slot 1 = _1/total
+    return ()
+
+fn fmt.Counter.total.init #7()
+  b0:
+    return 0
+
+fn fmt.Counter.count #8(_0/total)
+  b0:
+    return _0/total
+
+=== output ===
+[width]
+12
+modules!
+9
+0
+4
+=== result ===
+()

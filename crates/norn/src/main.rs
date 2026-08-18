@@ -122,11 +122,10 @@ fn cmd_check(args: &[String]) -> Result<ExitCode, String> {
     let paths = plain_paths(args)?;
     let mut failed = false;
     for path in &paths {
-        let file = read(path)?;
-        if front_end(&file).is_none() {
+        if front_end(path)?.is_none() {
             failed = true;
         } else if paths.len() > 1 {
-            println!("{}: ok", file.name);
+            println!("{}: ok", path.display());
         }
     }
     Ok(if failed {
@@ -141,8 +140,7 @@ fn cmd_nir(args: &[String]) -> Result<ExitCode, String> {
     let [path] = &paths[..] else {
         return Err("expected exactly one file".into());
     };
-    let file = read(path)?;
-    let Some(program) = front_end(&file) else {
+    let Some(program) = front_end(path)? else {
         return Ok(ExitCode::FAILURE);
     };
     print!("{}", norn_nir::print(&norn_nir::lower(&program)));
@@ -161,13 +159,12 @@ fn cmd_graph(args: &[String]) -> Result<ExitCode, String> {
         [path, name] => (path, Some(name.display().to_string())),
         _ => return Err("expected a file and an optional reactor name".into()),
     };
-    let file = read(path)?;
-    let Some(hir) = front_end(&file) else {
+    let Some(hir) = front_end(path)? else {
         return Ok(ExitCode::FAILURE);
     };
     let program = norn_nir::lower(&hir);
     if program.reactors.is_empty() {
-        return Err(format!("{}: no reactors", file.name));
+        return Err(format!("{}: no reactors", path.display()));
     }
     if let Some(wanted) = &wanted
         && !program.reactors.iter().any(|r| r.name == *wanted)
@@ -175,7 +172,7 @@ fn cmd_graph(args: &[String]) -> Result<ExitCode, String> {
         let known: Vec<&str> = program.reactors.iter().map(|r| r.name.as_str()).collect();
         return Err(format!(
             "{}: no reactor `{wanted}`; this file has {}",
-            file.name,
+            path.display(),
             known.join(", ")
         ));
     }
@@ -198,12 +195,11 @@ fn cmd_run(args: &[String]) -> Result<ExitCode, String> {
     let [path] = &paths[..] else {
         return Err("expected exactly one file".into());
     };
-    let file = read(path)?;
-    let Some(hir) = front_end(&file) else {
+    let Some(hir) = front_end(path)? else {
         return Ok(ExitCode::FAILURE);
     };
 
-    let main = entry_of(&hir, &file)?;
+    let main = entry_of(&hir, &path.display().to_string())?;
 
     let program = norn_nir::lower(&hir);
     // A `task fn main` runs as the root task of a runtime; a plain one is a task that never parks.
@@ -269,11 +265,10 @@ fn cmd_build(args: &[String]) -> Result<ExitCode, String> {
     let [path] = &paths[..] else {
         return Err("expected exactly one file".into());
     };
-    let file = read(path)?;
-    let Some(hir) = front_end(&file) else {
+    let Some(hir) = front_end(path)? else {
         return Ok(ExitCode::FAILURE);
     };
-    let main = entry_of(&hir, &file)?;
+    let main = entry_of(&hir, &path.display().to_string())?;
 
     let program = norn_nir::lower(&hir);
     let out = match out {
@@ -294,29 +289,55 @@ fn cmd_build(args: &[String]) -> Result<ExitCode, String> {
 }
 
 /// The function `run` and `build` start from: `main`, which must exist and take nothing.
-fn entry_of(hir: &norn_hir::Program, file: &SourceFile) -> Result<norn_hir::hir::FnId, String> {
+fn entry_of(hir: &norn_hir::Program, name: &str) -> Result<norn_hir::hir::FnId, String> {
     let Some(main) = hir.main else {
-        return Err(format!("{}: no `main` function to run", file.name));
+        return Err(format!("{name}: no `main` function to run"));
     };
     if hir.fns[main.index()].params != 0 {
-        return Err(format!("{}: `main` cannot take parameters", file.name));
+        return Err(format!("{name}: `main` cannot take parameters"));
     }
     Ok(main)
 }
 
-/// Parse and check one file, printing any diagnostics. `None` means it did not get through.
-fn front_end(file: &SourceFile) -> Option<norn_hir::Program> {
-    let parsed = parse(&file.text);
-    if !parsed.errors.is_empty() {
-        eprint!("{}", render_all(file, &parsed.errors));
-        return None;
+/// Load, parse, and check the module graph rooted at `path`, printing any diagnostics against the
+/// file they belong to. `Ok(None)` means diagnostics stopped it; `Err` means the entry itself
+/// could not be read.
+fn front_end(path: &Path) -> Result<Option<norn_hir::Program>, String> {
+    let mut read = |key: &str| std::fs::read_to_string(key);
+    let loaded = norn_hir::load(&path.display().to_string(), &mut read)?;
+    if !loaded.ok() {
+        let rendered: Vec<String> = loaded
+            .errors
+            .iter()
+            .map(|(index, diagnostic)| {
+                norn_syntax::render(&loaded.modules[*index].file, diagnostic)
+            })
+            .collect();
+        eprint!("{}", rendered.join("\n"));
+        return Ok(None);
     }
-    let checked = norn_hir::check(&parsed.module);
-    if !checked.errors.is_empty() {
-        eprint!("{}", render_all(file, &checked.errors));
-        return None;
+    let inputs: Vec<norn_hir::ModuleInput> = loaded
+        .modules
+        .iter()
+        .map(|module| norn_hir::ModuleInput {
+            name: module.name.clone(),
+            key: module.key.clone(),
+            module: &module.module,
+        })
+        .collect();
+    let checked = norn_hir::check_modules(&inputs);
+    if !checked.ok() {
+        let rendered: Vec<String> = loaded
+            .modules
+            .iter()
+            .zip(&checked.errors)
+            .filter(|(_, errors)| !errors.is_empty())
+            .map(|(module, errors)| render_all(&module.file, errors))
+            .collect();
+        eprint!("{}", rendered.join("\n"));
+        return Ok(None);
     }
-    Some(checked.program)
+    Ok(Some(checked.program))
 }
 
 fn cmd_fmt(args: &[String]) -> Result<ExitCode, String> {

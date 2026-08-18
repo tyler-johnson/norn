@@ -1,0 +1,40 @@
+// The M6.5 worked example: a program that is more than one file.
+//
+// A file is a module — no header names it; this one reaches `fmt.norn` both ways at once, with
+// named imports for the types it uses bare and a namespace binding for the rest, and reaches
+// `util/strings.norn` through a subdirectory specifier. The reactor is spawned through the
+// namespace, driven with `send`, and read with `latest` after a park, exactly as
+// `examples/reactors/gate.norn` does in one file.
+
+import { Report, describe } from "./fmt"
+import * as fmt from "./fmt"
+import * as strings from "./util/strings"
+
+fn measure(shape: fmt.Shape) -> I64 {
+    match shape {
+        fmt.Shape.Empty => 0
+        fmt.Shape.Dot(size) => fmt.area(fmt.Shape.Dot(size))
+    }
+}
+
+task fn main() -> ()
+    uses { clock }
+{
+    let report = Report(label: "width", value: 12)
+    print(describe(report))
+    print(report.value)
+
+    print(strings.shout("modules"))
+
+    print(measure(fmt.Shape.Dot(3)))
+    print(measure(fmt.Shape.Empty))
+
+    scope {
+        let counter = spawn reactor fmt.Counter(step: 2)
+        await send(counter.bump, ())
+        await send(counter.bump, ())
+        // Sending only queues; parking is what lets the reactor take its turns before the read.
+        await sleep(10)
+        print(latest(counter.count))
+    }
+}

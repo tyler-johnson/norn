@@ -1,0 +1,41 @@
+// A library file. Everything marked `export` is what `main.norn` may import; `pad` is
+// file-private and stays invisible outside, which is the other half of the demonstration.
+
+export struct Report {
+    label: String
+    value: I64
+}
+
+export enum Shape {
+    Empty
+    Dot(I64)
+}
+
+export fn describe(report: Report) -> String {
+    pad(report.label)
+}
+
+export fn area(shape: Shape) -> I64 {
+    match shape {
+        Shape.Empty => 0
+        Shape.Dot(size) => size * size
+    }
+}
+
+fn pad(text: String) -> String {
+    "[" + text + "]"
+}
+
+// A reactor is importable like any other declaration. `main.norn` spawns it through its
+// namespace binding as `fmt.Counter`.
+export reactor Counter(step: I64) {
+    input bump: () [capacity: 8, overflow: reject]
+
+    state total: I64 = 0
+
+    on bump() {
+        total = total + step
+    }
+
+    export signal count = total
+}
