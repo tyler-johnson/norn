@@ -38,8 +38,8 @@ pub fn module(module: &Module) -> String {
 
 fn print_item(item: &Item) -> String {
     match item {
-        Item::Record(decl) => {
-            let mut out = format!("record {} {{\n", decl.name.name);
+        Item::Struct(decl) => {
+            let mut out = format!("struct {} {{\n", decl.name.name);
             for field in &decl.fields {
                 out.push_str(&format!(
                     "{INDENT}{}: {}\n",
@@ -61,7 +61,7 @@ fn print_item(item: &Item) -> String {
                         let types: Vec<_> = types.iter().map(print_type).collect();
                         out.push_str(&format!("({})", types.join(", ")));
                     }
-                    VariantPayload::Record(fields) => {
+                    VariantPayload::Struct(fields) => {
                         let fields: Vec<_> = fields
                             .iter()
                             .map(|f| format!("{}: {}", f.name.name, print_type(&f.ty)))

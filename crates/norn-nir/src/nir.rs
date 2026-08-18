@@ -17,7 +17,7 @@ pub type LocalId = usize;
 pub type FnId = usize;
 
 pub struct Program {
-    pub records: Vec<RecordLayout>,
+    pub structs: Vec<StructLayout>,
     pub enums: Vec<EnumLayout>,
     pub fns: Vec<Function>,
     pub reactors: Vec<Reactor>,
@@ -73,7 +73,7 @@ pub struct Input {
 }
 
 /// Names are kept so that a value can be rendered in the surface syntax that built it.
-pub struct RecordLayout {
+pub struct StructLayout {
     pub name: String,
     pub fields: Vec<String>,
 }
@@ -187,7 +187,7 @@ pub enum Rvalue {
     /// now, and the body only when something awaits or spawns it.
     Task(FnId, Vec<Operand>),
     BuiltinTask(Builtin, Vec<Operand>),
-    Record(usize, Vec<Operand>),
+    Struct(usize, Vec<Operand>),
     Variant(usize, usize, Vec<Operand>),
     /// `gate.opened` — one input of a running reactor, as a value `send` can be handed.
     ReactorInput(Operand, usize),
@@ -275,11 +275,11 @@ impl Term {
 /// artifact M5 will diff the native backend against, so it is deliberately explicit.
 pub fn print(program: &Program) -> String {
     let mut out = String::new();
-    for (id, record) in program.records.iter().enumerate() {
+    for (id, strukt) in program.structs.iter().enumerate() {
         out.push_str(&format!(
-            "record {} #{id} ({})\n",
-            record.name,
-            record.fields.join(", ")
+            "struct {} #{id} ({})\n",
+            strukt.name,
+            strukt.fields.join(", ")
         ));
     }
     for (id, def) in program.enums.iter().enumerate() {
@@ -294,7 +294,7 @@ pub fn print(program: &Program) -> String {
             variants.join(", ")
         ));
     }
-    if !program.records.is_empty() || !program.enums.is_empty() {
+    if !program.structs.is_empty() || !program.enums.is_empty() {
         out.push('\n');
     }
     out.push_str(&print_reactors(program));
@@ -424,8 +424,8 @@ fn print_rvalue(program: &Program, function: &Function, rvalue: &Rvalue) -> Stri
         Rvalue::BuiltinTask(builtin, operands) => {
             format!("task builtin {}({})", builtin.name(), args(operands))
         }
-        Rvalue::Record(id, operands) => {
-            format!("{}({})", program.records[*id].name, args(operands))
+        Rvalue::Struct(id, operands) => {
+            format!("{}({})", program.structs[*id].name, args(operands))
         }
         Rvalue::Variant(enum_id, variant, operands) => {
             let def = &program.enums[*enum_id];

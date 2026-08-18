@@ -1,7 +1,7 @@
 === ast ===
 (module
   (module-name reactors)
-  (record Snapshot (field open I64) (field healthy Bool))
+  (struct Snapshot (field open I64) (field healthy Bool))
   (reactor Gate
     (params (param limit I64))
     (input opened unit (queue (int 64) reject))
@@ -82,7 +82,7 @@
 === canonical ===
 module reactors
 
-record Snapshot {
+struct Snapshot {
     open: I64
     healthy: Bool
 }

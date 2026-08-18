@@ -61,7 +61,7 @@ fn rejected(directory: &str) {
 }
 
 /// Checking must not depend on declaration order: a function may call one declared later, and a
-/// record may hold a type declared after it.
+/// struct may hold a type declared after it.
 #[test]
 fn declaration_order_does_not_matter() {
     let source = "\
@@ -73,7 +73,7 @@ fn second() -> I64 {
     7
 }
 
-record Wrapper {
+struct Wrapper {
     inner: I64
 }
 ";
@@ -130,7 +130,7 @@ task fn main(first: Connection, second: Connection) -> ()
     accepted(
         "a match binding owns the piece it named",
         "\
-record Session {
+struct Session {
     conn: Connection
     opened: I64
 }

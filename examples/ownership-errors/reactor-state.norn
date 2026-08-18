@@ -8,7 +8,7 @@
 // The working shape is `examples/reactors/server.norn`, where tasks own the sockets and tell the
 // reactor a count.
 
-record Session {
+struct Session {
     conn: Connection
     since: I64
 }

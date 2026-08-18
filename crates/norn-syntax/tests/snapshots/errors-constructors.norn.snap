@@ -3,4 +3,4 @@ error: expected a line break between statements, found `{`
   |
 4 |     let user = User { id: 7, name: name }
   |                     ^ this brace opens a block
-  = note: a brace always opens a block; a record is built with `Name(field: value)`
+  = note: a brace always opens a block; a struct is built with `Name(field: value)`

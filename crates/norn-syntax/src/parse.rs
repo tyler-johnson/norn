@@ -7,7 +7,7 @@
 //!    line starts something new rather than silently extending the previous expression.
 //!
 //! Two more rules keep spelling out of the grammar. Construction is spelled like a call —
-//! `User(id: 7)` builds the record and `user(id: 7)` calls the function, and name resolution in
+//! `User(id: 7)` builds the struct and `user(id: 7)` calls the function, and name resolution in
 //! the checker is what tells the two apart — so a brace is always a block and never a literal. In
 //! a pattern, a bare name always binds, and a dotted or parenthesised one matches a constructor.
 //! Nothing anywhere depends on whether a name is capitalised.
@@ -172,7 +172,7 @@ impl Parser {
                 let span = start.to(path.span);
                 uses.push(UseDecl { path, span });
             }
-            TokenKind::Kw(Kw::Record) => items.push(Item::Record(self.record_decl()?)),
+            TokenKind::Kw(Kw::Struct) => items.push(Item::Struct(self.struct_decl()?)),
             TokenKind::Kw(Kw::Enum) => items.push(Item::Enum(self.enum_decl()?)),
             TokenKind::Kw(Kw::Fn) | TokenKind::Kw(Kw::Task) => {
                 items.push(Item::Fn(self.fn_decl()?))
@@ -205,7 +205,7 @@ impl Parser {
                         format!("expected a declaration, found {}", other.describe()),
                     )
                     .note(
-                        "a file contains `use`, `record`, `enum`, `fn`, `task fn`, and `reactor` declarations",
+                        "a file contains `use`, `struct`, `enum`, `fn`, `task fn`, and `reactor` declarations",
                     ),
                 ));
             }
@@ -223,7 +223,7 @@ impl Parser {
             let starts_decl = matches!(
                 token.kind,
                 TokenKind::Kw(Kw::Use)
-                    | TokenKind::Kw(Kw::Record)
+                    | TokenKind::Kw(Kw::Struct)
                     | TokenKind::Kw(Kw::Enum)
                     | TokenKind::Kw(Kw::Fn)
                     | TokenKind::Kw(Kw::Task)
@@ -238,7 +238,7 @@ impl Parser {
 
     // ---------------------------------------------------------------- declarations
 
-    fn record_decl(&mut self) -> PResult<RecordDecl> {
+    fn struct_decl(&mut self) -> PResult<StructDecl> {
         let start = self.advance().span;
         let name = self.ident()?;
         self.expect(TokenKind::LBrace)?;
@@ -248,7 +248,7 @@ impl Parser {
             self.separator(&TokenKind::RBrace, "field")?;
         }
         let end = self.expect(TokenKind::RBrace)?.span;
-        Ok(RecordDecl {
+        Ok(StructDecl {
             name,
             fields,
             span: start.to(end),
@@ -290,7 +290,7 @@ impl Parser {
                     self.separator(&TokenKind::RBrace, "field")?;
                 }
                 span = span.to(self.expect(TokenKind::RBrace)?.span);
-                VariantPayload::Record(fields)
+                VariantPayload::Struct(fields)
             } else {
                 VariantPayload::Unit
             };
@@ -653,7 +653,7 @@ impl Parser {
                 if self.at(&TokenKind::LBrace) {
                     // The mistake a Rust or Go reader makes first.
                     diagnostic = diagnostic.label("this brace opens a block").note(
-                        "a brace always opens a block; a record is built with `Name(field: value)`",
+                        "a brace always opens a block; a struct is built with `Name(field: value)`",
                     );
                 }
                 return Err(self.push(diagnostic));

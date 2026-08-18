@@ -7,8 +7,8 @@
 //! than guessing.
 //!
 //! Construction is spelled like a call, so name resolution here is what tells `Point(x: 1)` the
-//! record from `point(x: 1)` the function: call position asks the builtins, then the `fn`s, then
-//! the type namespace — never the locals, which is why a local sharing a record's name is legal
+//! struct from `point(x: 1)` the function: call position asks the builtins, then the `fn`s, then
+//! the type namespace — never the locals, which is why a local sharing a struct's name is legal
 //! and invisible to a call.
 //!
 //! Everything the grammar admits but v0 does not implement — tasks, `await`, methods, generic
@@ -57,7 +57,7 @@ fn is_builtin_variant(name: &str) -> bool {
 
 /// What a name at the head of a path refers to.
 enum TypeName {
-    Record(RecordId),
+    Struct(StructId),
     Enum(EnumId),
     Reactor(ReactorId),
     Builtin(Ty),
@@ -226,7 +226,7 @@ impl Checker {
         };
         Checker {
             program: Program {
-                records: Vec::new(),
+                structs: Vec::new(),
                 enums: vec![option, result, io_error],
                 fns: Vec::new(),
                 reactors: Vec::new(),
@@ -352,7 +352,7 @@ impl Checker {
 
         for item in &module.items {
             let (name, span) = match item {
-                ast::Item::Record(decl) => (&decl.name, decl.span),
+                ast::Item::Struct(decl) => (&decl.name, decl.span),
                 ast::Item::Enum(decl) => (&decl.name, decl.span),
                 ast::Item::Reactor(decl) => (&decl.name, decl.span),
                 ast::Item::Fn(_) => continue,
@@ -365,14 +365,14 @@ impl Checker {
                 continue;
             }
             let resolved = match item {
-                ast::Item::Record(decl) => {
-                    let id = RecordId(self.program.records.len() as u32);
-                    self.program.records.push(RecordDef {
+                ast::Item::Struct(decl) => {
+                    let id = StructId(self.program.structs.len() as u32);
+                    self.program.structs.push(StructDef {
                         name: decl.name.name.clone(),
                         fields: Vec::new(),
                         span,
                     });
-                    TypeName::Record(id)
+                    TypeName::Struct(id)
                 }
                 ast::Item::Enum(decl) => {
                     let id = EnumId(self.program.enums.len() as u32);
@@ -411,8 +411,8 @@ impl Checker {
     fn define_types(&mut self, module: &ast::Module) {
         for item in &module.items {
             match item {
-                ast::Item::Record(decl) => {
-                    let Some(TypeName::Record(id)) = self.types.get(&decl.name.name) else {
+                ast::Item::Struct(decl) => {
+                    let Some(TypeName::Struct(id)) = self.types.get(&decl.name.name) else {
                         continue;
                     };
                     let id = *id;
@@ -432,7 +432,7 @@ impl Checker {
                             span: field.span,
                         });
                     }
-                    self.program.records[id.index()].fields = fields;
+                    self.program.structs[id.index()].fields = fields;
                 }
                 ast::Item::Enum(decl) => {
                     let Some(TypeName::Enum(id)) = self.types.get(&decl.name.name) else {
@@ -455,7 +455,7 @@ impl Checker {
                                     .collect();
                                 (fields, true)
                             }
-                            ast::VariantPayload::Record(decls) => {
+                            ast::VariantPayload::Struct(decls) => {
                                 let fields = decls
                                     .iter()
                                     .map(|f| FieldDef {
@@ -508,7 +508,7 @@ impl Checker {
             // Construction is spelled like a call, so call position must be unambiguous: one
             // name cannot both build a value and call a function.
             let clash = match self.types.get(&decl.name.name) {
-                Some(TypeName::Record(_)) => Some("record"),
+                Some(TypeName::Struct(_)) => Some("struct"),
                 Some(TypeName::Enum(_)) => Some("enum"),
                 Some(TypeName::Reactor(_)) => Some("reactor"),
                 Some(TypeName::Builtin(_)) | None => None,
@@ -1797,7 +1797,7 @@ impl Checker {
                 }
                 match self.types.get(name) {
                     Some(TypeName::Builtin(ty)) => ty.clone(),
-                    Some(TypeName::Record(id)) => Ty::Record(*id),
+                    Some(TypeName::Struct(id)) => Ty::Struct(*id),
                     Some(TypeName::Enum(id)) => Ty::Enum(*id),
                     Some(TypeName::Reactor(id)) => Ty::Reactor(*id),
                     None => {
@@ -2265,7 +2265,7 @@ impl Checker {
     fn check_path(&mut self, path: &ast::Path, expected: Option<&Ty>) -> Expr {
         let span = path.span;
         let head = &path.segments[0];
-        // A local shadows everything, including a record or enum of the same name — which is why
+        // A local shadows everything, including a struct or enum of the same name — which is why
         // `let Shape = …` followed by `Shape.Empty` is a field-access error on the local rather
         // than a construction. The four builtin constructor names are the exception, and only
         // because they are unbindable: nothing can exist for them to shadow.
@@ -2501,7 +2501,7 @@ impl Checker {
             return self.error_expr(span);
         }
 
-        let Ty::Record(id) = base.ty else {
+        let Ty::Struct(id) = base.ty else {
             let message = format!("{} has no fields", self.program.ty_name(&base.ty));
             self.push(
                 Diagnostic::new(span, message).label(format!("`{}` accessed here", name.name)),
@@ -2512,12 +2512,12 @@ impl Checker {
                 span,
             };
         };
-        let Some((index, field)) = self.program.records[id.index()].field(&name.name) else {
-            let record = self.program.records[id.index()].name.clone();
+        let Some((index, field)) = self.program.structs[id.index()].field(&name.name) else {
+            let strukt = self.program.structs[id.index()].name.clone();
             self.push(
                 Diagnostic::new(
                     name.span,
-                    format!("`{record}` has no field `{}`", name.name),
+                    format!("`{strukt}` has no field `{}`", name.name),
                 )
                 .label("unknown field"),
             );
@@ -2683,7 +2683,7 @@ impl Checker {
             let mut diagnostic = Diagnostic::new(span, message);
             if matches!(op, A::Eq | A::Ne) {
                 diagnostic = diagnostic.note(
-                    "structural equality on records and enums is not derived yet; match instead",
+                    "structural equality on structs and enums is not derived yet; match instead",
                 );
             }
             self.push(diagnostic);
@@ -2781,14 +2781,14 @@ impl Checker {
 
         let Some(&id) = self.fns.get(name) else {
             // Construction is spelled like a call; resolution is what tells the two apart. A
-            // record name builds the record, and the type namespace answers before the reactor
+            // struct name builds the struct, and the type namespace answers before the reactor
             // member fallback does — matching the scan in `reactor_graph`, which skips type
             // names for the same reason.
             if let Some(kind) = self.types.get(name) {
                 match kind {
-                    TypeName::Record(id) => {
+                    TypeName::Struct(id) => {
                         let id = *id;
-                        return self.construct_record(id, args, span);
+                        return self.construct_struct(id, args, span);
                     }
                     TypeName::Enum(id) => {
                         let example = self.program.enums[id.index()].variants.first().map_or_else(
@@ -3314,11 +3314,11 @@ impl Checker {
         }
     }
 
-    fn construct_record(&mut self, id: RecordId, args: &[ast::Arg], span: Span) -> Expr {
-        let record = &self.program.records[id.index()];
-        let name = record.name.clone();
-        let names: Vec<String> = record.fields.iter().map(|f| f.name.clone()).collect();
-        let types: Vec<Ty> = record.fields.iter().map(|f| f.ty.clone()).collect();
+    fn construct_struct(&mut self, id: StructId, args: &[ast::Arg], span: Span) -> Expr {
+        let strukt = &self.program.structs[id.index()];
+        let name = strukt.name.clone();
+        let names: Vec<String> = strukt.fields.iter().map(|f| f.name.clone()).collect();
+        let types: Vec<Ty> = strukt.fields.iter().map(|f| f.ty.clone()).collect();
         let Some(order) = self.argument_order(&names, args, &name, "field", span) else {
             return Expr {
                 kind: ExprKind::Error,
@@ -3332,10 +3332,10 @@ impl Checker {
         }
         Expr {
             kind: ExprKind::Construct {
-                ctor: Ctor::Record(id),
+                ctor: Ctor::Struct(id),
                 args: checked,
             },
-            ty: Ty::Record(id),
+            ty: Ty::Struct(id),
             span,
         }
     }
@@ -3752,7 +3752,7 @@ impl Checker {
             let mut collect = |pat: &Pat| match &pat.kind {
                 PatKind::Wild | PatKind::Bind(_) => covered.push(usize::MAX),
                 PatKind::Variant { variant, .. } => covered.push(*variant),
-                PatKind::Record { .. } => covered.push(usize::MAX),
+                PatKind::Struct { .. } => covered.push(usize::MAX),
                 _ => {}
             };
             match &arm.pat.kind {
@@ -3967,18 +3967,18 @@ impl Checker {
         match path.segments.len() {
             1 => {
                 let name = path.last().name.clone();
-                let Some(TypeName::Record(id)) = self.types.get(&name) else {
-                    self.error(span, format!("unknown record `{name}`"));
+                let Some(TypeName::Struct(id)) = self.types.get(&name) else {
+                    self.error(span, format!("unknown struct `{name}`"));
                     return Pat {
                         kind: PatKind::Error,
                         span,
                     };
                 };
                 let id = *id;
-                self.expect_pat_ty(&Ty::Record(id), ty, span);
-                let record = &self.program.records[id.index()];
-                let names: Vec<String> = record.fields.iter().map(|f| f.name.clone()).collect();
-                let types: Vec<Ty> = record.fields.iter().map(|f| f.ty.clone()).collect();
+                self.expect_pat_ty(&Ty::Struct(id), ty, span);
+                let strukt = &self.program.structs[id.index()];
+                let names: Vec<String> = strukt.fields.iter().map(|f| f.name.clone()).collect();
+                let types: Vec<Ty> = strukt.fields.iter().map(|f| f.ty.clone()).collect();
                 let Some(sub) = self.pat_args(&names, &types, args, rest, &name, span) else {
                     return Pat {
                         kind: PatKind::Error,
@@ -3986,8 +3986,8 @@ impl Checker {
                     };
                 };
                 Pat {
-                    kind: PatKind::Record {
-                        record: id,
+                    kind: PatKind::Struct {
+                        strukt: id,
                         args: sub,
                     },
                     span,
@@ -4749,7 +4749,7 @@ fn head_name(expr: &ast::Expr) -> Option<(String, Span)> {
 fn binds_anything(pat: &Pat) -> bool {
     match &pat.kind {
         PatKind::Bind(_) => true,
-        PatKind::Variant { args, .. } | PatKind::Record { args, .. } => {
+        PatKind::Variant { args, .. } | PatKind::Struct { args, .. } => {
             args.iter().any(binds_anything)
         }
         PatKind::Or(alts) => alts.iter().any(binds_anything),
@@ -4970,7 +4970,7 @@ impl Moves<'_> {
     fn bind(&mut self, pat: &Pat) {
         match &pat.kind {
             PatKind::Bind(id) => self.moved[id.index()] = None,
-            PatKind::Variant { args, .. } | PatKind::Record { args, .. } => {
+            PatKind::Variant { args, .. } | PatKind::Struct { args, .. } => {
                 for arg in args {
                     self.bind(arg);
                 }
@@ -5021,7 +5021,7 @@ impl Moves<'_> {
 
     fn out_of_field(&mut self, base: &Expr, index: usize, span: Span) {
         let field = match base.ty.owned() {
-            Ty::Record(id) => self.program.records[id.index()].fields[index].name.clone(),
+            Ty::Struct(id) => self.program.structs[id.index()].fields[index].name.clone(),
             _ => index.to_string(),
         };
         let whole = self.program.ty_name(base.ty.owned());

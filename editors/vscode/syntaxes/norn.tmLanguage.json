@@ -22,7 +22,7 @@
       "include": "#return-type"
     },
     {
-      "include": "#record-decl"
+      "include": "#struct-decl"
     },
     {
       "include": "#enum-decl"
@@ -224,14 +224,14 @@
         }
       ]
     },
-    "record-decl": {
-      "begin": "\\b(record)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(\\{)",
+    "struct-decl": {
+      "begin": "\\b(struct)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(\\{)",
       "beginCaptures": {
         "1": {
-          "name": "storage.type.record.norn"
+          "name": "storage.type.struct.norn"
         },
         "2": {
-          "name": "entity.name.type.record.norn"
+          "name": "entity.name.type.struct.norn"
         },
         "3": {
           "name": "punctuation.section.block.begin.norn"
@@ -460,7 +460,7 @@
       }
     },
     "field-name": {
-      "comment": "The same shape as a parameter, in a record body or a named enum payload.",
+      "comment": "The same shape as a parameter, in a struct body or a named enum payload.",
       "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\s*(:)",
       "captures": {
         "1": {
@@ -547,7 +547,7 @@
         },
         {
           "name": "storage.type.norn",
-          "match": "\\b(?:fn|record|enum|reactor)\\b"
+          "match": "\\b(?:fn|struct|enum|reactor)\\b"
         },
         {
           "name": "storage.modifier.export.norn",

@@ -52,14 +52,14 @@ pub struct UseDecl {
 
 #[derive(Debug)]
 pub enum Item {
-    Record(RecordDecl),
+    Struct(StructDecl),
     Enum(EnumDecl),
     Fn(FnDecl),
     Reactor(ReactorDecl),
 }
 
 #[derive(Debug)]
-pub struct RecordDecl {
+pub struct StructDecl {
     pub name: Ident,
     pub fields: Vec<FieldDecl>,
     pub span: Span,
@@ -90,7 +90,7 @@ pub struct Variant {
 pub enum VariantPayload {
     Unit,
     Tuple(Vec<Type>),
-    Record(Vec<FieldDecl>),
+    Struct(Vec<FieldDecl>),
 }
 
 #[derive(Debug)]

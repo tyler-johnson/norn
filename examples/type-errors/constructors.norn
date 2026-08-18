@@ -1,6 +1,6 @@
 module type_errors.constructors
 
-record Point {
+struct Point {
     x: I64
     y: I64
 }

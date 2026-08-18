@@ -16,7 +16,7 @@
 // The emitted header provides the imports: `Rc`, `io`, `ExitCode`, and the `norn_rt` names. The
 // per-program part provides, and this file may name freely:
 //
-//   static RECORDS: &[RecordLayout]         one entry per record type
+//   static STRUCTS: &[StructLayout]         one entry per struct type
 //   static ENUMS: &[EnumLayout]             one entry per enum type, seeded ones included
 //   static FN_NAMES: &[&str]                every function's name, by id
 //   static FN_LOCALS: &[usize]              every function's local count, by id
@@ -36,7 +36,7 @@ pub enum Value {
     Float(f64),
     Bool(bool),
     Str(Rc<str>),
-    Record(usize, Rc<Vec<Value>>),
+    Struct(usize, Rc<Vec<Value>>),
     Variant(usize, usize, Rc<Vec<Value>>),
     Task(Rc<TaskValue>),
     Resource(ResourceKind, ResourceId),
@@ -69,7 +69,7 @@ const IO_REFUSED: usize = 3;
 const IO_CLOSED: usize = 4;
 const IO_OTHER: usize = 5;
 
-pub struct RecordLayout {
+pub struct StructLayout {
     pub name: &'static str,
     pub fields: &'static [&'static str],
 }
@@ -307,7 +307,7 @@ fn read_place(locals: &[Value], local: usize, proj: &[usize]) -> Value {
     let mut value = &locals[local];
     for index in proj {
         value = match value {
-            Value::Record(_, fields) | Value::Variant(_, _, fields) => &fields[*index],
+            Value::Struct(_, fields) | Value::Variant(_, _, fields) => &fields[*index],
             other => return other.clone(),
         };
     }
@@ -318,7 +318,7 @@ fn write_place(locals: &mut [Value], local: usize, proj: &[usize], value: Value)
     let mut slot = &mut locals[local];
     for index in proj {
         slot = match slot {
-            Value::Record(_, fields) | Value::Variant(_, _, fields) => {
+            Value::Struct(_, fields) | Value::Variant(_, _, fields) => {
                 &mut Rc::make_mut(fields)[*index]
             }
             other => {
@@ -590,7 +590,7 @@ fn io_error_value(err: &io::Error) -> Value {
 // ---------------------------------------------------------------- spawning
 
 // The resource handles a spawned task is being given. Only handles passed directly are seen; one
-// buried inside a record stays with the parent, deliberately matching the interpreter.
+// buried inside a struct stays with the parent, deliberately matching the interpreter.
 fn moved_resources(kind: &TaskKind) -> Vec<ResourceId> {
     let args = match kind {
         TaskKind::Fn(_, args) | TaskKind::Builtin(_, args) => args,
@@ -648,8 +648,8 @@ fn render_nested(value: &Value) -> String {
         Value::Reactor(id) => format!("<reactor {id}>"),
         Value::Input(id, index) => format!("<input {index} of {id}>"),
         Value::Signal(id, index) => format!("<signal {index} of {id}>"),
-        Value::Record(id, fields) => {
-            let layout = &RECORDS[*id];
+        Value::Struct(id, fields) => {
+            let layout = &STRUCTS[*id];
             let mut out = format!("{}(", layout.name);
             for (index, field) in fields.iter().enumerate() {
                 if index > 0 {

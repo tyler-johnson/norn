@@ -1,6 +1,6 @@
 module errors.mismatches
 
-record User {
+struct User {
     id: I64
     name: String
 }

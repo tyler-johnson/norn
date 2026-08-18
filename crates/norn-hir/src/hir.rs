@@ -20,7 +20,7 @@ macro_rules! id {
     };
 }
 
-id!(RecordId, "Index into `Program::records`.");
+id!(StructId, "Index into `Program::structs`.");
 id!(EnumId, "Index into `Program::enums`.");
 id!(FnId, "Index into `Program::fns`.");
 id!(LocalId, "Index into the enclosing function's `locals`.");
@@ -119,7 +119,7 @@ pub enum Ty {
     F64,
     Bool,
     Str,
-    Record(RecordId),
+    Struct(StructId),
     Enum(EnumId),
     Option(Box<Ty>),
     Result(Box<Ty>, Box<Ty>),
@@ -195,7 +195,7 @@ impl Ty {
 }
 
 pub struct Program {
-    pub records: Vec<RecordDef>,
+    pub structs: Vec<StructDef>,
     pub enums: Vec<EnumDef>,
     pub fns: Vec<FnDef>,
     pub reactors: Vec<ReactorDef>,
@@ -211,7 +211,7 @@ impl Program {
             Ty::F64 => "F64".into(),
             Ty::Bool => "Bool".into(),
             Ty::Str => "String".into(),
-            Ty::Record(id) => self.records[id.index()].name.clone(),
+            Ty::Struct(id) => self.structs[id.index()].name.clone(),
             Ty::Enum(id) => self.enums[id.index()].name.clone(),
             Ty::Option(inner) => format!("Option<{}>", self.ty_name(inner)),
             Ty::Result(ok, err) => {
@@ -234,7 +234,7 @@ impl Program {
     /// The affine set in v0 is deliberately small: operating-system resources, because a descriptor
     /// has exactly one closer; a built-but-unstarted `Task<T>`, because starting one twice would run
     /// its effects twice and because it may be carrying a resource; and any aggregate holding one of
-    /// those, because a record is no less an owner than a variable. Everything else is copied, which
+    /// those, because a struct is no less an owner than a variable. Everything else is copied, which
     /// is what an interpreter that clones values already does and what keeps `print(p); print(p)`
     /// legal. Ordinary values become move-checked when M5 makes the copy cost something.
     ///
@@ -243,7 +243,7 @@ impl Program {
         self.affine_seen(ty, &mut Vec::new())
     }
 
-    /// `visiting` guards against a record that reaches itself — `record Node { next: Option<Node> }`
+    /// `visiting` guards against a struct that reaches itself — `struct Node { next: Option<Node> }`
     /// is writable, and asking whether it is affine would otherwise not terminate.
     fn affine_seen(&self, ty: &Ty, visiting: &mut Vec<Ty>) -> bool {
         if visiting.contains(ty) {
@@ -256,9 +256,9 @@ impl Program {
             Ty::Result(ok, err) => {
                 self.affine_seen(ok, visiting) || self.affine_seen(err, visiting)
             }
-            Ty::Record(id) => {
+            Ty::Struct(id) => {
                 visiting.push(ty.clone());
-                let found = self.records[id.index()]
+                let found = self.structs[id.index()]
                     .fields
                     .iter()
                     .any(|field| self.affine_seen(&field.ty, visiting));
@@ -421,13 +421,13 @@ impl NodeKind {
     }
 }
 
-pub struct RecordDef {
+pub struct StructDef {
     pub name: String,
     pub fields: Vec<FieldDef>,
     pub span: Span,
 }
 
-impl RecordDef {
+impl StructDef {
     pub fn field(&self, name: &str) -> Option<(usize, &FieldDef)> {
         self.fields.iter().enumerate().find(|(_, f)| f.name == name)
     }
@@ -504,7 +504,7 @@ pub enum LocalRole {
 /// Which aggregate a constructor expression builds.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Ctor {
-    Record(RecordId),
+    Struct(StructId),
     Variant(EnumId, usize),
 }
 
@@ -521,7 +521,7 @@ pub enum ExprKind {
     Str(String),
     Bool(bool),
     Local(LocalId),
-    /// Field access, resolved to an index into the record's fields.
+    /// Field access, resolved to an index into the struct's fields.
     Field {
         base: Box<Expr>,
         index: usize,
@@ -800,8 +800,8 @@ pub enum PatKind {
         variant: usize,
         args: Vec<Pat>,
     },
-    Record {
-        record: RecordId,
+    Struct {
+        strukt: StructId,
         args: Vec<Pat>,
     },
     Or(Vec<Pat>),

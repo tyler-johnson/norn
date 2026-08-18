@@ -5,8 +5,8 @@
 // hold one, so a borrow has nowhere to go when the call it was passed to ends. The one value that
 // outlives its call is a task, which is why `spawn` is the last case below.
 
-// A record cannot hold a borrow, because the record would outlive it.
-record Held {
+// A struct cannot hold a borrow, because the struct would outlive it.
+struct Held {
     conn: &Connection
 }
 

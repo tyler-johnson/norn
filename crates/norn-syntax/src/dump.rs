@@ -40,7 +40,7 @@ impl Node {
             out.push_str(&flat);
             return;
         };
-        // Leading atoms are names — `(fn greet`, `(record User` — and stay on the head line.
+        // Leading atoms are names — `(fn greet`, `(struct User` — and stay on the head line.
         let leading = children
             .iter()
             .take_while(|c| matches!(c, Node::Atom(_)))
@@ -94,7 +94,7 @@ pub fn expr(expr: &Expr) -> String {
 
 fn dump_item(item: &Item) -> Node {
     match item {
-        Item::Record(decl) => {
+        Item::Struct(decl) => {
             let mut children = vec![atom(&decl.name.name)];
             for field in &decl.fields {
                 children.push(list(
@@ -102,7 +102,7 @@ fn dump_item(item: &Item) -> Node {
                     vec![atom(&field.name.name), dump_type(&field.ty)],
                 ));
             }
-            list("record", children)
+            list("struct", children)
         }
         Item::Enum(decl) => {
             let mut children = vec![atom(&decl.name.name)];
@@ -113,7 +113,7 @@ fn dump_item(item: &Item) -> Node {
                     VariantPayload::Tuple(types) => {
                         parts.push(list("tuple", types.iter().map(dump_type).collect()));
                     }
-                    VariantPayload::Record(fields) => {
+                    VariantPayload::Struct(fields) => {
                         parts.push(list(
                             "fields",
                             fields

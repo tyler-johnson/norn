@@ -5,8 +5,8 @@
   (use std.http)
   (use std.json)
   (use std.time)
-  (record Config (field greeting String) (field upstream Url))
-  (record Profile (field id UserId) (field display_name String))
+  (struct Config (field greeting String) (field upstream Url))
+  (struct Profile (field id UserId) (field display_name String))
   (enum FetchError
     (variant Timeout)
     (variant Status (tuple I64))
@@ -98,12 +98,12 @@ use std.http
 use std.json
 use std.time
 
-record Config {
+struct Config {
     greeting: String
     upstream: Url
 }
 
-record Profile {
+struct Profile {
     id: UserId
     display_name: String
 }

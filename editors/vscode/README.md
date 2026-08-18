@@ -48,7 +48,7 @@ name resolution in the checker separates building data from calling a function, 
 separates a type from a value. Construction is spelled like a call — `User(id: 7)` — so a
 constructor is lexically indistinguishable from a call and highlights as one; that is accepted
 rather than guessed at. The grammar finds types positionally rather than by case: inside a
-parameter list — a `fn`'s or a `reactor`'s — after `->`, inside a `record` or `enum` body, and
+parameter list — a `fn`'s or a `reactor`'s — after `->`, inside a `struct` or `enum` body, and
 after the colon of an `input`, `state`, or `signal` declaration. A named argument — `User(id: 7)` —
 is lexically identical to a field declaration, so outside those contexts nothing is guessed at, and
 `id` stays an ordinary name rather than being mis-coloured as a type.

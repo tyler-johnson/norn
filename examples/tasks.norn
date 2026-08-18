@@ -5,12 +5,12 @@ use std.http
 use std.json
 use std.time
 
-record Config {
+struct Config {
     greeting: String
     upstream: Url
 }
 
-record Profile {
+struct Profile {
     id: UserId
     display_name: String
 }

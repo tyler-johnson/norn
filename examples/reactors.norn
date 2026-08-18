@@ -4,7 +4,7 @@ module reactors
 // regression net for the new productions, the way `tasks.norn` is for tasks, so it deliberately
 // includes forms later milestones will bring meaning to.
 
-record Snapshot {
+struct Snapshot {
     open: I64
     healthy: Bool
 }

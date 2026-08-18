@@ -1,8 +1,8 @@
 === ast ===
 (module
   (module-name values)
-  (record User (field id I64) (field name String) (field email String))
-  (record Profile
+  (struct User (field id I64) (field name String) (field email String))
+  (struct Profile
     (field user User)
     (field display_name String)
     (field verified Bool))
@@ -81,13 +81,13 @@
 === canonical ===
 module values
 
-record User {
+struct User {
     id: I64
     name: String
     email: String
 }
 
-record Profile {
+struct Profile {
     user: User
     display_name: String
     verified: Bool

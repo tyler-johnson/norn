@@ -1,6 +1,6 @@
 module results
 
-record Config {
+struct Config {
     port: I64
     host: String
 }

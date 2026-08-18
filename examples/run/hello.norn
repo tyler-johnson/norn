@@ -1,6 +1,6 @@
 module hello
 
-record Greeting {
+struct Greeting {
     salutation: String
     subject: String
 }

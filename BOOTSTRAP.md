@@ -103,7 +103,7 @@ Alternatives considered:
 
 ### Included
 
-- **Values** — `I64`, `F64`, `Bool`, `String`, `Bytes`, records, enums with payloads, `match`,
+- **Values** — `I64`, `F64`, `Bool`, `String`, `Bytes`, structs, enums with payloads, `match`,
   built-in `Result<T, E>` and `Option<T>` with `?`.
 - **Tasks** — `task fn`, `await`, `scope { spawn ... }`, cancellation, structured join on scope exit.
 - **Reactors** — static graphs only: `input` with declared capacity and overflow policy, `state`,
@@ -143,7 +143,7 @@ Alternatives considered:
   scope exit *and* on cancellation.
 
   The affine set is small and named: operating-system resources, a built-but-unstarted `Task<T>`,
-  and any record or enum that reaches one. Ordinary values stay copyable, because nothing in v0 can
+  and any struct or enum that reaches one. Ordinary values stay copyable, because nothing in v0 can
   observe the difference — the interpreter clones, and the native backend that would make a copy
   cost something is M5. Move checking for ordinary values arrives with it, and until then
   `print(p); print(p)` is legal.
@@ -181,7 +181,7 @@ the design rests on. `switch` arrives after the trace tooling exists to debug it
 ### M0 — Skeleton
 
 Cargo workspace, `norn` CLI, lexer, parser, spanned AST, snapshot test harness. Parses the value
-subset (records, enums, functions, `let`, `match`, expressions). No semantics yet.
+subset (structs, enums, functions, `let`, `match`, expressions). No semantics yet.
 
 The AST does not retain comments or layout, so round-tripping means idempotence of the canonical
 printer rather than byte equality with the source: `print(parse(print(parse(s))))` must equal
@@ -194,7 +194,7 @@ line breaks, and a postfix chain continues across a line break only for `.` — 
 opening a fresh line starts something new.
 
 Two further rules keep spelling out of the grammar entirely. **Construction is spelled like a
-call**, covering records and enum variants alike in both expressions and patterns; name resolution
+call**, covering structs and enum variants alike in both expressions and patterns; name resolution
 in the checker, not the grammar, is what tells building from calling:
 
 ```
@@ -210,12 +210,12 @@ match error {
 ```
 
 Two consequences follow, and both remove a rule rather than adding one. A brace is *always* a
-block — there is no record-literal syntax to disambiguate it from, so no construct needs to disable
+block — there is no struct-literal syntax to disambiguate it from, so no construct needs to disable
 literals in its condition or scrutinee position. And in a pattern, shape is the whole distinction:
 a bare name *always* binds, while a dotted or parenthesised one matches, so `NotFound` is a binding
 and `LoadError.NotFound` is a match.
 
-Because call position must be unambiguous, a `fn` may not share its name with a record, enum, or
+Because call position must be unambiguous, a `fn` may not share its name with a struct, enum, or
 reactor. The four built-in constructor names are the one carve-out on the pattern rule: `None`,
 `Some`, `Ok`, and `Err` stay bare — resolved by the expected type in expressions and by the
 scrutinee in patterns — and in exchange they are unbindable: no local, parameter, pattern binding,
@@ -422,7 +422,7 @@ Ordered roughly by when it becomes worth doing, not by importance:
    from the deployment path.
 5. **Borrow checking.** Until then, `&T` as a non-escaping parameter only, and no `&mut` at all.
    Partial moves wait here too: M4 rejects moving out of a field rather than tracking it, because a
-   half-moved record has no name in this language and `match` already takes one apart.
+   half-moved struct has no name in this language and `match` already takes one apart.
 6. **Move checking for ordinary values, and `Shared<T>`.** Both wait on a typed value
    representation. M5's backend deliberately kept the interpreter's dynamically tagged, `Rc`-shared
    values, so copying still costs a reference-count bump; the backend that gives values layout is

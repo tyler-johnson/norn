@@ -1,12 +1,12 @@
 module values
 
-record User {
+struct User {
     id: I64
     name: String
     email: String
 }
 
-record Profile {
+struct Profile {
     user: User
     display_name: String
     verified: Bool

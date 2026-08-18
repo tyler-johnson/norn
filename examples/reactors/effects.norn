@@ -11,7 +11,7 @@ enum Outcome {
     Failed
 }
 
-record Report {
+struct Report {
     pending: I64
     delivered: I64
     failed: I64

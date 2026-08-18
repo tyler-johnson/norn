@@ -656,7 +656,7 @@ Server ecosystems contain repetitive structural integration: serializers, router
 ```
 // Derivation and attributes
 @derive(Eq, Hash, Json, Schema)
-record User {
+struct User {
     id: UserId
     name: String
     email: Email
@@ -794,12 +794,12 @@ use std.log
 use std.process
 use std.time
 
-record Config {
+struct Config {
     greeting: String
     upstream: Url
 }
 
-record Metrics {
+struct Metrics {
     requests: U64
     mean_latency: Duration
 }
@@ -1263,7 +1263,7 @@ Systems requiring frequent atomic operations across arbitrary boundaries are a w
 | TypeScript + RxJS | Rapid iteration, broad web ecosystem, expressive event-stream operators. | When team conventions are no longer enough. The compiler can enforce pure propagation, atomic stabilization, causal feedback, bounded queues, structured subscription lifetimes, valid resource ownership, and explicit task concurrency. |
 | Erlang or Elixir | Actors, supervision, fault tolerance, distribution, operational maturity. | When stronger static types, affine resources, native layouts, potential zero-copy transfer, deterministic intra-component derivation, and backpressured byte streams matter. This language must still develop equally serious supervision before competing broadly. |
 | Java, Kotlin, or C# | Deep server ecosystems, databases, debuggers, profilers, mature frameworks. | When futures, event buses, actors, reactive libraries, lifecycle frameworks, and concurrency annotations still leave one fragmented architecture. The proposed model unifies those concerns, at the cost of ecosystem depth. |
-| Functional and synchronous FRP systems | Strong temporal semantics, mathematical models, deterministic propagation. | When production server ergonomics are equally important: direct HTTP and file APIs, ordinary task procedures, native deployment, resource ownership, familiar records and enums, and mainstream package workflows. |
+| Functional and synchronous FRP systems | Strong temporal semantics, mathematical models, deterministic propagation. | When production server ergonomics are equally important: direct HTTP and file APIs, ordinary task procedures, native deployment, resource ownership, familiar structs and enums, and mainstream package workflows. |
 
 The language is intentionally more opinionated than Rust or Go. It trades some generality for a simpler architecture: finite work belongs in tasks; long-lived mutable temporal state belongs in reactors; byte and row sequences belong in flows; and cross-reactor communication is owned, immutable, or bounded.
 
@@ -1396,7 +1396,7 @@ Independent pure subgraphs can theoretically recompute in parallel while preserv
 
 **How much of ownership should users see?**
 
-Rust demonstrates the power and cost of explicit ownership. This language could simplify common server code through task-local regions, immutable-by-default records, move inference, and constrained reactor boundaries. The danger is either producing Rust-level complexity plus FRP complexity, or hiding so much that performance and lifetime become mysterious.
+Rust demonstrates the power and cost of explicit ownership. This language could simplify common server code through task-local regions, immutable-by-default structs, move inference, and constrained reactor boundaries. The danger is either producing Rust-level complexity plus FRP complexity, or hiding so much that performance and lifetime become mysterious.
 
 **What is durable?**
 

@@ -6,7 +6,7 @@
 // socket and then reading from it is not a special rule about descriptors, it is the ordinary rule
 // about names, and that is what makes double-close a compile error.
 
-record Session {
+struct Session {
     conn: Connection
     opened: I64
 }
@@ -59,9 +59,9 @@ task fn moves_on_one_branch(conn: Connection, tidy: Bool) -> ()
     }
 }
 
-// Moving one field would leave the rest of the record with no owner and no name. `match` is what
+// Moving one field would leave the rest of the struct with no owner and no name. `match` is what
 // takes a value apart.
-task fn opens_the_record(session: Session) -> ()
+task fn opens_the_struct(session: Session) -> ()
     uses { net.io }
 {
     await tcp_close(session.conn)

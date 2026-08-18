@@ -14,12 +14,12 @@ use norn_hir::hir;
 use crate::nir::*;
 
 pub fn lower(program: &hir::Program) -> Program {
-    let records = program
-        .records
+    let structs = program
+        .structs
         .iter()
-        .map(|record| RecordLayout {
-            name: record.name.clone(),
-            fields: record.fields.iter().map(|f| f.name.clone()).collect(),
+        .map(|strukt| StructLayout {
+            name: strukt.name.clone(),
+            fields: strukt.fields.iter().map(|f| f.name.clone()).collect(),
         })
         .collect();
     let enums = program
@@ -46,7 +46,7 @@ pub fn lower(program: &hir::Program) -> Program {
         .collect();
     let reactors = program.reactors.iter().map(lower_reactor).collect();
     let lowered = Program {
-        records,
+        structs,
         enums,
         fns,
         reactors,
@@ -340,7 +340,7 @@ impl Lowerer<'_> {
             hir::ExprKind::Construct { ctor, args } => {
                 let args = args.iter().map(|arg| self.expr(arg)).collect();
                 let rvalue = match ctor {
-                    hir::Ctor::Record(id) => Rvalue::Record(id.index(), args),
+                    hir::Ctor::Struct(id) => Rvalue::Struct(id.index(), args),
                     hir::Ctor::Variant(id, variant) => Rvalue::Variant(id.index(), *variant, args),
                 };
                 let temp = Place::local(self.temp());
@@ -589,7 +589,7 @@ impl Lowerer<'_> {
             hir::PatKind::Str(v) => {
                 self.test_const(value, Const::Str(v.as_str().into()), success, fail)
             }
-            hir::PatKind::Record { args, .. } => {
+            hir::PatKind::Struct { args, .. } => {
                 self.test_fields(args, value, success, fail);
             }
             hir::PatKind::Variant { variant, args, .. } => {

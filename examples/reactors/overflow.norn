@@ -8,7 +8,7 @@
 // has to be one order, but a noisy input must not be able to consume the room a quiet one was
 // promised.
 
-record Counts {
+struct Counts {
     rejected: I64
     oldest: I64
     newest: I64

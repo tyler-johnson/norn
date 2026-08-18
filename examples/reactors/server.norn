@@ -9,7 +9,7 @@
 // Driven by a real client rather than by the virtual clock, so it lives in a live test
 // (`crates/norn-nir/tests/server.rs`) rather than in the golden corpus.
 
-record Snapshot {
+struct Snapshot {
     accepted: I64
     open: I64
     healthy: Bool

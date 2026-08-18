@@ -35,7 +35,7 @@ pub enum Value {
     Float(f64),
     Bool(bool),
     Str(Rc<str>),
-    Record(usize, Rc<Vec<Value>>),
+    Struct(usize, Rc<Vec<Value>>),
     Variant(usize, usize, Rc<Vec<Value>>),
     /// A computation that has not run. `await` and `spawn` are what start it.
     Task(Rc<TaskValue>),
@@ -420,9 +420,9 @@ impl Interpreter<'_> {
                     args.iter().map(|arg| read_operand(frame, arg)).collect(),
                 ),
             })),
-            Rvalue::Record(id, args) => {
+            Rvalue::Struct(id, args) => {
                 let fields = args.iter().map(|arg| read_operand(frame, arg)).collect();
-                Value::Record(*id, Rc::new(fields))
+                Value::Struct(*id, Rc::new(fields))
             }
             Rvalue::Variant(enum_id, variant, args) => {
                 let fields = args.iter().map(|arg| read_operand(frame, arg)).collect();
@@ -640,8 +640,8 @@ impl Interpreter<'_> {
             Value::Reactor(id) => format!("<reactor {id}>"),
             Value::Input(id, index) => format!("<input {index} of {id}>"),
             Value::Signal(id, index) => format!("<signal {index} of {id}>"),
-            Value::Record(id, fields) => {
-                let layout = &self.program.records[*id];
+            Value::Struct(id, fields) => {
+                let layout = &self.program.structs[*id];
                 let mut out = format!("{}(", layout.name);
                 for (index, field) in fields.iter().enumerate() {
                     if index > 0 {
@@ -691,7 +691,7 @@ impl Interpreter<'_> {
 /// The resource handles a spawned task is being given. Ownership follows them: the child closes what
 /// it was handed, which is the dynamic shadow of the move rule M4 makes static.
 ///
-/// Only handles passed directly are seen. One buried inside a record stays with the parent, which is
+/// Only handles passed directly are seen. One buried inside a struct stays with the parent, which is
 /// another thing static ownership will fix rather than something to chase dynamically.
 fn moved_resources(kind: &TaskKind) -> Vec<ResourceId> {
     let args = match kind {
@@ -807,7 +807,7 @@ fn read_place(frame: &Frame, place: &Place) -> Value {
     let mut value = &frame.locals[place.local];
     for index in &place.proj {
         value = match value {
-            Value::Record(_, fields) | Value::Variant(_, _, fields) => &fields[*index],
+            Value::Struct(_, fields) | Value::Variant(_, _, fields) => &fields[*index],
             // Only reachable if lowering produced a projection the checker did not sanction.
             other => return other.clone(),
         };
@@ -819,7 +819,7 @@ fn write_place(frame: &mut Frame, place: &Place, value: Value) {
     let mut slot = &mut frame.locals[place.local];
     for index in &place.proj {
         slot = match slot {
-            Value::Record(_, fields) | Value::Variant(_, _, fields) => {
+            Value::Struct(_, fields) | Value::Variant(_, _, fields) => {
                 &mut Rc::make_mut(fields)[*index]
             }
             other => {

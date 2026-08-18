@@ -18,7 +18,7 @@ mod generated {
     };
 
     // The generated contract, stubbed: one plain `main` with no locals and no reactors.
-    static RECORDS: &[RecordLayout] = &[];
+    static STRUCTS: &[StructLayout] = &[];
     static ENUMS: &[EnumLayout] = &[];
     static FN_NAMES: &[&str] = &["main"];
     static FN_LOCALS: &[usize] = &[0];

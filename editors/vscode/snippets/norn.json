@@ -19,14 +19,14 @@
     ],
     "description": "A plain function"
   },
-  "record": {
-    "prefix": "record",
+  "struct": {
+    "prefix": "struct",
     "body": [
-      "record ${1:Name} {",
+      "struct ${1:Name} {",
       "\t${2:field}: ${3:I64}",
       "}"
     ],
-    "description": "A record declaration"
+    "description": "A struct declaration"
   },
   "enum": {
     "prefix": "enum",

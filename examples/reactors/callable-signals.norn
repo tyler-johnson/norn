@@ -14,7 +14,7 @@
 // That is the whole trade: a name elides its arguments, so "is this current?" is a real question;
 // a call spells them, so it is not.
 
-record Report {
+struct Report {
     count: I64
     rejected: I64
     full: Bool

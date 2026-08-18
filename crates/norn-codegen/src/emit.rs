@@ -137,15 +137,15 @@ impl Emitter<'_> {
             "// ---------------------------------------------------------------- program tables",
         );
         push(out, 0, "");
-        push(out, 0, "static RECORDS: &[RecordLayout] = &[");
-        for record in &self.program.records {
-            let fields: Vec<String> = record.fields.iter().map(|f| format!("{f:?}")).collect();
+        push(out, 0, "static STRUCTS: &[StructLayout] = &[");
+        for strukt in &self.program.structs {
+            let fields: Vec<String> = strukt.fields.iter().map(|f| format!("{f:?}")).collect();
             push(
                 out,
                 1,
                 &format!(
-                    "RecordLayout {{ name: {:?}, fields: &[{}] }},",
-                    record.name,
+                    "StructLayout {{ name: {:?}, fields: &[{}] }},",
+                    strukt.name,
                     fields.join(", ")
                 ),
             );
@@ -511,8 +511,8 @@ impl Emitter<'_> {
                 "Value::Task(Rc::new(TaskValue {{ kind: TaskKind::Builtin(Builtin::{builtin:?}, vec![{}]) }}))",
                 self.args_list(ctx, args)
             ),
-            Rvalue::Record(id, args) => format!(
-                "Value::Record({id}usize, Rc::new(vec![{}]))",
+            Rvalue::Struct(id, args) => format!(
+                "Value::Struct({id}usize, Rc::new(vec![{}]))",
                 self.args_list(ctx, args)
             ),
             Rvalue::Variant(enum_id, variant, args) => format!(

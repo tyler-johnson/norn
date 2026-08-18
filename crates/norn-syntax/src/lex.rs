@@ -11,7 +11,7 @@ use crate::span::Span;
 pub enum Kw {
     Module,
     Use,
-    Record,
+    Struct,
     Enum,
     Fn,
     Task,
@@ -43,7 +43,7 @@ impl Kw {
     pub const ALL: &'static [Kw] = &[
         Kw::Module,
         Kw::Use,
-        Kw::Record,
+        Kw::Struct,
         Kw::Enum,
         Kw::Fn,
         Kw::Task,
@@ -72,7 +72,7 @@ impl Kw {
         match self {
             Kw::Module => "module",
             Kw::Use => "use",
-            Kw::Record => "record",
+            Kw::Struct => "struct",
             Kw::Enum => "enum",
             Kw::Fn => "fn",
             Kw::Task => "task",
@@ -361,7 +361,7 @@ impl<'a> Lexer<'a> {
         let kw = match word {
             "module" => Some(Kw::Module),
             "use" => Some(Kw::Use),
-            "record" => Some(Kw::Record),
+            "struct" => Some(Kw::Struct),
             "enum" => Some(Kw::Enum),
             "fn" => Some(Kw::Fn),
             "task" => Some(Kw::Task),

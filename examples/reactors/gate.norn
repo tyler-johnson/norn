@@ -15,7 +15,7 @@
 //   - Serial turns. Two messages sitting in the mailbox are two turns with two sequence numbers,
 //     never one turn that saw both.
 
-record Snapshot {
+struct Snapshot {
     accepted: I64
     rejected: I64
     open: I64

@@ -1,9 +1,9 @@
-error: `Point` is already the name of a record
+error: `Point` is already the name of a struct
   --> constructors.norn:15:4
    |
 15 | fn Point(x: I64) -> I64 {
    |    ^^^^^ a call must be unambiguous
-   = note: `Point(…)` has to mean one thing, and the record `Point` already claims it
+   = note: `Point(…)` has to mean one thing, and the struct `Point` already claims it
 
 error: `Some` cannot be a binding
   --> constructors.norn:22:9
