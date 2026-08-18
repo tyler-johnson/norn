@@ -477,3 +477,32 @@ Ordered roughly by when it becomes worth doing, not by importance:
     that shape reasonable — in v0 a flow comes from a file or a request body and is consumed only
     by `pipe_to` and `http_respond_flow`, wholly inside the runtime. `coalesce_latest` remains a
     §10 gap rather than M6 work: it is an overflow policy, not a wire feature.
+12. **Modules, `use`, and the standard library that dissolves the builtins.** Earlier than its
+    position suggests: modules gate the standard library, and item 7 does not — the ordering
+    below explains why. The grammar already carries both halves of the spelling — a file may open
+    with `module bytes`, and `use` parses — but the checker answers `use` with "nothing to import
+    yet", and §4 excludes modules beyond a single file. What is missing is resolution across
+    files: one file's declarations nameable from another, single files first, nothing clever
+    about paths.
+
+    The decision this entry records, made after M6: the standard library follows Rust's model,
+    not Go's. Users should think in terms of libraries, so the builtin table is scaffolding with
+    unstable spellings — 25 names as of M6, each implemented twice (an interpreter arm and its
+    prelude mirror, trap text as ABI) and each a name no user function may take. Go keeps its
+    builtins forever and affords short names by keeping the set near fifteen and shadowable;
+    Norn's set is bigger, growing, and reserved, so staying on that road means either squatting
+    on `read`/`open`/`close` or weakening the closed vocabulary that `uses` checking leans on.
+    Rust's road ends better: std code written in Norn is one implementation executed by both
+    engines, so the differential oracle covers it for free and the mirror stops growing with the
+    language. Until the absorption begins, the bar for a new builtin is "cannot wait for std".
+
+    The absorption comes in two waves with different gates. The proto-std needs no generics —
+    Go's `net/http` predates Go's generics by a decade, and `Option`/`Result` are already
+    spellable at concrete types. Its gates are modules, a loop construct or tail calls (item 1),
+    and a few byte primitives — indexing, building — after which HTTP parsing and rendering,
+    `bytes_text`, and `pipe_to` over `flow_next` become concrete Norn modules: most of the table.
+    The general std — collections, `Flow<T>` beyond `Bytes`, and the method spelling that turns
+    `request_header(&req, h)` into `req.header(h)` — waits for item 7's generics and traits.
+    What never dissolves is a small intrinsic layer at the syscall boundary, which is also where
+    `uses { … }` keeps doing its checking: the authority seam stays a closed, named table after
+    every name above it has become a library.
