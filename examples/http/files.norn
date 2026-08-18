@@ -1,0 +1,104 @@
+// The M6 done-when: an HTTP file server, streaming in both directions.
+//
+// A PUT streams the request body to disk through `pipe_to` — the body is a `Flow<Bytes>`, the
+// file is the sink, and the runtime moves at most one chunk at a time, so a large upload never
+// sits in memory. A GET answers with a file as the response body, the same machinery pointed the
+// other way. Dispatch is a `match` on the method, because v0 has free functions and string
+// patterns and does not need more than that.
+//
+// `?` in `upload` is the error story: if the file cannot be created, the function unwinds, the
+// handler's scope closes, and the request socket is closed by the scope rather than by code —
+// the client sees the connection drop, which is what an unhandled server error is.
+//
+// The path is used as it came, prefixed with `.`: v0 has no substring builtins, so `..` traversal
+// is not guarded here. A real server wants that guard; this example wants to stay readable.
+
+task fn upload(req: Request) -> Result<(), IoError>
+    uses { net.io, fs.write }
+{
+    let sink = await file_create("." + request_path(&req))?
+    let body = request_body(&req)
+    let moved = await pipe_to(body, sink)?
+    await http_respond_empty(req, 204)
+}
+
+task fn download(req: Request) -> Result<(), IoError>
+    uses { net.io, fs.read }
+{
+    match await flow_of_file("." + request_path(&req)) {
+        Ok(body) => await http_respond_flow(req, 200, body)
+        Err(IoError.NotFound) => await http_respond(req, 404, "not found\n")
+        Err(_) => await http_respond(req, 500, "cannot open\n")
+    }
+}
+
+task fn route(req: Request) -> Result<(), IoError>
+    uses { net.io, fs.read, fs.write }
+{
+    match request_method(&req) {
+        "PUT" => await upload(req)
+        "GET" => await download(req)
+        _ => await http_respond(req, 405, "method not allowed\n")
+    }
+}
+
+task fn serve(conn: Connection) -> ()
+    uses { net.io, fs.read, fs.write }
+{
+    match await http_read_request(conn) {
+        Ok(req) => match await route(req) {
+            Ok(_) => ()
+            Err(_) => ()
+        }
+        // A malformed head is an Err value, and the runtime has already closed the socket.
+        Err(_) => ()
+    }
+}
+
+task fn accept_loop(listener: Listener) -> ()
+    uses { net.io, fs.read, fs.write }
+{
+    match await tcp_accept(&listener) {
+        Ok(conn) => scope {
+            spawn serve(conn)
+            await accept_loop(listener)
+        }
+        Err(_) => ()
+    }
+}
+
+task fn main() -> Result<(), IoError>
+    uses { clock, net.listen, net.io, fs.read, fs.write }
+{
+    let listener = await tcp_listen(0)?
+    print(digits(listener_port(&listener)))
+    scope {
+        spawn accept_loop(listener)
+        await sleep(500)
+    }
+    Ok(())
+}
+
+fn digits(n: I64) -> String {
+    if n < 10 {
+        digit(n)
+    } else {
+        digits(n / 10) + digit(n % 10)
+    }
+}
+
+fn digit(n: I64) -> String {
+    match n {
+        0 => "0"
+        1 => "1"
+        2 => "2"
+        3 => "3"
+        4 => "4"
+        5 => "5"
+        6 => "6"
+        7 => "7"
+        8 => "8"
+        9 => "9"
+        _ => "?"
+    }
+}
