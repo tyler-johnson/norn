@@ -119,6 +119,9 @@ pub enum Ty {
     F64,
     Bool,
     Str,
+    /// A sequence of raw octets. What the wire carries and a file holds; `String` is for text that
+    /// is known to be text. There is no literal — bytes come from I/O and from `bytes(s)`.
+    Bytes,
     Struct(StructId),
     Enum(EnumId),
     Option(Box<Ty>),
@@ -211,6 +214,7 @@ impl Program {
             Ty::F64 => "F64".into(),
             Ty::Bool => "Bool".into(),
             Ty::Str => "String".into(),
+            Ty::Bytes => "Bytes".into(),
             Ty::Struct(id) => self.structs[id.index()].name.clone(),
             Ty::Enum(id) => self.enums[id.index()].name.clone(),
             Ty::Option(inner) => format!("Option<{}>", self.ty_name(inner)),
@@ -656,6 +660,10 @@ pub enum Builtin {
     TcpClose,
     Send,
     Latest,
+    Bytes,
+    BytesLen,
+    BytesSlice,
+    BytesText,
 }
 
 impl Builtin {
@@ -673,6 +681,10 @@ impl Builtin {
         Builtin::TcpClose,
         Builtin::Send,
         Builtin::Latest,
+        Builtin::Bytes,
+        Builtin::BytesLen,
+        Builtin::BytesSlice,
+        Builtin::BytesText,
     ];
 
     pub fn from_name(name: &str) -> Option<Builtin> {
@@ -687,6 +699,10 @@ impl Builtin {
             "tcp_close" => Some(Builtin::TcpClose),
             "send" => Some(Builtin::Send),
             "latest" => Some(Builtin::Latest),
+            "bytes" => Some(Builtin::Bytes),
+            "bytes_len" => Some(Builtin::BytesLen),
+            "bytes_slice" => Some(Builtin::BytesSlice),
+            "bytes_text" => Some(Builtin::BytesText),
             _ => None,
         }
     }
@@ -703,6 +719,10 @@ impl Builtin {
             Builtin::TcpClose => "tcp_close",
             Builtin::Send => "send",
             Builtin::Latest => "latest",
+            Builtin::Bytes => "bytes",
+            Builtin::BytesLen => "bytes_len",
+            Builtin::BytesSlice => "bytes_slice",
+            Builtin::BytesText => "bytes_text",
         }
     }
 
@@ -714,7 +734,11 @@ impl Builtin {
     /// "could anything outside tell that this ran", not "did it need authority".
     pub fn is_pure(self) -> bool {
         match self {
-            Builtin::ListenerPort => true,
+            Builtin::ListenerPort
+            | Builtin::Bytes
+            | Builtin::BytesLen
+            | Builtin::BytesSlice
+            | Builtin::BytesText => true,
             Builtin::Print
             | Builtin::Sleep
             | Builtin::TcpListen
@@ -734,7 +758,14 @@ impl Builtin {
 
     pub fn capabilities(self) -> &'static [Capability] {
         match self {
-            Builtin::Print | Builtin::ListenerPort | Builtin::Send | Builtin::Latest => &[],
+            Builtin::Print
+            | Builtin::ListenerPort
+            | Builtin::Send
+            | Builtin::Latest
+            | Builtin::Bytes
+            | Builtin::BytesLen
+            | Builtin::BytesSlice
+            | Builtin::BytesText => &[],
             Builtin::Sleep => &[Capability::Clock],
             Builtin::TcpListen => &[Capability::NetListen],
             Builtin::TcpAccept | Builtin::TcpRead | Builtin::TcpWrite | Builtin::TcpClose => {
@@ -771,6 +802,10 @@ impl Builtin {
             Builtin::TcpClose => (vec![connection()], task(Ty::Unit)),
             Builtin::Send => (vec![Ty::Error, Ty::Error], task(Ty::Unit)),
             Builtin::Latest => (vec![Ty::Error], Ty::Error),
+            Builtin::Bytes => (vec![Ty::Str], Ty::Bytes),
+            Builtin::BytesLen => (vec![Ty::Bytes], Ty::I64),
+            Builtin::BytesSlice => (vec![Ty::Bytes, Ty::I64, Ty::I64], Ty::Bytes),
+            Builtin::BytesText => (vec![Ty::Bytes], Ty::Option(Box::new(Ty::Str))),
         }
     }
 }

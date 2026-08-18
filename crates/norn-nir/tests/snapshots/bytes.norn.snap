@@ -1,0 +1,117 @@
+=== nir ===
+enum Option #0 (None/0, Some/1)
+enum Result #1 (Ok/1, Err/1)
+enum IoError #2 (NotFound/0, Denied/0, InUse/0, Refused/0, Closed/0, Other/1)
+
+fn main #0()
+    local _0/data
+    local _1/head
+    local _2/text
+    local _3/snowman
+    local _4/text
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+    local _10
+    local _11
+    local _12
+    local _13
+    local _14
+    local _15
+    local _16
+    local _17
+    local _18
+    local _19
+    local _20
+    local _21
+    local _22
+    local _23
+    local _24
+    local _25
+    local _26
+    local _27
+    local _28
+    local _29
+    local _30
+    local _31
+  b0:
+    _5 = builtin bytes("hello, norn")
+    _0/data = _5
+    _6 = builtin print(_0/data)
+    _7 = builtin bytes_len(_0/data)
+    _8 = builtin print(_7)
+    _9 = builtin bytes_slice(_0/data, 0, 5)
+    _1/head = _9
+    _11 = builtin bytes_text(_1/head)
+    goto b2
+  b1:
+    _14 = builtin bytes("☃")
+    _3/snowman = _14
+    _16 = builtin bytes_slice(_3/snowman, 0, 1)
+    _17 = builtin bytes_text(_16)
+    goto b10
+  b2:
+    switch tag _11 [1 => b6] else b3
+  b3:
+    switch tag _11 [0 => b8] else b4
+  b4:
+    trap "no match arm applied"
+  b5:
+    _12 = builtin print(_2/text)
+    _10 = _12
+    goto b1
+  b6:
+    _2/text = _11.0
+    goto b5
+  b7:
+    _13 = builtin print("not text")
+    _10 = _13
+    goto b1
+  b8:
+    goto b7
+  b9:
+    _20 = builtin bytes_slice(_0/data, 7, 11)
+    _21 = builtin bytes("norn")
+    _22 = _20 eq _21
+    _23 = builtin print(_22)
+    _24 = builtin bytes("abc")
+    _25 = builtin bytes("abd")
+    _26 = _24 lt _25
+    _27 = builtin print(_26)
+    _28 = builtin bytes("")
+    _29 = builtin bytes_slice(_0/data, 4, 4)
+    _30 = _28 eq _29
+    _31 = builtin print(_30)
+    return _31
+  b10:
+    switch tag _17 [1 => b14] else b11
+  b11:
+    switch tag _17 [0 => b16] else b12
+  b12:
+    trap "no match arm applied"
+  b13:
+    _18 = builtin print(_4/text)
+    _15 = _18
+    goto b9
+  b14:
+    _4/text = _17.0
+    goto b13
+  b15:
+    _19 = builtin print("a torn character is not text")
+    _15 = _19
+    goto b9
+  b16:
+    goto b15
+
+=== output ===
+<bytes 11>
+11
+hello
+a torn character is not text
+true
+true
+true
+=== result ===
+()

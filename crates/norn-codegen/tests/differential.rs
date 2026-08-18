@@ -52,6 +52,12 @@ fn traps_match() {
             "nested-gap",
             "enum Wrap {\n    One(Option<I64>)\n}\n\nfn main() -> I64 {\n    match Wrap.One(None) {\n        Wrap.One(Some(v)) => v\n    }\n}\n",
         ),
+        (
+            // The bounds are values, so the checker cannot rule the range out; the trap text
+            // interpolates all three numbers and both engines must agree on every byte.
+            "bytes-slice-range",
+            "fn main() -> () {\n    let cut = bytes_slice(bytes(\"abc\"), 1, 9)\n    print(cut)\n}\n",
+        ),
     ];
     for (name, source) in programs {
         let (nir, main) = common::build_source(name, source);

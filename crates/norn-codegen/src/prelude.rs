@@ -36,6 +36,7 @@ pub enum Value {
     Float(f64),
     Bool(bool),
     Str(Rc<str>),
+    Bytes(Rc<[u8]>),
     Struct(usize, Rc<Vec<Value>>),
     Variant(usize, usize, Rc<Vec<Value>>),
     Task(Rc<TaskValue>),
@@ -60,6 +61,8 @@ pub enum TaskKind {
 const ENUM_OPTION: usize = 0;
 const ENUM_RESULT: usize = 1;
 const ENUM_IO_ERROR: usize = 2;
+const TAG_NONE: usize = 0;
+const TAG_SOME: usize = 1;
 const TAG_OK: usize = 0;
 const TAG_ERR: usize = 1;
 const IO_NOT_FOUND: usize = 0;
@@ -127,6 +130,10 @@ pub enum Builtin {
     TcpClose,
     Send,
     Latest,
+    Bytes,
+    BytesLen,
+    BytesSlice,
+    BytesText,
 }
 
 impl Builtin {
@@ -142,6 +149,10 @@ impl Builtin {
             Builtin::TcpClose => "tcp_close",
             Builtin::Send => "send",
             Builtin::Latest => "latest",
+            Builtin::Bytes => "bytes",
+            Builtin::BytesLen => "bytes_len",
+            Builtin::BytesSlice => "bytes_slice",
+            Builtin::BytesText => "bytes_text",
         }
     }
 }
@@ -373,6 +384,7 @@ fn binary(op: BinOp, lhs: Value, rhs: Value, func: &str) -> Result<Value, Trap> 
                 (Int(a), Int(b)) => a.partial_cmp(b),
                 (Float(a), Float(b)) => a.partial_cmp(b),
                 (Str(a), Str(b)) => a.partial_cmp(b),
+                (Value::Bytes(a), Value::Bytes(b)) => a.partial_cmp(b),
                 _ => None,
             };
             let Some(ordering) = ordering else {
@@ -457,6 +469,31 @@ fn eval_builtin(
                 }
             }
         }
+        Builtin::Bytes => Value::Bytes(text("bytes", &args[0])?.into_bytes().into()),
+        Builtin::BytesLen => Value::Int(blob("bytes_len", &args[0])?.len() as i64),
+        Builtin::BytesSlice => {
+            let data = blob("bytes_slice", &args[0])?;
+            let start = integer("bytes_slice", &args[1])?;
+            let end = integer("bytes_slice", &args[2])?;
+            let len = data.len() as i64;
+            if start < 0 || end < start || end > len {
+                return Err(Trap::new(
+                    format!("`bytes_slice` out of range: {start}..{end} of {len}"),
+                    func,
+                ));
+            }
+            // A slice copies in v0, deliberately matching the interpreter; the cheap
+            // representation waits for typed layout.
+            Value::Bytes(data[start as usize..end as usize].into())
+        }
+        Builtin::BytesText => match std::str::from_utf8(&blob("bytes_text", &args[0])?) {
+            Ok(text) => Value::Variant(
+                ENUM_OPTION,
+                TAG_SOME,
+                Rc::new(vec![Value::Str(text.into())]),
+            ),
+            Err(_) => Value::Variant(ENUM_OPTION, TAG_NONE, Rc::new(Vec::new())),
+        },
         task => {
             return Err(Trap::new(
                 format!("`{}` builds a task and cannot be evaluated here", task.name()),
@@ -558,6 +595,16 @@ fn resource(builtin: &str, value: &Value) -> Result<ResourceId, Trap> {
     }
 }
 
+fn blob(builtin: &str, value: &Value) -> Result<Rc<[u8]>, Trap> {
+    match value {
+        Value::Bytes(data) => Ok(data.clone()),
+        other => Err(Trap::new(
+            format!("`{builtin}` wanted bytes, found {other:?}"),
+            "runtime",
+        )),
+    }
+}
+
 // Wrap what a socket operation returned as a `Result<T, IoError>`.
 fn fallible(outcome: io::Result<Value>) -> Value {
     let (variant, fields) = match outcome {
@@ -637,6 +684,7 @@ fn render_nested(value: &Value) -> String {
         }
         Value::Bool(v) => v.to_string(),
         Value::Str(v) => format!("{:?}", &**v),
+        Value::Bytes(v) => format!("<bytes {}>", v.len()),
         Value::Task(task) => {
             let name = match &task.kind {
                 TaskKind::Fn(id, _) => FN_NAMES[*id],

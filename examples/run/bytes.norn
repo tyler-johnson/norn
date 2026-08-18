@@ -1,0 +1,32 @@
+// Bytes: the value the wire carries and a file holds.
+//
+// There is no bytes literal — data arrives from I/O, or from `bytes(s)`, which is a string's UTF-8.
+// A slice copies in v0 (the clone-everything engines cannot make zero-copy observable), decoding
+// back to text is fallible because not every octet sequence is UTF-8, and printing a bytes value
+// shows its length rather than inventing an escape syntax for its contents.
+
+module bytes
+
+fn main() -> () {
+    let data = bytes("hello, norn")
+    print(data)
+    print(bytes_len(data))
+
+    let head = bytes_slice(data, 0, 5)
+    match bytes_text(head) {
+        Some(text) => print(text)
+        None => print("not text")
+    }
+
+    // Slicing through the middle of a multi-byte character is not text any more.
+    let snowman = bytes("☃")
+    match bytes_text(bytes_slice(snowman, 0, 1)) {
+        Some(text) => print(text)
+        None => print("a torn character is not text")
+    }
+
+    // Equality is by content, and ordering is lexicographic.
+    print(bytes_slice(data, 7, 11) == bytes("norn"))
+    print(bytes("abc") < bytes("abd"))
+    print(bytes("") == bytes_slice(data, 4, 4))
+}

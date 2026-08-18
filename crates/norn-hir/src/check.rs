@@ -331,6 +331,8 @@ impl Checker {
             .insert("Bool".into(), TypeName::Builtin(Ty::Bool));
         self.types
             .insert("String".into(), TypeName::Builtin(Ty::Str));
+        self.types
+            .insert("Bytes".into(), TypeName::Builtin(Ty::Bytes));
         self.types.insert(
             "Listener".into(),
             TypeName::Builtin(Ty::Resource(Resource::Listener)),
@@ -2654,13 +2656,13 @@ impl Checker {
                 _ => None,
             },
             A::Eq | A::Ne => match operand {
-                Ty::I64 | Ty::F64 | Ty::Bool | Ty::Str => {
+                Ty::I64 | Ty::F64 | Ty::Bool | Ty::Str | Ty::Bytes => {
                     Some((if op == A::Eq { BinOp::Eq } else { BinOp::Ne }, Ty::Bool))
                 }
                 _ => None,
             },
             A::Lt | A::Le | A::Gt | A::Ge => match operand {
-                Ty::I64 | Ty::F64 | Ty::Str => {
+                Ty::I64 | Ty::F64 | Ty::Str | Ty::Bytes => {
                     let hir_op = match op {
                         A::Lt => BinOp::Lt,
                         A::Le => BinOp::Le,

@@ -492,7 +492,7 @@
         },
         {
           "name": "support.type.builtin.norn",
-          "match": "\\b(?:I64|F64|Bool|String|Task|Result|Option|IoError|Listener|Connection)\\b"
+          "match": "\\b(?:I64|F64|Bool|String|Bytes|Task|Result|Option|IoError|Listener|Connection)\\b"
         },
         {
           "name": "entity.name.type.norn",
@@ -590,7 +590,7 @@
     },
     "builtin-fns": {
       "name": "support.function.builtin.norn",
-      "match": "\\b(?:print|listener_port|sleep|tcp_listen|tcp_accept|tcp_read|tcp_write|tcp_close|send|latest)\\b(?=\\s*\\()"
+      "match": "\\b(?:print|listener_port|sleep|tcp_listen|tcp_accept|tcp_read|tcp_write|tcp_close|send|latest|bytes_len|bytes_slice|bytes_text|bytes)\\b(?=\\s*\\()"
     },
     "call": {
       "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\s*(?=\\()",

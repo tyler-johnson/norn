@@ -35,6 +35,7 @@ pub enum Value {
     Float(f64),
     Bool(bool),
     Str(Rc<str>),
+    Bytes(Rc<[u8]>),
     Struct(usize, Rc<Vec<Value>>),
     Variant(usize, usize, Rc<Vec<Value>>),
     /// A computation that has not run. `await` and `spawn` are what start it.
@@ -484,6 +485,36 @@ impl Interpreter<'_> {
                     }
                 }
             }
+            Builtin::Bytes => Value::Bytes(text("bytes", &args[0])?.into_bytes().into()),
+            Builtin::BytesLen => Value::Int(blob("bytes_len", &args[0])?.len() as i64),
+            Builtin::BytesSlice => {
+                let data = blob("bytes_slice", &args[0])?;
+                let start = integer("bytes_slice", &args[1])?;
+                let end = integer("bytes_slice", &args[2])?;
+                let len = data.len() as i64;
+                if start < 0 || end < start || end > len {
+                    return Err(self.trap(
+                        frame,
+                        format!("`bytes_slice` out of range: {start}..{end} of {len}"),
+                    ));
+                }
+                // A slice copies in v0: a clone-everything engine cannot make zero-copy
+                // observable, so the cheap representation waits for typed layout (§8).
+                Value::Bytes(data[start as usize..end as usize].into())
+            }
+            Builtin::BytesText => {
+                let data = blob("bytes_text", &args[0])?;
+                match std::str::from_utf8(&data) {
+                    Ok(text) => Value::Variant(
+                        EnumId::OPTION.index(),
+                        EnumId::SOME,
+                        Rc::new(vec![Value::Str(text.into())]),
+                    ),
+                    Err(_) => {
+                        Value::Variant(EnumId::OPTION.index(), EnumId::NONE, Rc::new(Vec::new()))
+                    }
+                }
+            }
             task => {
                 return Err(self.trap(
                     frame,
@@ -587,6 +618,7 @@ impl Interpreter<'_> {
                     (Int(a), Int(b)) => a.partial_cmp(b),
                     (Float(a), Float(b)) => a.partial_cmp(b),
                     (Str(a), Str(b)) => a.partial_cmp(b),
+                    (Value::Bytes(a), Value::Bytes(b)) => a.partial_cmp(b),
                     _ => None,
                 };
                 let Some(ordering) = ordering else {
@@ -629,6 +661,7 @@ impl Interpreter<'_> {
             }
             Value::Bool(v) => v.to_string(),
             Value::Str(v) => format!("{:?}", &**v),
+            Value::Bytes(v) => format!("<bytes {}>", v.len()),
             Value::Task(task) => {
                 let name = match &task.kind {
                     TaskKind::Fn(id, _) => self.program.fns[*id].name.as_str(),
@@ -753,6 +786,16 @@ fn resource(builtin: &str, value: &Value) -> Result<ResourceId, Trap> {
         Value::Resource(_, id) => Ok(*id),
         other => Err(Trap::new(
             format!("`{builtin}` wanted a resource, found {other:?}"),
+            "runtime",
+        )),
+    }
+}
+
+fn blob(builtin: &str, value: &Value) -> Result<Rc<[u8]>, Trap> {
+    match value {
+        Value::Bytes(data) => Ok(data.clone()),
+        other => Err(Trap::new(
+            format!("`{builtin}` wanted bytes, found {other:?}"),
             "runtime",
         )),
     }
