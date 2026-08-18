@@ -1,8 +1,8 @@
 //! The `norn` compiler driver.
 //!
 //! The verbs follow the pipeline: `parse` stops after syntax, `check` after types, `nir` after
-//! lowering, and `run` executes. Later milestones add `build`, `graph`, and `trace` (see
-//! `BOOTSTRAP.md` §5).
+//! lowering, `run` executes, and `build` compiles to a native binary. Later milestones add
+//! `trace` (see `BOOTSTRAP.md` §5).
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -18,6 +18,7 @@ usage:
     norn nir <file>                   print the lowered IR
     norn graph <file> [Name]          print a reactor's dependency graph
     norn run [options] <file>         check, lower, and execute `main`
+    norn build [options] <file>       compile to a native binary
     norn fmt [--check] <file>...      rewrite files in canonical form
     norn --version
     norn --help
@@ -30,6 +31,10 @@ run options:
     --trace           write the runtime event trace to stderr
     --virtual-clock   jump to the next deadline instead of sleeping, so a run
                       that only waits on timers is instant and deterministic
+
+build options:
+    -o <path>         where to write the binary (default: ./<stem>)
+    --emit-rust       keep the generated Rust beside the binary, as <path>.rs
 ";
 
 fn main() -> ExitCode {
@@ -65,6 +70,7 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
         "nir" => cmd_nir(&args[1..]),
         "graph" => cmd_graph(&args[1..]),
         "run" => cmd_run(&args[1..]),
+        "build" => cmd_build(&args[1..]),
         "fmt" => cmd_fmt(&args[1..]),
         other => Err(format!("unknown command `{other}`\n\n{USAGE}")),
     }
@@ -197,13 +203,7 @@ fn cmd_run(args: &[String]) -> Result<ExitCode, String> {
         return Ok(ExitCode::FAILURE);
     };
 
-    let Some(main) = hir.main else {
-        return Err(format!("{}: no `main` function to run", file.name));
-    };
-    let entry = &hir.fns[main.index()];
-    if entry.params != 0 {
-        return Err(format!("{}: `main` cannot take parameters", file.name));
-    }
+    let main = entry_of(&hir, &file)?;
 
     let program = norn_nir::lower(&hir);
     // A `task fn main` runs as the root task of a runtime; a plain one is a task that never parks.
@@ -246,6 +246,62 @@ fn cmd_run(args: &[String]) -> Result<ExitCode, String> {
             Ok(ExitCode::FAILURE)
         }
     }
+}
+
+fn cmd_build(args: &[String]) -> Result<ExitCode, String> {
+    let mut out: Option<PathBuf> = None;
+    let mut emit_rust = false;
+    let mut paths = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "-o" => {
+                index += 1;
+                let path = args.get(index).ok_or("`-o` expects a path")?;
+                out = Some(PathBuf::from(path));
+            }
+            "--emit-rust" => emit_rust = true,
+            flag if flag.starts_with('-') => return Err(format!("unknown option `{flag}`")),
+            path => paths.push(PathBuf::from(path)),
+        }
+        index += 1;
+    }
+    let [path] = &paths[..] else {
+        return Err("expected exactly one file".into());
+    };
+    let file = read(path)?;
+    let Some(hir) = front_end(&file) else {
+        return Ok(ExitCode::FAILURE);
+    };
+    let main = entry_of(&hir, &file)?;
+
+    let program = norn_nir::lower(&hir);
+    let out = match out {
+        Some(out) => out,
+        None => path
+            .file_stem()
+            .map(PathBuf::from)
+            .ok_or_else(|| format!("cannot derive an output name from `{}`", path.display()))?,
+    };
+    let options = norn_codegen::BuildOptions {
+        out,
+        cache_dir: None,
+        emit_rust,
+        rustc: None,
+    };
+    norn_codegen::build(&program, main.index(), &options)?;
+    Ok(ExitCode::SUCCESS)
+}
+
+/// The function `run` and `build` start from: `main`, which must exist and take nothing.
+fn entry_of(hir: &norn_hir::Program, file: &SourceFile) -> Result<norn_hir::hir::FnId, String> {
+    let Some(main) = hir.main else {
+        return Err(format!("{}: no `main` function to run", file.name));
+    };
+    if hir.fns[main.index()].params != 0 {
+        return Err(format!("{}: `main` cannot take parameters", file.name));
+    }
+    Ok(main)
 }
 
 /// Parse and check one file, printing any diagnostics. `None` means it did not get through.

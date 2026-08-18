@@ -611,6 +611,9 @@ pub enum ExprKind {
     Error,
 }
 
+// `UnOp`, `BinOp`, and `Builtin` are mirrored in `norn-codegen/src/prelude.rs`, variant names
+// included: the interpreter's trap messages interpolate `{:?}` of them, and both engines must
+// word a trap identically.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum UnOp {
     Neg,

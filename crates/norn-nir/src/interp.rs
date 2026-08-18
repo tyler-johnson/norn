@@ -25,6 +25,9 @@ pub use norn_rt::{Captured, Clock, Config, Output, Poll, ResourceId, ResourceKin
 
 use crate::nir::*;
 
+/// Mirrored in `norn-codegen/src/prelude.rs`, variant names included: trap messages interpolate
+/// `{:?}` of these, so a rename here is a byte difference the differential oracle catches in
+/// stderr.
 #[derive(Clone, PartialEq, Debug)]
 pub enum Value {
     Unit,

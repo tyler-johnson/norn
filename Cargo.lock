@@ -6,8 +6,19 @@ version = 4
 name = "norn"
 version = "0.0.0"
 dependencies = [
+ "norn-codegen",
  "norn-hir",
  "norn-nir",
+ "norn-syntax",
+]
+
+[[package]]
+name = "norn-codegen"
+version = "0.0.0"
+dependencies = [
+ "norn-hir",
+ "norn-nir",
+ "norn-rt",
  "norn-syntax",
 ]
 

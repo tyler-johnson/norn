@@ -1,17 +1,15 @@
 [package]
-name = "norn"
-description = "The Norn compiler driver"
+name = "norn-codegen"
+description = "NIR to restricted Rust, and the rustc driver that makes it a binary"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
-[[bin]]
-name = "norn"
-path = "src/main.rs"
-
 [dependencies]
-norn-codegen.workspace = true
 norn-hir.workspace = true
 norn-nir.workspace = true
+
+[dev-dependencies]
+norn-rt.workspace = true
 norn-syntax.workspace = true

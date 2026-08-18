@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "crates/norn",
+    "crates/norn-codegen",
     "crates/norn-hir",
     "crates/norn-nir",
     "crates/norn-rt",
@@ -15,6 +16,7 @@ rust-version = "1.97"
 publish = false
 
 [workspace.dependencies]
+norn-codegen = { path = "crates/norn-codegen" }
 norn-hir = { path = "crates/norn-hir" }
 norn-nir = { path = "crates/norn-nir" }
 norn-rt = { path = "crates/norn-rt" }
