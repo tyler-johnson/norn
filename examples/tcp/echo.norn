@@ -6,8 +6,9 @@
 // connection it is serving, and every socket is closed on the way out. No cleanup is written
 // anywhere in this file.
 //
-// There is no `loop` in v0, so the accept loop recurses. Each connection therefore costs a frame
-// and a scope for as long as the server runs, which tail calls will fix and nothing else needs to.
+// The accept loop is a `loop` inside a `scope`: the scope owns every child the loop spawns, each
+// pass borrows the listener and hands its connection to a fresh child, and when accepting fails —
+// cancellation closes the listener — the loop breaks and the scope joins what it started.
 
 task fn echo(conn: Connection) -> ()
     uses { net.io }
@@ -25,14 +26,15 @@ task fn echo(conn: Connection) -> ()
 task fn accept_loop(listener: Listener) -> ()
     uses { net.io }
 {
-    match await tcp_accept(&listener) {
-        // The connection moves into the child, which is then what owns and closes it. The scope
-        // wrapping the recursion is what that child may not outlive.
-        Ok(conn) => scope {
-            spawn echo(conn)
-            await accept_loop(listener)
+    scope {
+        loop {
+            match await tcp_accept(&listener) {
+                // The connection moves into the child, which is then what owns and closes it. The
+                // scope wrapping the loop is what that child may not outlive.
+                Ok(conn) => spawn echo(conn)
+                Err(_) => break
+            }
         }
-        Err(_) => ()
     }
 }
 
@@ -49,11 +51,13 @@ task fn main() -> Result<(), IoError>
 }
 
 fn digits(n: I64) -> String {
-    if n < 10 {
-        digit(n)
-    } else {
-        digits(n / 10) + digit(n % 10)
+    let mut rest = n
+    let mut out = digit(n % 10)
+    while rest > 9 {
+        rest = rest / 10
+        out = digit(rest % 10) + out
     }
+    out
 }
 
 fn digit(n: I64) -> String {

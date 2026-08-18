@@ -58,12 +58,13 @@ task fn serve(conn: Connection) -> ()
 task fn accept_loop(listener: Listener) -> ()
     uses { net.io, fs.read, fs.write }
 {
-    match await tcp_accept(&listener) {
-        Ok(conn) => scope {
-            spawn serve(conn)
-            await accept_loop(listener)
+    scope {
+        loop {
+            match await tcp_accept(&listener) {
+                Ok(conn) => spawn serve(conn)
+                Err(_) => break
+            }
         }
-        Err(_) => ()
     }
 }
 
@@ -80,11 +81,13 @@ task fn main() -> Result<(), IoError>
 }
 
 fn digits(n: I64) -> String {
-    if n < 10 {
-        digit(n)
-    } else {
-        digits(n / 10) + digit(n % 10)
+    let mut rest = n
+    let mut out = digit(n % 10)
+    while rest > 9 {
+        rest = rest / 10
+        out = digit(rest % 10) + out
     }
+    out
 }
 
 fn digit(n: I64) -> String {
