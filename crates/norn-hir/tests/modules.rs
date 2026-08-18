@@ -344,3 +344,155 @@ fn entry_module_diagnostics_match_the_single_file_checker() {
     assert_eq!(single_rendered, multi_rendered);
     assert!(!single.ok());
 }
+
+// ---------------------------------------------------------------- namespace imports
+
+#[test]
+fn a_namespace_reaches_every_kind_of_export() {
+    assert_ok(&[
+        (
+            "main.norn",
+            "import * as fmt from \"./fmt\"\n\nfn measure(config: fmt.Config) -> I64 {\n    match config {\n        fmt.Config(width: w) => fmt.digits(w)\n    }\n}\n\nfn main() -> I64 {\n    measure(fmt.Config(width: 12))\n}\n",
+        ),
+        ("fmt.norn", FMT),
+    ]);
+}
+
+#[test]
+fn a_namespace_reaches_an_enum_variant_in_call_and_pattern_position() {
+    assert_ok(&[
+        (
+            "main.norn",
+            "import * as fmt from \"./fmt\"\n\nfn main() -> I64 {\n    match fmt.Shape.Dot(2) {\n        fmt.Shape.Empty => 0\n        fmt.Shape.Dot(n) => n\n    }\n}\n",
+        ),
+        ("fmt.norn", FMT),
+    ]);
+}
+
+#[test]
+fn a_namespace_unit_variant_is_a_value() {
+    assert_ok(&[
+        (
+            "main.norn",
+            "import * as fmt from \"./fmt\"\n\nfn main() -> I64 {\n    let empty = fmt.Shape.Empty\n    match empty {\n        fmt.Shape.Empty => 0\n        _ => 1\n    }\n}\n",
+        ),
+        ("fmt.norn", FMT),
+    ]);
+    // A payload-carrying variant is not a bare value, through a namespace or otherwise.
+    let out = rendered(&[
+        (
+            "main.norn",
+            "import * as fmt from \"./fmt\"\n\nfn main() -> I64 {\n    let dot = fmt.Shape.Dot\n    0\n}\n",
+        ),
+        ("fmt.norn", FMT),
+    ]);
+    assert!(out.contains("carries a payload"), "{out}");
+}
+
+#[test]
+fn a_namespace_alone_is_not_a_value() {
+    let out = rendered(&[
+        (
+            "main.norn",
+            "import * as fmt from \"./fmt\"\n\nfn main() -> I64 {\n    let x = fmt\n    0\n}\n",
+        ),
+        ("fmt.norn", FMT),
+    ]);
+    assert!(
+        out.contains("`fmt` is a module namespace, not a value"),
+        "{out}"
+    );
+}
+
+#[test]
+fn a_namespaced_function_is_not_a_value() {
+    let out = rendered(&[
+        (
+            "main.norn",
+            "import * as fmt from \"./fmt\"\n\nfn main() -> I64 {\n    let f = fmt.digits\n    0\n}\n",
+        ),
+        ("fmt.norn", FMT),
+    ]);
+    assert!(out.contains("functions are not values yet"), "{out}");
+    assert!(out.contains("`fmt.digits` can only be called"), "{out}");
+}
+
+#[test]
+fn a_namespace_may_not_take_a_declared_name() {
+    let out = rendered(&[
+        (
+            "main.norn",
+            "import * as Shape from \"./fmt\"\n\nenum Shape {\n    A\n}\n\nfn main() {}\n",
+        ),
+        ("fmt.norn", FMT),
+    ]);
+    assert!(
+        out.contains("the imported name `Shape` is already taken"),
+        "{out}"
+    );
+    assert!(out.contains("declared in this file"), "{out}");
+}
+
+#[test]
+fn a_reactor_spawns_through_a_namespace() {
+    assert_ok(&[
+        (
+            "main.norn",
+            "import * as lib from \"./gate\"\n\ntask fn main() -> () {\n    scope {\n        let gate = spawn reactor lib.Gate(limit: 8)\n        await send(gate.opened, ())\n    }\n}\n",
+        ),
+        (
+            "gate.norn",
+            "export reactor Gate(limit: I64) {\n    input opened: () [capacity: 1, overflow: reject]\n    state n: I64 = 0\n    on opened() {\n        n = n + 1\n    }\n    export signal open = n\n}\n",
+        ),
+    ]);
+}
+
+#[test]
+fn an_unexported_reactor_cannot_be_spawned() {
+    let out = rendered(&[
+        (
+            "main.norn",
+            "import * as lib from \"./gate\"\n\ntask fn main() -> () {\n    scope {\n        let gate = spawn reactor lib.Gate(limit: 8)\n        ()\n    }\n}\n",
+        ),
+        (
+            "gate.norn",
+            "reactor Gate(limit: I64) {\n    input opened: () [capacity: 1, overflow: reject]\n    on opened() {}\n}\n",
+        ),
+    ]);
+    assert!(out.contains("`Gate` is not exported by `lib`"), "{out}");
+    assert!(out.contains("private to its file"), "{out}");
+}
+
+#[test]
+fn an_unexported_function_stays_private_through_a_namespace() {
+    let out = rendered(&[
+        (
+            "main.norn",
+            "import * as fmt from \"./fmt\"\n\nfn main() -> I64 {\n    fmt.secret()\n}\n",
+        ),
+        ("fmt.norn", FMT),
+    ]);
+    assert!(out.contains("`secret` is not exported by `fmt`"), "{out}");
+}
+
+#[test]
+fn a_cross_file_impurity_travels_as_a_note() {
+    let out = rendered(&[
+        (
+            "main.norn",
+            "import { loud } from \"./lib\"\n\nreactor Meter() {\n    input go: () [capacity: 1, overflow: reject]\n    state n: I64 = 0\n    on go() {\n        n = n + 1\n    }\n    signal echo = loud()\n}\n\ntask fn main() -> () {\n    scope {\n        let meter = spawn reactor Meter()\n        await send(meter.go, ())\n    }\n}\n",
+        ),
+        (
+            "lib.norn",
+            "export fn loud() -> I64 {\n    print(\"observable\")\n    1\n}\n",
+        ),
+    ]);
+    assert!(
+        out.contains("this reaches `lib.loud`, which calls `print`"),
+        "{out}"
+    );
+    // The culprit lives in another file, so the location travels as a note, never as a secondary
+    // span rendered against the wrong file's text.
+    assert!(out.contains("`lib.loud` calls it in lib.norn"), "{out}");
+    assert!(!out.contains("--> lib.norn"), "{out}");
+}

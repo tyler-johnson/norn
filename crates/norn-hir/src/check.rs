@@ -155,6 +155,15 @@ impl DeclKind {
     }
 }
 
+/// What `ns.name` resolved to, for the sites that consult a namespace binding.
+#[derive(Clone, Copy)]
+enum NsItem {
+    Fn(FnId),
+    Struct(StructId),
+    Enum(EnumId),
+    Reactor(ReactorId),
+}
+
 /// What a name at the head of a path refers to.
 #[derive(Clone)]
 enum TypeName {
@@ -691,6 +700,51 @@ impl Checker {
             };
             self.ns[module].fns.insert(local, id);
         }
+    }
+
+    /// Resolve the first two segments of a path whose head is a `* as` namespace binding.
+    ///
+    /// `None` when the head is not a namespace — the caller falls through to its own "unknown"
+    /// answer. `Some(Err(()))` when it is one but the member does not resolve: unknown or
+    /// unexported, each already diagnosed here, so the caller only has to produce an error value.
+    fn resolve_ns(&mut self, path: &ast::Path) -> Option<Result<NsItem, ()>> {
+        let head = &path.segments[0];
+        let &target = self.ns[self.current].namespaces.get(&head.name)?;
+        let member = &path.segments[1];
+        let span = head.span.to(member.span);
+        let Some(&(kind, exported)) = self.decls[target].get(&member.name) else {
+            let file = self.names[target].clone();
+            self.push(
+                Diagnostic::new(
+                    span,
+                    format!("`{}` is not defined in `{}`", member.name, head.name),
+                )
+                .label("unknown name")
+                .note(format!("{file} declares no `{}`", member.name)),
+            );
+            return Some(Err(()));
+        };
+        if !exported {
+            let name = member.name.clone();
+            let shown = head.name.clone();
+            self.not_exported(&name, &shown, target, span);
+            return Some(Err(()));
+        }
+        let item = match kind {
+            DeclKind::Fn => self.ns[target]
+                .fns
+                .get(&member.name)
+                .map(|&id| NsItem::Fn(id)),
+            _ => match self.ns[target].types.get(&member.name) {
+                Some(TypeName::Struct(id)) => Some(NsItem::Struct(*id)),
+                Some(TypeName::Enum(id)) => Some(NsItem::Enum(*id)),
+                Some(TypeName::Reactor(id)) => Some(NsItem::Reactor(*id)),
+                // The target refused the declaration — a duplicate, or a fn whose name a type
+                // already claims. It has an error of its own; do not add a second.
+                Some(TypeName::Builtin(_)) | None => None,
+            },
+        };
+        Some(item.ok_or(()))
     }
 
     /// The shared privacy diagnostic: at an import item now, and at namespace accesses once those
@@ -1926,19 +1980,30 @@ impl Checker {
                 && culprit != function
             {
                 let name = self.program.fns[culprit.index()].name.clone();
-                self.push(
-                    Diagnostic::new(
-                        span,
-                        format!(
-                            "this reaches `{}`, which calls `{}`",
-                            name,
-                            builtin.name()
-                        ),
+                let mut diagnostic = Diagnostic::new(
+                    span,
+                    format!("this reaches `{}`, which calls `{}`", name, builtin.name()),
+                )
+                .label("a turn is pure");
+                // A secondary span renders against *this* file's text, so one that points into
+                // another module has to travel as a note instead: the name carries the location.
+                let culprit_owner = self.fn_owner[culprit.index()];
+                diagnostic = if culprit_owner == owner {
+                    diagnostic.secondary(
+                        at,
+                        format!("`{}` is something the world can see happen", builtin.name()),
                     )
-                    .label("a turn is pure")
-                    .secondary(at, format!("`{}` is something the world can see happen", builtin.name()))
-                    .note("purity is not the same question as authority: `print` needs no capability and is still observable")
-                    .note("effects leave a turn through `after`, which starts them once the snapshot is published"),
+                } else {
+                    diagnostic.note(format!(
+                        "`{}` is something the world can see happen; `{name}` calls it in {}",
+                        builtin.name(),
+                        self.names[culprit_owner]
+                    ))
+                };
+                self.push(
+                    diagnostic
+                        .note("purity is not the same question as authority: `print` needs no capability and is still observable")
+                        .note("effects leave a turn through `after`, which starts them once the snapshot is published"),
                 );
             }
 
@@ -1951,12 +2016,21 @@ impl Checker {
                 .collect();
             let culprit = cycle[0];
             let message = format!("`{}` is recursive, and a turn must end", names[0]);
-            let mut diagnostic = Diagnostic::new(span, message)
-                .label("reached from here")
-                .secondary(
+            let mut diagnostic = Diagnostic::new(span, message).label("reached from here");
+            // As above: the culprit's span only means something in its own file.
+            let culprit_owner = self.fn_owner[culprit.index()];
+            diagnostic = if culprit_owner == owner {
+                diagnostic.secondary(
                     self.program.fns[culprit.index()].span,
                     format!("the cycle is {}", names.join(" → ")),
-                );
+                )
+            } else {
+                diagnostic.note(format!(
+                    "the cycle is {}, declared in {}",
+                    names.join(" → "),
+                    self.names[culprit_owner]
+                ))
+            };
             diagnostic = diagnostic
                 .note("v0 has no loop construct, so recursion is the only way a pure function can fail to return — which is what makes termination provable rather than hoped for")
                 .note("compute the value with a bounded expression, or move the work into a `task fn` and request it with `after`");
@@ -2207,6 +2281,41 @@ impl Checker {
             }
             ast::TypeKind::Path { path, args } => {
                 if path.segments.len() != 1 {
+                    // `fmt.Config` in type position. The special single-segment names — Option,
+                    // Task, Flow, and the rest — are seeded, never declared, so none of them can
+                    // sit behind a namespace and none is checked for here.
+                    if path.segments.len() == 2
+                        && self.ns[self.current]
+                            .namespaces
+                            .contains_key(&path.segments[0].name)
+                    {
+                        let item = match self.resolve_ns(path) {
+                            Some(Ok(item)) => item,
+                            _ => return Ty::Error,
+                        };
+                        if !args.is_empty() {
+                            self.push(
+                                Diagnostic::new(
+                                    ty.span,
+                                    format!("`{}` takes no type arguments", path.text()),
+                                )
+                                .note("user-defined generics arrive after M6; see BOOTSTRAP.md §8"),
+                            );
+                            return Ty::Error;
+                        }
+                        return match item {
+                            NsItem::Struct(id) => Ty::Struct(id),
+                            NsItem::Enum(id) => Ty::Enum(id),
+                            NsItem::Reactor(id) => Ty::Reactor(id),
+                            NsItem::Fn(_) => {
+                                self.push(Diagnostic::new(
+                                    path.span,
+                                    format!("`{}` is a function, not a type", path.text()),
+                                ));
+                                Ty::Error
+                            }
+                        };
+                    }
                     self.error(path.span, format!("unknown type `{}`", path.text()));
                     return Ty::Error;
                 }
@@ -2775,7 +2884,63 @@ impl Checker {
                 && let Some(TypeName::Enum(id)) = self.ns[self.current].types.get(&head.name)
             {
                 let id = *id;
-                return self.check_variant_path(id, path, expected, span);
+                return self.check_variant_path(id, path, 0, expected, span);
+            }
+            // A namespace binding answers last among the file-level names, and nothing it answers
+            // for can also be a local, a member, or an enum head — collisions were banned at the
+            // import, which is what keeps this one lookup rather than a precedence rule.
+            if self.ns[self.current].namespaces.contains_key(&head.name) {
+                if path.segments.len() == 1 {
+                    self.push(
+                        Diagnostic::new(
+                            span,
+                            format!("`{}` is a module namespace, not a value", head.name),
+                        )
+                        .label("names a file")
+                        .note(format!(
+                            "reach what it exports through it, as in `{}.name`",
+                            head.name
+                        )),
+                    );
+                    return self.error_expr(span);
+                }
+                return match self.resolve_ns(path) {
+                    Some(Ok(NsItem::Enum(id))) => {
+                        self.check_variant_path(id, path, 1, expected, span)
+                    }
+                    Some(Ok(NsItem::Fn(_))) => {
+                        self.push(
+                            Diagnostic::new(span, "functions are not values yet")
+                                .label(format!("`{}` can only be called", path.text()))
+                                .note("first-class functions arrive with closures in M7"),
+                        );
+                        self.error_expr(span)
+                    }
+                    Some(Ok(NsItem::Struct(_))) => {
+                        self.push(
+                            Diagnostic::new(
+                                span,
+                                format!("`{}` is a struct, not a value", path.text()),
+                            )
+                            .note(format!("construct one, as in `{}(…)`", path.text())),
+                        );
+                        self.error_expr(span)
+                    }
+                    Some(Ok(NsItem::Reactor(_))) => {
+                        self.push(
+                            Diagnostic::new(
+                                span,
+                                format!("`{}` is a reactor, not a value", path.text()),
+                            )
+                            .note(format!(
+                                "create one with `spawn reactor {}(…)`",
+                                path.text()
+                            )),
+                        );
+                        self.error_expr(span)
+                    }
+                    _ => self.error_expr(span),
+                };
             }
             if path.segments.len() == 1 && self.ns[self.current].fns.contains_key(&head.name) {
                 self.push(
@@ -2815,15 +2980,29 @@ impl Checker {
         &mut self,
         id: EnumId,
         path: &ast::Path,
+        first: usize,
         expected: Option<&Ty>,
         span: Span,
     ) -> Expr {
-        let enum_name = &path.segments[0].name;
-        let variant_name = &path.segments[1].name;
-        let variant_span = path.segments[0].span.to(path.segments[1].span);
+        // `first` is the index of the enum-name segment: 0 for a local head, 1 behind a namespace
+        // — `fmt.Shape.Dot` resolves with the same code as `Shape.Dot`.
+        if path.segments.len() < first + 2 {
+            let written = path.text();
+            let example = self.enum_example(id);
+            self.push(
+                Diagnostic::new(span, format!("`{written}` is an enum"))
+                    .note(format!("name the variant, as in `{written}.{example}`")),
+            );
+            return self.error_expr(span);
+        }
+        let enum_name = &path.segments[first].name;
+        let variant_name = &path.segments[first + 1].name;
+        let variant_span = path.segments[0].span.to(path.segments[first + 1].span);
         let Some((index, variant)) = self.program.enums[id.index()].variant(variant_name) else {
             let message = format!("`{enum_name}` has no variant `{variant_name}`");
-            self.push(Diagnostic::new(path.segments[1].span, message).label("unknown variant"));
+            self.push(
+                Diagnostic::new(path.segments[first + 1].span, message).label("unknown variant"),
+            );
             return self.error_expr(span);
         };
         let fields: Vec<String> = if variant.positional {
@@ -2836,8 +3015,9 @@ impl Checker {
                 .collect()
         };
         // `Option.None` and friends build `Ty::Option`/`Ty::Result` values whose payload types
-        // come from the expectation, so they route through the builtin checkers.
-        if (id == EnumId::OPTION || id == EnumId::RESULT) && path.segments.len() == 2 {
+        // come from the expectation, so they route through the builtin checkers. They are seeded
+        // rather than declared, so no namespace can reach them: `first` is always 0 here.
+        if (id == EnumId::OPTION || id == EnumId::RESULT) && path.segments.len() == first + 2 {
             return if id == EnumId::OPTION {
                 self.check_option(path, &[], expected, span)
             } else {
@@ -2859,7 +3039,7 @@ impl Checker {
             return self.error_expr(span);
         }
         let mut expr = self.construct_variant(id, index, &[], Ty::Enum(id), variant_span);
-        for segment in &path.segments[2..] {
+        for segment in &path.segments[first + 2..] {
             expr = self.field_access(expr, segment, path.segments[0].span.to(segment.span));
         }
         expr
@@ -3255,6 +3435,14 @@ impl Checker {
         }
 
         if path.segments.len() != 1 {
+            // A local enum head has answered by now, so a namespace head cannot be shadowed by
+            // one — the two are disjoint by construction.
+            if self.ns[self.current]
+                .namespaces
+                .contains_key(&path.segments[0].name)
+            {
+                return self.check_ns_call(path, args, span);
+            }
             self.error(path.span, format!("unknown function `{}`", path.text()));
             return Expr {
                 kind: ExprKind::Error,
@@ -3279,16 +3467,7 @@ impl Checker {
                         return self.construct_struct(id, args, span);
                     }
                     TypeName::Enum(id) => {
-                        let example = self.program.enums[id.index()].variants.first().map_or_else(
-                            || "Variant".to_string(),
-                            |v| {
-                                if v.fields.is_empty() {
-                                    v.name.clone()
-                                } else {
-                                    format!("{}(…)", v.name)
-                                }
-                            },
-                        );
+                        let example = self.enum_example(*id);
                         self.push(
                             Diagnostic::new(path.span, format!("`{name}` is an enum"))
                                 .note(format!("name the variant, as in `{name}.{example}`")),
@@ -3308,14 +3487,18 @@ impl Checker {
             }
             return self.check_member_call(name, path.span, args, span);
         };
+        self.call_fn(id, &name.clone(), args, span)
+    }
+
+    /// The call itself, once the callee is a known function: argument matching, and the capability
+    /// check where the task is *built* — calling a `task fn` builds one, it does not run one,
+    /// which is why authority is asked here rather than at the `await`.
+    fn call_fn(&mut self, id: FnId, display: &str, args: &[ast::Arg], span: Span) -> Expr {
         let (params, ret) = self.signatures[id.index()].clone();
         let param_names: Vec<String> = params.iter().map(|(n, _)| n.clone()).collect();
-        let Some(order) = self.argument_order(&param_names, args, name, "parameter", span) else {
-            return Expr {
-                kind: ExprKind::Error,
-                ty: Ty::Error,
-                span,
-            };
+        let Some(order) = self.argument_order(&param_names, args, display, "parameter", span)
+        else {
+            return self.error_expr(span);
         };
 
         let mut checked = Vec::with_capacity(params.len());
@@ -3324,11 +3507,9 @@ impl Checker {
             checked.push(self.check_expr(&arg.value, Some(ty)));
         }
 
-        // Calling a `task fn` builds a task; it does not run one. That is why the capability check
-        // happens here rather than at the `await`.
         let ty = if self.program.fns[id.index()].is_task {
             let needs = self.program.fns[id.index()].uses.clone();
-            self.require_task_authority(name, &needs, span);
+            self.require_task_authority(display, &needs, span);
             Ty::Task(Box::new(ret))
         } else {
             ret
@@ -3341,6 +3522,66 @@ impl Checker {
             ty,
             span,
         }
+    }
+
+    /// A dotted call whose head is a namespace binding: `fmt.digits(2)`, `fmt.Config(width: 3)`,
+    /// `fmt.Shape.Dot(p)` — each the namespaced spelling of a call form that already exists.
+    fn check_ns_call(&mut self, path: &ast::Path, args: &[ast::Arg], span: Span) -> Expr {
+        let resolved = match self.resolve_ns(path) {
+            Some(Ok(item)) => item,
+            _ => return self.error_expr(span),
+        };
+        let written = path.text();
+        match (resolved, path.segments.len()) {
+            (NsItem::Fn(id), 2) => self.call_fn(id, &written, args, span),
+            (NsItem::Struct(id), 2) => self.construct_struct(id, args, span),
+            (NsItem::Enum(id), 2) => {
+                let example = self.enum_example(id);
+                self.push(
+                    Diagnostic::new(path.span, format!("`{written}` is an enum"))
+                        .note(format!("name the variant, as in `{written}.{example}`")),
+                );
+                self.error_expr(span)
+            }
+            (NsItem::Reactor(_), 2) => {
+                self.push(
+                    Diagnostic::new(path.span, format!("`{written}` is a reactor"))
+                        .label("not a function")
+                        .note(format!("create one with `spawn reactor {written}(…)`")),
+                );
+                self.error_expr(span)
+            }
+            (NsItem::Enum(id), 3) => {
+                let variant_name = &path.segments[2].name;
+                let Some((index, _)) = self.program.enums[id.index()].variant(variant_name) else {
+                    let head = format!("{}.{}", path.segments[0].name, path.segments[1].name);
+                    let message = format!("`{head}` has no variant `{variant_name}`");
+                    self.push(
+                        Diagnostic::new(path.segments[2].span, message).label("unknown variant"),
+                    );
+                    return self.error_expr(span);
+                };
+                self.construct_variant(id, index, args, Ty::Enum(id), span)
+            }
+            _ => {
+                self.error(path.span, format!("unknown function `{written}`"));
+                self.error_expr(span)
+            }
+        }
+    }
+
+    /// A representative variant spelling, for the "name the variant" teach.
+    fn enum_example(&self, id: EnumId) -> String {
+        self.program.enums[id.index()].variants.first().map_or_else(
+            || "Variant".to_string(),
+            |v| {
+                if v.fields.is_empty() {
+                    v.name.clone()
+                } else {
+                    format!("{}(…)", v.name)
+                }
+            },
+        )
     }
 
     /// A reactor member named in call position.
@@ -3565,7 +3806,33 @@ impl Checker {
             return self.error_expr(span);
         }
         let name = path.text();
-        let Some(&id) = self.ns[self.current].reactors.get(&name) else {
+        // One segment answers from this file's reactors — which is where a named import lands
+        // too; two reach through a namespace binding, export-checked like any other access.
+        let resolved = if path.segments.len() == 1 {
+            self.ns[self.current]
+                .reactors
+                .get(&path.segments[0].name)
+                .copied()
+        } else if path.segments.len() == 2
+            && self.ns[self.current]
+                .namespaces
+                .contains_key(&path.segments[0].name)
+        {
+            match self.resolve_ns(path) {
+                Some(Ok(NsItem::Reactor(id))) => Some(id),
+                Some(Ok(_)) => {
+                    self.push(
+                        Diagnostic::new(path.span, format!("`{name}` is not a reactor"))
+                            .label("not a reactor"),
+                    );
+                    return self.error_expr(span);
+                }
+                _ => return self.error_expr(span),
+            }
+        } else {
+            None
+        };
+        let Some(id) = resolved else {
             self.push(
                 Diagnostic::new(path.span, format!("unknown reactor `{name}`"))
                     .label("not a reactor"),
@@ -4463,83 +4730,112 @@ impl Checker {
                     };
                 };
                 let id = *id;
-                self.expect_pat_ty(&Ty::Struct(id), ty, span);
-                let strukt = &self.program.structs[id.index()];
-                let names: Vec<String> = strukt.fields.iter().map(|f| f.name.clone()).collect();
-                let types: Vec<Ty> = strukt.fields.iter().map(|f| f.ty.clone()).collect();
-                let Some(sub) = self.pat_args(&names, &types, args, rest, &name, span) else {
-                    return Pat {
-                        kind: PatKind::Error,
-                        span,
-                    };
-                };
-                Pat {
-                    kind: PatKind::Struct {
-                        strukt: id,
-                        args: sub,
-                    },
-                    span,
-                }
+                self.struct_pat(id, &name, args, rest, ty, span)
             }
             2 => {
                 let enum_name = path.segments[0].name.clone();
                 let variant_name = path.segments[1].name.clone();
-                let Some(TypeName::Enum(id)) = self.ns[self.current].types.get(&enum_name) else {
-                    self.error(path.segments[0].span, format!("unknown enum `{enum_name}`"));
-                    return Pat {
-                        kind: PatKind::Error,
+                if let Some(TypeName::Enum(id)) = self.ns[self.current].types.get(&enum_name) {
+                    let id = *id;
+                    // `Option.Some(x)` and friends: their scrutinees are `Ty::Option`/`Ty::Result`
+                    // rather than `Ty::Enum`, so they route through the builtin resolution once
+                    // the variant name is known to be real.
+                    if id == EnumId::OPTION || id == EnumId::RESULT {
+                        if self.program.enums[id.index()]
+                            .variant(&variant_name)
+                            .is_none()
+                        {
+                            let message = format!("`{enum_name}` has no variant `{variant_name}`");
+                            self.push(
+                                Diagnostic::new(path.segments[1].span, message)
+                                    .label("unknown variant"),
+                            );
+                            return Pat {
+                                kind: PatKind::Error,
+                                span,
+                            };
+                        }
+                        return self.builtin_variant_pat(&variant_name, args, rest, ty, span);
+                    }
+                    return self.variant_pat(
+                        id,
+                        &enum_name,
+                        &variant_name,
+                        path.segments[1].span,
+                        args,
+                        rest,
+                        ty,
                         span,
-                    };
-                };
-                let id = *id;
-                // `Option.Some(x)` and friends: their scrutinees are `Ty::Option`/`Ty::Result`
-                // rather than `Ty::Enum`, so they route through the builtin resolution once the
-                // variant name is known to be real.
-                if id == EnumId::OPTION || id == EnumId::RESULT {
-                    if self.program.enums[id.index()]
-                        .variant(&variant_name)
-                        .is_none()
-                    {
-                        let message = format!("`{enum_name}` has no variant `{variant_name}`");
-                        self.push(
-                            Diagnostic::new(path.segments[1].span, message)
-                                .label("unknown variant"),
-                        );
-                        return Pat {
+                    );
+                }
+                // `fmt.Config(width: w)` — an imported struct matched through its namespace.
+                if self.ns[self.current].namespaces.contains_key(&enum_name) {
+                    return match self.resolve_ns(path) {
+                        Some(Ok(NsItem::Struct(id))) => {
+                            self.struct_pat(id, &path.text(), args, rest, ty, span)
+                        }
+                        Some(Ok(NsItem::Enum(id))) => {
+                            let written = path.text();
+                            let example = self.enum_example(id);
+                            self.push(
+                                Diagnostic::new(span, format!("`{written}` is an enum"))
+                                    .note(format!("name the variant, as in `{written}.{example}`")),
+                            );
+                            Pat {
+                                kind: PatKind::Error,
+                                span,
+                            }
+                        }
+                        Some(Ok(_)) => {
+                            self.error(span, format!("unknown constructor `{}`", path.text()));
+                            Pat {
+                                kind: PatKind::Error,
+                                span,
+                            }
+                        }
+                        _ => Pat {
                             kind: PatKind::Error,
                             span,
-                        };
-                    }
-                    return self.builtin_variant_pat(&variant_name, args, rest, ty, span);
+                        },
+                    };
                 }
-                self.expect_pat_ty(&Ty::Enum(id), ty, span);
-                let Some((index, variant)) = self.program.enums[id.index()].variant(&variant_name)
-                else {
-                    let message = format!("`{enum_name}` has no variant `{variant_name}`");
-                    self.push(
-                        Diagnostic::new(path.segments[1].span, message).label("unknown variant"),
-                    );
-                    return Pat {
-                        kind: PatKind::Error,
-                        span,
-                    };
-                };
-                let names: Vec<String> = variant.fields.iter().map(|f| f.name.clone()).collect();
-                let types: Vec<Ty> = variant.fields.iter().map(|f| f.ty.clone()).collect();
-                let subject = format!("{enum_name}.{variant_name}");
-                let Some(sub) = self.pat_args(&names, &types, args, rest, &subject, span) else {
-                    return Pat {
-                        kind: PatKind::Error,
-                        span,
-                    };
-                };
+                self.error(path.segments[0].span, format!("unknown enum `{enum_name}`"));
                 Pat {
-                    kind: PatKind::Variant {
-                        enum_id: id,
-                        variant: index,
-                        args: sub,
-                    },
+                    kind: PatKind::Error,
                     span,
+                }
+            }
+            3 if self.ns[self.current]
+                .namespaces
+                .contains_key(&path.segments[0].name) =>
+            {
+                // `fmt.Shape.Dot(p)` — an imported enum's variant matched through its namespace.
+                match self.resolve_ns(path) {
+                    Some(Ok(NsItem::Enum(id))) => {
+                        let display =
+                            format!("{}.{}", path.segments[0].name, path.segments[1].name);
+                        self.variant_pat(
+                            id,
+                            &display,
+                            &path.segments[2].name.clone(),
+                            path.segments[2].span,
+                            args,
+                            rest,
+                            ty,
+                            span,
+                        )
+                    }
+                    Some(Ok(_)) => {
+                        self.error(span, format!("unknown constructor `{}`", path.text()));
+                        Pat {
+                            kind: PatKind::Error,
+                            span,
+                        }
+                    }
+                    _ => Pat {
+                        kind: PatKind::Error,
+                        span,
+                    },
                 }
             }
             _ => {
@@ -4549,6 +4845,78 @@ impl Checker {
                     span,
                 }
             }
+        }
+    }
+
+    /// A struct pattern, once the struct is resolved: `Config(width: w)`, spelled locally or
+    /// through a namespace.
+    fn struct_pat(
+        &mut self,
+        id: StructId,
+        display: &str,
+        args: &[ast::PatArg],
+        rest: bool,
+        ty: &Ty,
+        span: Span,
+    ) -> Pat {
+        self.expect_pat_ty(&Ty::Struct(id), ty, span);
+        let strukt = &self.program.structs[id.index()];
+        let names: Vec<String> = strukt.fields.iter().map(|f| f.name.clone()).collect();
+        let types: Vec<Ty> = strukt.fields.iter().map(|f| f.ty.clone()).collect();
+        let Some(sub) = self.pat_args(&names, &types, args, rest, display, span) else {
+            return Pat {
+                kind: PatKind::Error,
+                span,
+            };
+        };
+        Pat {
+            kind: PatKind::Struct {
+                strukt: id,
+                args: sub,
+            },
+            span,
+        }
+    }
+
+    /// A user enum's variant pattern, once the enum is resolved. Option and Result never arrive
+    /// here — their scrutinees carry their own `Ty` spellings and route through the builtin path.
+    #[allow(clippy::too_many_arguments)]
+    fn variant_pat(
+        &mut self,
+        id: EnumId,
+        enum_display: &str,
+        variant_name: &str,
+        variant_span: Span,
+        args: &[ast::PatArg],
+        rest: bool,
+        ty: &Ty,
+        span: Span,
+    ) -> Pat {
+        self.expect_pat_ty(&Ty::Enum(id), ty, span);
+        let Some((index, variant)) = self.program.enums[id.index()].variant(variant_name) else {
+            let message = format!("`{enum_display}` has no variant `{variant_name}`");
+            self.push(Diagnostic::new(variant_span, message).label("unknown variant"));
+            return Pat {
+                kind: PatKind::Error,
+                span,
+            };
+        };
+        let names: Vec<String> = variant.fields.iter().map(|f| f.name.clone()).collect();
+        let types: Vec<Ty> = variant.fields.iter().map(|f| f.ty.clone()).collect();
+        let subject = format!("{enum_display}.{variant_name}");
+        let Some(sub) = self.pat_args(&names, &types, args, rest, &subject, span) else {
+            return Pat {
+                kind: PatKind::Error,
+                span,
+            };
+        };
+        Pat {
+            kind: PatKind::Variant {
+                enum_id: id,
+                variant: index,
+                args: sub,
+            },
+            span,
         }
     }
 
