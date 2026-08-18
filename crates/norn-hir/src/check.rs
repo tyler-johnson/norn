@@ -98,7 +98,65 @@ fn is_builtin_variant(name: &str) -> bool {
     matches!(name, "None" | "Some" | "Ok" | "Err")
 }
 
+/// Why an import specifier could not be resolved to a module key.
+pub enum SpecifierError {
+    /// No leading `./` or `../`: the shape reserved for the standard library and packages.
+    Bare,
+    /// The specifier wrote the `.norn`, which is implied.
+    Extension,
+}
+
+/// Resolve an import specifier against the key of the importing module: dirname ⊕ specifier, with
+/// `.` and `..` folded lexically and `.norn` appended.
+///
+/// Shared by the checker and the loader so the two cannot disagree about which file a specifier
+/// names. Lexical means `./a/../fmt` and `./fmt` coincide; symlink aliasing is a documented v0 gap.
+pub fn resolve_specifier(importer_key: &str, specifier: &str) -> Result<String, SpecifierError> {
+    if specifier.ends_with(".norn") {
+        return Err(SpecifierError::Extension);
+    }
+    if !specifier.starts_with("./") && !specifier.starts_with("../") {
+        return Err(SpecifierError::Bare);
+    }
+    let mut parts: Vec<&str> = match importer_key.rsplit_once('/') {
+        Some((dir, _)) => dir.split('/').collect(),
+        None => Vec::new(),
+    };
+    for segment in specifier.split('/') {
+        match segment {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            segment => parts.push(segment),
+        }
+    }
+    Ok(format!("{}.norn", parts.join("/")))
+}
+
+/// What kind of thing a file declares under a name, read straight off the AST — the exports view
+/// an importing file resolves against, available before any checking has run.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum DeclKind {
+    Fn,
+    Struct,
+    Enum,
+    Reactor,
+}
+
+impl DeclKind {
+    fn describe(self) -> &'static str {
+        match self {
+            DeclKind::Fn => "function",
+            DeclKind::Struct => "struct",
+            DeclKind::Enum => "enum",
+            DeclKind::Reactor => "reactor",
+        }
+    }
+}
+
 /// What a name at the head of a path refers to.
+#[derive(Clone)]
 enum TypeName {
     Struct(StructId),
     Enum(EnumId),
@@ -198,6 +256,20 @@ struct Checker {
     /// are checked through this table rather than by looking the name back up, so a duplicate or a
     /// display-name prefix can never silently skip (or double-check) a body.
     fn_of_item: Vec<Vec<Option<FnId>>>,
+    /// The module identities the inputs arrived with: display names for diagnostics, keys for
+    /// specifier resolution, and the file stem each non-entry module prefixes display names with.
+    names: Vec<String>,
+    keys: Vec<String>,
+    stems: Vec<String>,
+    key_index: HashMap<String, usize>,
+    /// Per module, what it declares: name → (kind, exported). First declaration wins, matching
+    /// namespace insertion order.
+    decls: Vec<HashMap<String, (DeclKind, bool)>>,
+    /// Per module, per import declaration, the module its specifier resolved to.
+    import_target: Vec<Vec<Option<usize>>>,
+    /// Function imports that passed every check except having an id: bound after every module's
+    /// `declare_fns` has run. (module, local name, target module, source name, item span).
+    pending_fn_imports: Vec<(usize, String, usize, String, Span)>,
     /// Signatures, resolved before any body is checked so that functions may call one another
     /// regardless of declaration order.
     signatures: Vec<(Vec<(String, Ty)>, Ty)>,
@@ -312,6 +384,13 @@ impl Checker {
             fn_owner: Vec::new(),
             reactor_owner: Vec::new(),
             fn_of_item: (0..modules).map(|_| Vec::new()).collect(),
+            names: Vec::new(),
+            keys: Vec::new(),
+            stems: Vec::new(),
+            key_index: HashMap::new(),
+            decls: (0..modules).map(|_| HashMap::new()).collect(),
+            import_target: (0..modules).map(|_| Vec::new()).collect(),
+            pending_fn_imports: Vec::new(),
             signatures: Vec::new(),
             locals: Vec::new(),
             scopes: Vec::new(),
@@ -342,20 +421,28 @@ impl Checker {
     /// discovered in, and an import cycle is not an error: there are no module initialisers, so
     /// there is no order for a cycle to violate.
     fn run(&mut self, inputs: &[ModuleInput]) {
-        for (index, input) in inputs.iter().enumerate() {
-            self.current = index;
-            if let Some(decl) = input.module.imports.first() {
-                self.push(
-                    Diagnostic::new(decl.span, "`import` has nothing to resolve yet")
-                        .label("no module loader")
-                        .note("multi-file programs arrive with the loader; see BOOTSTRAP.md"),
-                );
-            }
+        self.names = inputs.iter().map(|input| input.name.clone()).collect();
+        self.keys = inputs.iter().map(|input| input.key.clone()).collect();
+        self.stems = inputs
+            .iter()
+            .map(|input| {
+                let base = input.name.rsplit('/').next().unwrap_or(&input.name);
+                base.strip_suffix(".norn").unwrap_or(base).to_string()
+            })
+            .collect();
+        for (index, key) in self.keys.iter().enumerate() {
+            self.key_index.entry(key.clone()).or_insert(index);
         }
 
+        self.each(inputs, Checker::collect_decls);
+        self.each(inputs, Checker::check_specifiers);
         self.each(inputs, Checker::declare_types);
+        // Type imports bind before types are defined, because a field may name an imported type;
+        // function imports cannot bind until every module's `declare_fns` has run.
+        self.each(inputs, Checker::bind_imports);
         self.each(inputs, Checker::define_types);
         self.each(inputs, Checker::declare_fns);
+        self.bind_fn_imports();
         // Reactors are declared, scanned, and checked between signatures and bodies, because a
         // `task fn` body may mention a reactor and a node body may call any function.
         self.each(inputs, Checker::declare_reactors);
@@ -382,6 +469,244 @@ impl Checker {
             self.current = index;
             phase(self, input.module);
         }
+    }
+
+    /// The display-name prefix a non-entry module's functions and reactors carry: "fmt.digits",
+    /// "fmt.Gate". The entry module stays unprefixed, so a one-file program reads as it always did.
+    fn qualified(&self, name: &str) -> String {
+        if self.current == 0 || self.stems[self.current].is_empty() {
+            name.to_string()
+        } else {
+            format!("{}.{name}", self.stems[self.current])
+        }
+    }
+
+    /// The exports view, straight off the AST: available before any checking has run, which is
+    /// what lets import binding know a name's kind before the name has an id.
+    fn collect_decls(&mut self, module: &ast::Module) {
+        let mut decls = HashMap::new();
+        for item in &module.items {
+            let (name, kind, exported) = match item {
+                ast::Item::Fn(decl) => (&decl.name, DeclKind::Fn, decl.exported),
+                ast::Item::Struct(decl) => (&decl.name, DeclKind::Struct, decl.exported),
+                ast::Item::Enum(decl) => (&decl.name, DeclKind::Enum, decl.exported),
+                ast::Item::Reactor(decl) => (&decl.name, DeclKind::Reactor, decl.exported),
+            };
+            decls
+                .entry(name.name.clone())
+                .or_insert((kind, exported.is_some()));
+        }
+        self.decls[self.current] = decls;
+    }
+
+    /// Resolve every import specifier to a module, or say why it does not name one. Path policy
+    /// lives here rather than in the parser so that `norn check` on disk and an in-memory test
+    /// agree about what a specifier means.
+    fn check_specifiers(&mut self, module: &ast::Module) {
+        let mut targets = Vec::with_capacity(module.imports.len());
+        for decl in &module.imports {
+            let span = decl.specifier_span;
+            let target = match resolve_specifier(&self.keys[self.current], &decl.specifier) {
+                Err(SpecifierError::Bare) => {
+                    self.push(
+                        Diagnostic::new(
+                            span,
+                            format!("`{}` is reserved for the standard library", decl.specifier),
+                        )
+                        .label("not a relative path")
+                        .note("a module is named by where its file is: `./fmt`, or `../util/strings`, relative to the importing file"),
+                    );
+                    None
+                }
+                Err(SpecifierError::Extension) => {
+                    let trimmed = decl.specifier.trim_end_matches(".norn");
+                    self.push(
+                        Diagnostic::new(span, "the `.norn` extension is implied")
+                            .label("spelled out here")
+                            .note(format!(
+                                "write `\"{trimmed}\"`; the file it names is still `{trimmed}.norn`"
+                            )),
+                    );
+                    None
+                }
+                Ok(key) if key == self.keys[self.current] => {
+                    self.push(
+                        Diagnostic::new(span, "a file cannot import itself")
+                            .label("this is the importing file"),
+                    );
+                    None
+                }
+                Ok(key) => match self.key_index.get(&key) {
+                    Some(&index) => Some(index),
+                    None => {
+                        self.push(
+                            Diagnostic::new(
+                                span,
+                                format!("cannot find module `{}`", decl.specifier),
+                            )
+                            .note(format!("expected a module at `{key}`")),
+                        );
+                        None
+                    }
+                },
+            };
+            targets.push(target);
+        }
+        self.import_target[self.current] = targets;
+    }
+
+    /// Bind what a module imports, and say everything that is wrong with its import list — each
+    /// bad item exactly once. Types and reactors bind here, before `define_types` needs them;
+    /// functions have no id yet, so the good ones go on a pending list for `bind_fn_imports`.
+    fn bind_imports(&mut self, module: &ast::Module) {
+        // Names this module's import list has already bound, so two imports of one name collide
+        // whichever forms or files they came from.
+        let mut claimed: HashMap<String, Span> = HashMap::new();
+        for (index, decl) in module.imports.iter().enumerate() {
+            let Some(target) = self.import_target[self.current][index] else {
+                continue;
+            };
+            match &decl.kind {
+                ast::ImportKind::Namespace(name) => {
+                    // A namespace binding may not collide with anything: keeping the namespace
+                    // disjoint from every other kind of name is what keeps resolution one rule.
+                    if let Some(what) = self.import_collision(&name.name, &claimed) {
+                        self.push(
+                            Diagnostic::new(
+                                name.span,
+                                format!("the imported name `{}` is already taken", name.name),
+                            )
+                            .label(what)
+                            .note("pick another name after `as`"),
+                        );
+                        continue;
+                    }
+                    claimed.insert(name.name.clone(), name.span);
+                    self.ns[self.current]
+                        .namespaces
+                        .insert(name.name.clone(), target);
+                }
+                ast::ImportKind::Named(items) => {
+                    for item in items {
+                        let source = &item.name.name;
+                        let local = item.alias.as_ref().unwrap_or(&item.name);
+                        let Some(&(kind, exported)) = self.decls[target].get(source) else {
+                            let file = self.names[target].clone();
+                            self.push(
+                                Diagnostic::new(
+                                    item.name.span,
+                                    format!("`{source}` is not defined in `{}`", decl.specifier),
+                                )
+                                .label("unknown name")
+                                .note(format!("{file} declares no `{source}`")),
+                            );
+                            continue;
+                        };
+                        if !exported {
+                            self.not_exported(source, &decl.specifier, target, item.name.span);
+                            continue;
+                        }
+                        if let Some(what) = self.import_collision(&local.name, &claimed) {
+                            self.push(
+                                Diagnostic::new(
+                                    item.span,
+                                    format!("the imported name `{}` is already taken", local.name),
+                                )
+                                .label(what)
+                                .note(format!(
+                                    "rename the import with `as`, as in `{source} as other`"
+                                )),
+                            );
+                            continue;
+                        }
+                        claimed.insert(local.name.clone(), item.span);
+                        match kind {
+                            DeclKind::Fn => self.pending_fn_imports.push((
+                                self.current,
+                                local.name.clone(),
+                                target,
+                                source.clone(),
+                                item.span,
+                            )),
+                            DeclKind::Struct | DeclKind::Enum | DeclKind::Reactor => {
+                                // The target's namespaces are populated: every module's
+                                // `declare_types` has run by the time any module binds.
+                                let Some(resolved) = self.ns[target].types.get(source).cloned()
+                                else {
+                                    // The target refused the declaration (a duplicate, say); it
+                                    // already has an error of its own.
+                                    continue;
+                                };
+                                if let TypeName::Reactor(id) = resolved {
+                                    // Mirror a local reactor, which lives in both namespaces.
+                                    self.ns[self.current]
+                                        .reactors
+                                        .insert(local.name.clone(), id);
+                                }
+                                self.ns[self.current]
+                                    .types
+                                    .insert(local.name.clone(), resolved);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// What an imported name would collide with, if anything.
+    fn import_collision(
+        &self,
+        local: &str,
+        claimed: &HashMap<String, Span>,
+    ) -> Option<&'static str> {
+        if is_builtin_variant(local) {
+            return Some("a built-in constructor");
+        }
+        if Builtin::from_name(local).is_some() {
+            return Some("a built-in function");
+        }
+        if claimed.contains_key(local) {
+            return Some("bound by an earlier import");
+        }
+        if self.ns[self.current].namespaces.contains_key(local) {
+            return Some("an imported module");
+        }
+        if self.decls[self.current].contains_key(local) {
+            return Some("declared in this file");
+        }
+        if self.ns[self.current].types.contains_key(local) {
+            return Some("a built-in type");
+        }
+        None
+    }
+
+    /// The second half of import binding: give each pending function import its id, now that
+    /// every module's `declare_fns` has run.
+    fn bind_fn_imports(&mut self) {
+        for (module, local, target, source, _span) in std::mem::take(&mut self.pending_fn_imports) {
+            // A missing entry means the target refused the declaration; it has its own error.
+            let Some(&id) = self.ns[target].fns.get(&source) else {
+                continue;
+            };
+            self.ns[module].fns.insert(local, id);
+        }
+    }
+
+    /// The shared privacy diagnostic: at an import item now, and at namespace accesses once those
+    /// resolve. `shown` is how the referring site spelled the module — a specifier or a bound name.
+    fn not_exported(&mut self, name: &str, shown: &str, target: usize, span: Span) {
+        let file = self.names[target].clone();
+        let kind = self.decls[target]
+            .get(name)
+            .map_or("declaration", |(kind, _)| kind.describe());
+        self.push(
+            Diagnostic::new(span, format!("`{name}` is not exported by `{shown}`"))
+                .label("private to its file")
+                .note(format!(
+                    "the {kind} is declared in {file}; write `export` before it to make it public"
+                )),
+        );
     }
 
     /// Pass six: what an affine value's single owner means for a body that has already typed.
@@ -518,7 +843,7 @@ impl Checker {
                     let id = ReactorId(self.program.reactors.len() as u32);
                     self.reactor_owner.push(self.current);
                     self.program.reactors.push(ReactorDef {
-                        name: decl.name.name.clone(),
+                        name: self.qualified(&decl.name.name),
                         params: Vec::new(),
                         uses: Vec::new(),
                         inputs: Vec::new(),
@@ -688,7 +1013,10 @@ impl Checker {
             self.ns[self.current].fns.insert(decl.name.name.clone(), id);
             self.signatures.push((params.clone(), ret.clone()));
             self.program.fns.push(FnDef {
-                name: decl.name.name.clone(),
+                // A non-entry module's functions display with their file's stem — "fmt.digits" —
+                // the way lifted reactor members already display dotted. Resolution still goes by
+                // the bare name; only what traps and traces print changes.
+                name: self.qualified(&decl.name.name),
                 is_task: decl.is_task,
                 uses,
                 params: params.len(),
@@ -826,6 +1154,9 @@ impl Checker {
     /// has not run yet.
     fn declare_reactors(&mut self, module: &ast::Module) {
         for (id, decl) in self.reactor_items(module) {
+            // Lifted member names hang off the reactor's display name, so a non-entry module's
+            // members compose to "fmt.Gate.on.opened". In-file diagnostics keep the written name.
+            let display = self.program.reactors[id.index()].name.clone();
             let uses = self.capabilities(&decl.uses);
             let mut params = Vec::new();
             let mut nodes: Vec<Node> = Vec::new();
@@ -901,10 +1232,8 @@ impl Checker {
                         let ty = self.reactor_ty(ty, "input", &name.name, member.span);
                         let capacity = self.capacity(&queue.capacity);
                         let overflow = self.overflow(&queue.overflow);
-                        let handler = self.declare_lifted(
-                            format!("{}.on.{}", decl.name.name, name.name),
-                            member.span,
-                        );
+                        let handler =
+                            self.declare_lifted(format!("{display}.on.{}", name.name), member.span);
                         inputs.push(InputDef {
                             name: name.name.clone(),
                             ty,
@@ -921,10 +1250,8 @@ impl Checker {
                         }
                         let ty = self.resolve_ty(ty);
                         let ty = self.reactor_ty(ty, "state cell", &name.name, member.span);
-                        let init = self.declare_lifted(
-                            format!("{}.{}.init", decl.name.name, name.name),
-                            member.span,
-                        );
+                        let init = self
+                            .declare_lifted(format!("{display}.{}.init", name.name), member.span);
                         let slot = slots.len();
                         slots.push(NodeId(nodes.len() as u32));
                         nodes.push(Node {
@@ -940,10 +1267,8 @@ impl Checker {
                         if !claim(self, &mut taken, name) {
                             continue;
                         }
-                        let body = self.declare_lifted(
-                            format!("{}.{}", decl.name.name, name.name),
-                            member.span,
-                        );
+                        let body =
+                            self.declare_lifted(format!("{display}.{}", name.name), member.span);
                         nodes.push(Node {
                             name: name.name.clone(),
                             kind: NodeKind::Signal { body },
@@ -1022,10 +1347,8 @@ impl Checker {
                         };
                         let capacity = self.capacity(&queue.capacity);
                         let overflow = self.overflow(&queue.overflow);
-                        let handler = self.declare_lifted(
-                            format!("{}.on.{}", decl.name.name, input.name),
-                            member.span,
-                        );
+                        let handler = self
+                            .declare_lifted(format!("{display}.on.{}", input.name), member.span);
                         inputs.push(InputDef {
                             name: input.name.clone(),
                             ty,

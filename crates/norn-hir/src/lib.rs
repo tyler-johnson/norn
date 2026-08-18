@@ -6,5 +6,7 @@
 pub mod check;
 pub mod hir;
 
-pub use check::{Checked, CheckedModules, ModuleInput, check, check_modules};
+pub use check::{
+    Checked, CheckedModules, ModuleInput, SpecifierError, check, check_modules, resolve_specifier,
+};
 pub use hir::{Program, Ty};
