@@ -33,9 +33,32 @@ impl Checked {
     }
 }
 
-pub fn check(module: &ast::Module) -> Checked {
-    let mut checker = Checker::new();
-    checker.run(module);
+/// One file handed to `check_modules`. `name` is what diagnostics print; `key` is the
+/// lexically-normalized resolution identity import specifiers resolve to.
+pub struct ModuleInput<'a> {
+    pub name: String,
+    pub key: String,
+    pub module: &'a ast::Module,
+}
+
+/// The checked program, with diagnostics attributed per module — `errors` is parallel to the
+/// inputs, because a `Span` carries no file identity and the caller has one `SourceFile` each.
+pub struct CheckedModules {
+    pub program: Program,
+    pub errors: Vec<Vec<Diagnostic>>,
+}
+
+impl CheckedModules {
+    pub fn ok(&self) -> bool {
+        self.errors.iter().all(|errors| errors.is_empty())
+    }
+}
+
+/// Check a program of one or more files. `inputs[0]` is the entry module: the one whose `main`
+/// counts, and the one whose declarations keep their unprefixed display names.
+pub fn check_modules(inputs: &[ModuleInput]) -> CheckedModules {
+    let mut checker = Checker::new(inputs.len());
+    checker.run(inputs);
     let Checker {
         program,
         mut errors,
@@ -43,8 +66,28 @@ pub fn check(module: &ast::Module) -> Checked {
     } = checker;
     // Report in source order rather than stage order, as the parser does: signatures are resolved
     // before any body is checked, and what that finds should not float to the top of the list.
-    errors.sort_by_key(|diagnostic| diagnostic.span.start);
-    Checked { program, errors }
+    for errors in &mut errors {
+        errors.sort_by_key(|diagnostic| diagnostic.span.start);
+    }
+    CheckedModules { program, errors }
+}
+
+/// Check a single module. A thin wrapper over `check_modules`, kept so a one-file program — and
+/// every in-memory test — stays a one-line call.
+pub fn check(module: &ast::Module) -> Checked {
+    let inputs = [ModuleInput {
+        name: String::new(),
+        key: String::new(),
+        module,
+    }];
+    let mut checked = check_modules(&inputs);
+    Checked {
+        program: checked.program,
+        errors: checked
+            .errors
+            .pop()
+            .expect("one module in, one error list out"),
+    }
 }
 
 /// The four constructor names that stay bare: resolved by the expected type in expressions and
@@ -118,12 +161,43 @@ impl Sort {
     }
 }
 
-struct Checker {
-    program: Program,
-    errors: Vec<Diagnostic>,
+/// One module's namespaces. Every name a file can mention resolves through its own `ModuleNs`;
+/// what another file declared only enters through an import binding.
+struct ModuleNs {
     types: HashMap<String, TypeName>,
     fns: HashMap<String, FnId>,
     reactors: HashMap<String, ReactorId>,
+    /// `import * as fmt` bindings: local name → module index.
+    namespaces: HashMap<String, usize>,
+}
+
+impl ModuleNs {
+    fn new() -> ModuleNs {
+        ModuleNs {
+            types: HashMap::new(),
+            fns: HashMap::new(),
+            reactors: HashMap::new(),
+            namespaces: HashMap::new(),
+        }
+    }
+}
+
+struct Checker {
+    program: Program,
+    /// Diagnostics per module, indexed the way the inputs were. Attribution matters because a
+    /// `Span` has no file identity: whoever renders these pairs each list with its own file.
+    errors: Vec<Vec<Diagnostic>>,
+    /// Per-module namespaces; `current` says whose file is being looked at.
+    ns: Vec<ModuleNs>,
+    current: usize,
+    /// Which module declared each function and reactor, parallel to `program.fns` and
+    /// `program.reactors` — how the global passes put a diagnostic in the right file's list.
+    fn_owner: Vec<usize>,
+    reactor_owner: Vec<usize>,
+    /// Per module, the `FnId` each item declared — `None` where declaration was refused. Bodies
+    /// are checked through this table rather than by looking the name back up, so a duplicate or a
+    /// display-name prefix can never silently skip (or double-check) a body.
+    fn_of_item: Vec<Vec<Option<FnId>>>,
     /// Signatures, resolved before any body is checked so that functions may call one another
     /// regardless of declaration order.
     signatures: Vec<(Vec<(String, Ty)>, Ty)>,
@@ -151,7 +225,7 @@ struct Checker {
 }
 
 impl Checker {
-    fn new() -> Checker {
+    fn new(modules: usize) -> Checker {
         // `Option` and `Result` are seeded as ordinary enums so that construction, matching, and
         // lowering treat them exactly like a user enum. Only their type arguments are special.
         let span = Span::new(0, 0);
@@ -232,10 +306,12 @@ impl Checker {
                 reactors: Vec::new(),
                 main: None,
             },
-            errors: Vec::new(),
-            types: HashMap::new(),
-            fns: HashMap::new(),
-            reactors: HashMap::new(),
+            errors: (0..modules).map(|_| Vec::new()).collect(),
+            ns: (0..modules).map(|_| ModuleNs::new()).collect(),
+            current: 0,
+            fn_owner: Vec::new(),
+            reactor_owner: Vec::new(),
+            fn_of_item: (0..modules).map(|_| Vec::new()).collect(),
             signatures: Vec::new(),
             locals: Vec::new(),
             scopes: Vec::new(),
@@ -252,35 +328,60 @@ impl Checker {
     }
 
     fn error(&mut self, span: Span, message: impl Into<String>) {
-        self.errors.push(Diagnostic::new(span, message));
+        self.errors[self.current].push(Diagnostic::new(span, message));
     }
 
     fn push(&mut self, diagnostic: Diagnostic) {
-        self.errors.push(diagnostic);
+        self.errors[self.current].push(diagnostic);
     }
 
     // ---------------------------------------------------------------- program
 
-    fn run(&mut self, module: &ast::Module) {
-        if let Some(decl) = module.imports.first() {
-            self.push(
-                Diagnostic::new(decl.span, "`import` has nothing to resolve yet")
-                    .label("no module loader")
-                    .note("multi-file programs arrive with the loader; see BOOTSTRAP.md"),
-            );
+    /// Every phase runs over every module before the next phase starts — all declares before all
+    /// defines before all bodies — so cross-file references resolve whatever order files were
+    /// discovered in, and an import cycle is not an error: there are no module initialisers, so
+    /// there is no order for a cycle to violate.
+    fn run(&mut self, inputs: &[ModuleInput]) {
+        for (index, input) in inputs.iter().enumerate() {
+            self.current = index;
+            if let Some(decl) = input.module.imports.first() {
+                self.push(
+                    Diagnostic::new(decl.span, "`import` has nothing to resolve yet")
+                        .label("no module loader")
+                        .note("multi-file programs arrive with the loader; see BOOTSTRAP.md"),
+                );
+            }
         }
 
-        self.declare_types(module);
-        self.define_types(module);
-        self.declare_fns(module);
+        self.each(inputs, Checker::declare_types);
+        self.each(inputs, Checker::define_types);
+        self.each(inputs, Checker::declare_fns);
         // Reactors are declared, scanned, and checked between signatures and bodies, because a
         // `task fn` body may mention a reactor and a node body may call any function.
-        self.declare_reactors(module);
-        let graphs = self.scan_reactors(module);
-        self.check_reactors(module, graphs);
-        self.check_fns(module);
+        self.each(inputs, Checker::declare_reactors);
+        let graphs: Vec<Vec<Wiring>> = inputs
+            .iter()
+            .enumerate()
+            .map(|(index, input)| {
+                self.current = index;
+                self.scan_reactors(input.module)
+            })
+            .collect();
+        for ((index, input), graphs) in inputs.iter().enumerate().zip(graphs) {
+            self.current = index;
+            self.check_reactors(input.module, graphs);
+        }
+        self.each(inputs, Checker::check_fns);
         self.check_turns();
         self.check_moves();
+    }
+
+    /// One phase, over every module in input order.
+    fn each(&mut self, inputs: &[ModuleInput], phase: fn(&mut Checker, &ast::Module)) {
+        for (index, input) in inputs.iter().enumerate() {
+            self.current = index;
+            phase(self, input.module);
+        }
     }
 
     /// Pass six: what an affine value's single owner means for a body that has already typed.
@@ -292,8 +393,8 @@ impl Checker {
     /// together. Recursion is the language's one cycle and it crosses a call boundary, where
     /// parameters are fresh.
     fn check_moves(&mut self) {
-        let mut errors = Vec::new();
-        for function in &self.program.fns {
+        let mut errors: Vec<(usize, Vec<Diagnostic>)> = Vec::new();
+        for (index, function) in self.program.fns.iter().enumerate() {
             let mut moves = Moves {
                 program: &self.program,
                 locals: &function.locals,
@@ -302,9 +403,11 @@ impl Checker {
                 errors: Vec::new(),
             };
             moves.value(&function.body);
-            errors.extend(moves.errors);
+            errors.push((self.fn_owner[index], moves.errors));
         }
-        self.errors.extend(errors);
+        for (owner, found) in errors {
+            self.errors[owner].extend(found);
+        }
     }
 
     /// The one diagnostic every purity rule shares. A turn is not a place where the world can
@@ -325,45 +428,55 @@ impl Checker {
     /// Pass one: every type name exists before any type is resolved, so declarations may refer to
     /// one another in any order.
     fn declare_types(&mut self, module: &ast::Module) {
-        self.types.insert("I64".into(), TypeName::Builtin(Ty::I64));
-        self.types.insert("F64".into(), TypeName::Builtin(Ty::F64));
-        self.types
+        self.ns[self.current]
+            .types
+            .insert("I64".into(), TypeName::Builtin(Ty::I64));
+        self.ns[self.current]
+            .types
+            .insert("F64".into(), TypeName::Builtin(Ty::F64));
+        self.ns[self.current]
+            .types
             .insert("Bool".into(), TypeName::Builtin(Ty::Bool));
-        self.types
+        self.ns[self.current]
+            .types
             .insert("String".into(), TypeName::Builtin(Ty::Str));
-        self.types
+        self.ns[self.current]
+            .types
             .insert("Bytes".into(), TypeName::Builtin(Ty::Bytes));
-        self.types.insert(
+        self.ns[self.current].types.insert(
             "Listener".into(),
             TypeName::Builtin(Ty::Resource(Resource::Listener)),
         );
-        self.types.insert(
+        self.ns[self.current].types.insert(
             "Connection".into(),
             TypeName::Builtin(Ty::Resource(Resource::Connection)),
         );
-        self.types.insert(
+        self.ns[self.current].types.insert(
             "File".into(),
             TypeName::Builtin(Ty::Resource(Resource::File)),
         );
-        self.types.insert(
+        self.ns[self.current].types.insert(
             "Request".into(),
             TypeName::Builtin(Ty::Resource(Resource::Request)),
         );
         // `Flow` is registered so that redeclaring it is an error, but `resolve_ty` intercepts the
         // name before this entry is consulted: the only writable spelling is `Flow<Bytes>`.
-        self.types.insert(
+        self.ns[self.current].types.insert(
             "Flow".into(),
             TypeName::Builtin(Ty::Resource(Resource::Flow)),
         );
-        self.types
+        self.ns[self.current]
+            .types
             .insert("IoError".into(), TypeName::Enum(EnumId::IO_ERROR));
         // `Option` and `Result` have their own `Ty` spellings and `resolve_ty` checks those
         // before consulting this map, so registering them changes nothing about types. What it
         // does is give the *value* namespace a head to resolve — `Option.None` is a variant
         // construction — and make `enum Option` a redeclaration rather than a shadow.
-        self.types
+        self.ns[self.current]
+            .types
             .insert("Option".into(), TypeName::Enum(EnumId::OPTION));
-        self.types
+        self.ns[self.current]
+            .types
             .insert("Result".into(), TypeName::Enum(EnumId::RESULT));
 
         for item in &module.items {
@@ -373,7 +486,7 @@ impl Checker {
                 ast::Item::Reactor(decl) => (&decl.name, decl.span),
                 ast::Item::Fn(_) => continue,
             };
-            if self.types.contains_key(&name.name) {
+            if self.ns[self.current].types.contains_key(&name.name) {
                 self.push(
                     Diagnostic::new(name.span, format!("`{}` is declared twice", name.name))
                         .label("duplicate type"),
@@ -403,6 +516,7 @@ impl Checker {
                 // its own name, and it names the thing rather than describing its shape.
                 ast::Item::Reactor(decl) => {
                     let id = ReactorId(self.program.reactors.len() as u32);
+                    self.reactor_owner.push(self.current);
                     self.program.reactors.push(ReactorDef {
                         name: decl.name.name.clone(),
                         params: Vec::new(),
@@ -414,12 +528,16 @@ impl Checker {
                         exports: Vec::new(),
                         span,
                     });
-                    self.reactors.insert(decl.name.name.clone(), id);
+                    self.ns[self.current]
+                        .reactors
+                        .insert(decl.name.name.clone(), id);
                     TypeName::Reactor(id)
                 }
                 ast::Item::Fn(_) => unreachable!(),
             };
-            self.types.insert(name.name.clone(), resolved);
+            self.ns[self.current]
+                .types
+                .insert(name.name.clone(), resolved);
         }
     }
 
@@ -428,7 +546,9 @@ impl Checker {
         for item in &module.items {
             match item {
                 ast::Item::Struct(decl) => {
-                    let Some(TypeName::Struct(id)) = self.types.get(&decl.name.name) else {
+                    let Some(TypeName::Struct(id)) =
+                        self.ns[self.current].types.get(&decl.name.name)
+                    else {
                         continue;
                     };
                     let id = *id;
@@ -451,7 +571,8 @@ impl Checker {
                     self.program.structs[id.index()].fields = fields;
                 }
                 ast::Item::Enum(decl) => {
-                    let Some(TypeName::Enum(id)) = self.types.get(&decl.name.name) else {
+                    let Some(TypeName::Enum(id)) = self.ns[self.current].types.get(&decl.name.name)
+                    else {
                         continue;
                     };
                     let id = *id;
@@ -498,7 +619,8 @@ impl Checker {
     }
 
     fn declare_fns(&mut self, module: &ast::Module) {
-        for item in &module.items {
+        let mut of_item: Vec<Option<FnId>> = vec![None; module.items.len()];
+        for (index, item) in module.items.iter().enumerate() {
             let ast::Item::Fn(decl) = item else { continue };
             if Builtin::from_name(&decl.name.name).is_some() {
                 self.push(
@@ -523,7 +645,7 @@ impl Checker {
             }
             // Construction is spelled like a call, so call position must be unambiguous: one
             // name cannot both build a value and call a function.
-            let clash = match self.types.get(&decl.name.name) {
+            let clash = match self.ns[self.current].types.get(&decl.name.name) {
                 Some(TypeName::Struct(_)) => Some("struct"),
                 Some(TypeName::Enum(_)) => Some("enum"),
                 Some(TypeName::Reactor(_)) => Some("reactor"),
@@ -543,7 +665,7 @@ impl Checker {
                 );
                 continue;
             }
-            if self.fns.contains_key(&decl.name.name) {
+            if self.ns[self.current].fns.contains_key(&decl.name.name) {
                 self.push(
                     Diagnostic::new(
                         decl.name.span,
@@ -561,7 +683,9 @@ impl Checker {
             let ret = decl.ret.as_ref().map_or(Ty::Unit, |ty| self.resolve_ty(ty));
             let uses = self.capabilities(&decl.uses);
             let id = FnId(self.program.fns.len() as u32);
-            self.fns.insert(decl.name.name.clone(), id);
+            of_item[index] = Some(id);
+            self.fn_owner.push(self.current);
+            self.ns[self.current].fns.insert(decl.name.name.clone(), id);
             self.signatures.push((params.clone(), ret.clone()));
             self.program.fns.push(FnDef {
                 name: decl.name.name.clone(),
@@ -577,10 +701,13 @@ impl Checker {
                 },
                 span: decl.span,
             });
-            if decl.name.name == "main" {
+            // Only the entry module's `main` is an entry point; an imported `main` is an ordinary
+            // function.
+            if decl.name.name == "main" && self.current == 0 {
                 self.program.main = Some(id);
             }
         }
+        self.fn_of_item[self.current] = of_item;
     }
 
     /// Resolve a `uses { … }` list. The vocabulary is closed, so an unknown name is an error that
@@ -610,14 +737,13 @@ impl Checker {
     }
 
     fn check_fns(&mut self, module: &ast::Module) {
-        for item in &module.items {
+        for (index, item) in module.items.iter().enumerate() {
             let ast::Item::Fn(decl) = item else { continue };
-            let Some(&id) = self.fns.get(&decl.name.name) else {
+            // Bodies pair with declarations by position, not by name: a display-name prefix or a
+            // duplicate must never silently skip a body or check one against the wrong signature.
+            let Some(id) = self.fn_of_item[self.current][index] else {
                 continue;
             };
-            if self.program.fns[id.index()].name != decl.name.name {
-                continue;
-            }
             if !decl.is_task && !decl.uses.is_empty() {
                 // The parser already rejects `uses` on a non-task function, so this is unreachable
                 // in practice; keeping it means the checker never silently ignores a capability.
@@ -656,7 +782,7 @@ impl Checker {
             let ast::Item::Reactor(decl) = item else {
                 continue;
             };
-            let Some(&id) = self.reactors.get(&decl.name.name) else {
+            let Some(&id) = self.ns[self.current].reactors.get(&decl.name.name) else {
                 continue;
             };
             if seen.contains(&id) {
@@ -676,6 +802,7 @@ impl Checker {
     /// because it *is* plain.
     fn declare_lifted(&mut self, name: String, span: Span) -> FnId {
         let id = FnId(self.program.fns.len() as u32);
+        self.fn_owner.push(self.current);
         self.signatures.push((Vec::new(), Ty::Error));
         self.program.fns.push(FnDef {
             name,
@@ -1046,8 +1173,8 @@ impl Checker {
                     // the same reason reading one is: there has been no turn.
                     for (found, span) in &scan.calls {
                         if Builtin::from_name(found).is_some()
-                            || self.fns.contains_key(found)
-                            || self.types.contains_key(found)
+                            || self.ns[self.current].fns.contains_key(found)
+                            || self.ns[self.current].types.contains_key(found)
                         {
                             continue;
                         }
@@ -1093,8 +1220,8 @@ impl Checker {
                     // moved the callee's value moved one of the arguments passed to it too.
                     for (found, _) in &scan.calls {
                         if Builtin::from_name(found).is_some()
-                            || self.fns.contains_key(found)
-                            || self.types.contains_key(found)
+                            || self.ns[self.current].fns.contains_key(found)
+                            || self.ns[self.current].types.contains_key(found)
                         {
                             continue;
                         }
@@ -1431,17 +1558,18 @@ impl Checker {
     ///
     /// This expires the day loops arrive, and should be replaced rather than extended when they do.
     fn check_turns(&mut self) {
-        let mut turn_fns: Vec<(FnId, Span)> = Vec::new();
-        for reactor in &self.program.reactors {
+        let mut turn_fns: Vec<(FnId, Span, usize)> = Vec::new();
+        for (index, reactor) in self.program.reactors.iter().enumerate() {
+            let owner = self.reactor_owner[index];
             for node in &reactor.nodes {
                 match node.kind {
                     NodeKind::Param { .. } => {}
-                    NodeKind::State { init, .. } => turn_fns.push((init, node.span)),
-                    NodeKind::Signal { body, .. } => turn_fns.push((body, node.span)),
+                    NodeKind::State { init, .. } => turn_fns.push((init, node.span, owner)),
+                    NodeKind::Signal { body, .. } => turn_fns.push((body, node.span, owner)),
                 }
             }
             for input in &reactor.inputs {
-                turn_fns.push((input.handler, input.span));
+                turn_fns.push((input.handler, input.span, owner));
             }
         }
         if turn_fns.is_empty() {
@@ -1465,7 +1593,10 @@ impl Checker {
             .map(|def| impure_builtin(&def.body))
             .collect();
 
-        for (function, span) in turn_fns {
+        for (function, span, owner) in turn_fns {
+            // The diagnostics land in the file that owns the reactor — the turn is what has to
+            // change, wherever the function it reaches was written.
+            self.current = owner;
             // Reported once per turn function even when several reachable functions are impure:
             // the first one is what has to change, and listing the rest is noise until it does.
             if let Some((culprit, builtin, at)) = reachable_impurity(&calls, &impurities, function)
@@ -1828,7 +1959,7 @@ impl Checker {
                     );
                     return Ty::Error;
                 }
-                match self.types.get(name) {
+                match self.ns[self.current].types.get(name) {
                     Some(TypeName::Builtin(ty)) => ty.clone(),
                     Some(TypeName::Struct(id)) => Ty::Struct(*id),
                     Some(TypeName::Enum(id)) => Ty::Enum(*id),
@@ -2318,12 +2449,12 @@ impl Checker {
             }
             // A dotted path whose head names an enum is a variant construction: `Shape.Empty`.
             if path.segments.len() >= 2
-                && let Some(TypeName::Enum(id)) = self.types.get(&head.name)
+                && let Some(TypeName::Enum(id)) = self.ns[self.current].types.get(&head.name)
             {
                 let id = *id;
                 return self.check_variant_path(id, path, expected, span);
             }
-            if path.segments.len() == 1 && self.fns.contains_key(&head.name) {
+            if path.segments.len() == 1 && self.ns[self.current].fns.contains_key(&head.name) {
                 self.push(
                     Diagnostic::new(span, "functions are not values yet")
                         .label(format!("`{}` can only be called", head.name))
@@ -2780,7 +2911,8 @@ impl Checker {
 
         // `Enum.Variant(…)` is a construction spelled like a call, which is what it is.
         if path.segments.len() == 2
-            && let Some(TypeName::Enum(id)) = self.types.get(&path.segments[0].name)
+            && let Some(TypeName::Enum(id)) =
+                self.ns[self.current].types.get(&path.segments[0].name)
         {
             let id = *id;
             let Some((index, _)) = self.program.enums[id.index()].variant(name) else {
@@ -2812,12 +2944,12 @@ impl Checker {
             return self.check_builtin(builtin, args, span);
         }
 
-        let Some(&id) = self.fns.get(name) else {
+        let Some(&id) = self.ns[self.current].fns.get(name) else {
             // Construction is spelled like a call; resolution is what tells the two apart. A
             // struct name builds the struct, and the type namespace answers before the reactor
             // member fallback does — matching the scan in `reactor_graph`, which skips type
             // names for the same reason.
-            if let Some(kind) = self.types.get(name) {
+            if let Some(kind) = self.ns[self.current].types.get(name) {
                 match kind {
                     TypeName::Struct(id) => {
                         let id = *id;
@@ -3110,7 +3242,7 @@ impl Checker {
             return self.error_expr(span);
         }
         let name = path.text();
-        let Some(&id) = self.reactors.get(&name) else {
+        let Some(&id) = self.ns[self.current].reactors.get(&name) else {
             self.push(
                 Diagnostic::new(path.span, format!("unknown reactor `{name}`"))
                     .label("not a reactor"),
@@ -4000,7 +4132,7 @@ impl Checker {
         match path.segments.len() {
             1 => {
                 let name = path.last().name.clone();
-                let Some(TypeName::Struct(id)) = self.types.get(&name) else {
+                let Some(TypeName::Struct(id)) = self.ns[self.current].types.get(&name) else {
                     self.error(span, format!("unknown struct `{name}`"));
                     return Pat {
                         kind: PatKind::Error,
@@ -4029,7 +4161,7 @@ impl Checker {
             2 => {
                 let enum_name = path.segments[0].name.clone();
                 let variant_name = path.segments[1].name.clone();
-                let Some(TypeName::Enum(id)) = self.types.get(&enum_name) else {
+                let Some(TypeName::Enum(id)) = self.ns[self.current].types.get(&enum_name) else {
                     self.error(path.segments[0].span, format!("unknown enum `{enum_name}`"));
                     return Pat {
                         kind: PatKind::Error,
