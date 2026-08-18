@@ -119,6 +119,15 @@ fn the_file_server_streams_both_ways_and_cancellation_closes_everything() {
         "unexpected response for a missing file: {head}"
     );
 
+    // `..` traversal is refused before the method is dispatched.
+    let traversal = exchange(port, b"GET /../upload.bin HTTP/1.1\r\n\r\n");
+    let (head, body) = split_response(&traversal);
+    assert!(
+        head.starts_with("HTTP/1.1 400 Bad Request\r\n"),
+        "a `..` path was not refused: {head}"
+    );
+    assert_eq!(body, b"bad path\n", "unexpected 400 body");
+
     // The cancellation claim: promise a long body, deliver a sliver, and hold the socket open
     // through the server's shutdown. The handler is parked on the body flow when the scope
     // closes, and the close lines for its request, flow, and file must appear all the same.

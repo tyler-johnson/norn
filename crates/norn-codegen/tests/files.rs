@@ -78,6 +78,15 @@ fn the_native_file_server_streams_both_ways_and_cancellation_closes_everything()
         "unexpected response for a missing file: {head}"
     );
 
+    // `..` traversal is refused before the method is dispatched.
+    let traversal = exchange(port, b"GET /../upload.bin HTTP/1.1\r\n\r\n");
+    let (head, body) = split_response(&traversal);
+    assert!(
+        head.starts_with("HTTP/1.1 400 Bad Request\r\n"),
+        "a `..` path was not refused: {head}"
+    );
+    assert_eq!(body, b"bad path\n", "unexpected 400 body");
+
     // The cancellation claim, exactly as in the interpreter test: a long-promised body, a sliver
     // delivered, and the socket held open through the server's shutdown.
     let mut abandoned = TcpStream::connect(("127.0.0.1", port)).unwrap();

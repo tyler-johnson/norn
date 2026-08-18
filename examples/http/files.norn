@@ -10,8 +10,8 @@
 // handler's scope closes, and the request socket is closed by the scope rather than by code —
 // the client sees the connection drop, which is what an unhandled server error is.
 //
-// The path is used as it came, prefixed with `.`: v0 has no substring builtins, so `..` traversal
-// is not guarded here. A real server wants that guard; this example wants to stay readable.
+// The path is prefixed with `.` and guarded: `has_dotdot` walks the path's bytes with `data[i]`,
+// and a request that tries `..` traversal is answered 400 before the method is dispatched.
 
 task fn upload(req: Request) -> Result<(), IoError>
     uses { net.io, fs.write }
@@ -35,6 +35,9 @@ task fn download(req: Request) -> Result<(), IoError>
 task fn route(req: Request) -> Result<(), IoError>
     uses { net.io, fs.read, fs.write }
 {
+    if has_dotdot(request_path(&req)) {
+        return await http_respond(req, 400, "bad path\n")
+    }
     match request_method(&req) {
         "PUT" => await upload(req)
         "GET" => await download(req)
@@ -78,6 +81,20 @@ task fn main() -> Result<(), IoError>
         await sleep(500)
     }
     Ok(())
+}
+
+// `..` anywhere in the path, byte for byte: 46 is `.`. Written on the byte primitives —
+// `bytes`, `bytes_len`, `data[i]` — because v0 has no substring search.
+fn has_dotdot(path: String) -> Bool {
+    let data = bytes(path)
+    let mut i = 0
+    while i + 1 < bytes_len(data) {
+        if data[i] == 46 && data[i + 1] == 46 {
+            return true
+        }
+        i = i + 1
+    }
+    false
 }
 
 fn digits(n: I64) -> String {
