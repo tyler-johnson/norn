@@ -59,6 +59,13 @@ fn traps_match() {
             "fn main() -> () {\n    let cut = bytes_slice(bytes(\"abc\"), 1, 9)\n    print(cut)\n}\n",
         ),
         (
+            // A slice of a slice: the backend's view composes offsets, and the trap must
+            // interpolate the view's length — the one input that distinguishes it from the
+            // backing buffer's (11).
+            "bytes-slice-of-slice-range",
+            "fn main() -> () {\n    let inner = bytes_slice(bytes(\"abcdef\"), 2, 5)\n    print(bytes_slice(inner, 1, 9))\n}\n",
+        ),
+        (
             "byte-index-range",
             "fn main() -> () {\n    let data = bytes(\"abc\")\n    print(data[9])\n}\n",
         ),

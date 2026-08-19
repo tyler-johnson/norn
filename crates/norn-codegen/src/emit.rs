@@ -603,8 +603,8 @@ impl Emitter<'_> {
             // Binding does not block, so this answers at once either way.
             Builtin::TcpListen => ready_fallible("cx.listen(*a0)", "id", "id"),
             Builtin::TcpAccept => pending_fallible("cx.accept(*a0)", "id", "id"),
-            Builtin::TcpRead => pending_fallible("cx.read(*a0)", "data", "Rc::from(data)"),
-            Builtin::TcpWrite => pending_fallible("cx.write(*a0, a1)", "()", "()"),
+            Builtin::TcpRead => pending_fallible("cx.read(*a0)", "data", "Bytes::from_vec(data)"),
+            Builtin::TcpWrite => pending_fallible("cx.write(*a0, a1.as_slice())", "()", "()"),
             Builtin::TcpClose | Builtin::FileClose | Builtin::FlowClose => vec![format!(
                 "TaskVal::B{builtin:?}(a0) => {{ cx.close(*a0); Poll::Ready(Value::Unit) }}"
             )],
@@ -613,12 +613,14 @@ impl Emitter<'_> {
             Builtin::FileCreate => ready_fallible("cx.file_create(a0)", "id", "id"),
             Builtin::FileWrite => {
                 vec![format!(
-                    "TaskVal::BFileWrite(a0, a1) => {{ let outcome = cx.file_write(*a0, a1); Poll::Ready({}) }}",
+                    "TaskVal::BFileWrite(a0, a1) => {{ let outcome = cx.file_write(*a0, a1.as_slice()); Poll::Ready({}) }}",
                     self.fallible_expr(builtin, "()", "()")
                 )]
             }
             Builtin::FlowOfFile => ready_fallible("cx.flow_of_file(a0)", "id", "id"),
-            Builtin::FlowNext => pending_fallible("cx.flow_next(*a0)", "chunk", "Rc::from(chunk)"),
+            Builtin::FlowNext => {
+                pending_fallible("cx.flow_next(*a0)", "chunk", "Bytes::from_vec(chunk)")
+            }
             Builtin::Send => vec![
                 "TaskVal::BSend(a0, a1) => match cx.send(a0.0, a0.1, a1.clone()) {".into(),
                 "    Poll::Ready(()) => Poll::Ready(Value::Unit),".into(),
@@ -1169,8 +1171,8 @@ impl Emitter<'_> {
                 other => panic!("concat on {other:?} survived checking"),
             },
             // Eq reaches runtime only on the five comparable scalars, where the representations'
-            // own equality is content equality (`Rc<str>`/`Rc<[u8]>` compare contents, and
-            // NaN != NaN falls out of f64).
+            // own equality is content equality (`Rc<str>` compares contents, the byte view's
+            // manual `PartialEq` compares slices, and NaN != NaN falls out of f64).
             BinOp::Eq | BinOp::Ne => {
                 let ty = self.operand_ty(function, lhs);
                 assert!(
@@ -1244,7 +1246,7 @@ impl Emitter<'_> {
                     ctx.cx_stmt("latest")
                 )
             }
-            Builtin::Bytes => format!("Rc::<[u8]>::from(({}).as_bytes())", arg(0)),
+            Builtin::Bytes => format!("Bytes::from_slice(({}).as_bytes())", arg(0)),
             Builtin::BytesLen => format!("(({}).len() as i64)", arg(0)),
             Builtin::BytesSlice => {
                 format!("bytes_slice({}, {}, {}, {fname})?", arg(0), arg(1), arg(2))

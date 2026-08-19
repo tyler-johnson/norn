@@ -507,8 +507,10 @@ impl Interpreter<'_> {
                         format!("`bytes_slice` out of range: {start}..{end} of {len}"),
                     ));
                 }
-                // A slice copies in v0: a clone-everything engine cannot make zero-copy
-                // observable, so the cheap representation waits for typed layout (§8).
+                // A slice copies here, deliberately: the typed backend slices as an O(1) view
+                // (§8 item 6b), and this engine is the reference — the divergence is
+                // unobservable because every trap interpolates computed numbers and a bytes
+                // value renders as its length.
                 Value::Bytes(data[start as usize..end as usize].into())
             }
             Builtin::Byte => {

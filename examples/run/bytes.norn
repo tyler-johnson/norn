@@ -2,7 +2,8 @@
 //
 // There is no bytes literal — data arrives from I/O, from `bytes(s)`, which is a string's UTF-8,
 // or is built up from `byte(n)` joined with `+`.
-// A slice copies in v0 (the clone-everything engines cannot make zero-copy observable), decoding
+// A slice is an O(1) view natively and a deliberate copy in the reference interpreter — the
+// difference is unobservable. Decoding
 // back to text is fallible because not every octet sequence is UTF-8 — and that decoding is
 // `std/bytes`'s `to_string`, the first builtin dissolved into std: the validator is ordinary
 // Norn over `data[i]`, with only the trusting `text_unchecked` beneath it. Printing a bytes

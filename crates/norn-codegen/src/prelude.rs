@@ -172,7 +172,63 @@ fn str_concat(a: Rc<str>, b: Rc<str>) -> Rc<str> {
 
 // ---------------------------------------------------------------- bytes
 
-fn bytes_slice(data: Rc<[u8]>, start: i64, end: i64, func: &str) -> Result<Rc<[u8]>, Trap> {
+// A byte view (BOOTSTRAP §8 item 6b): a shared buffer and the window this value sees of it.
+// Slicing is O(1) — offsets compose on the same buffer — and only `+` allocates. A small view
+// keeps its whole buffer alive; v0 accepts that. Everything observable goes through `as_slice`,
+// so a view and the interpreter's copied `Rc<[u8]>` agree on every byte: length, contents,
+// equality, ordering, UTF-8 error offsets. The interpreter copies deliberately — it is the
+// reference implementation, and the divergence is unobservable. Equality and ordering are by
+// content, never by buffer identity: a derived `PartialEq` would compare pointers and offsets,
+// and `bytes("") == bytes_slice(data, 4, 4)` must stay true across different buffers.
+#[derive(Clone)]
+pub struct Bytes {
+    buf: Rc<[u8]>,
+    start: usize,
+    len: usize,
+}
+
+impl Bytes {
+    fn from_vec(data: Vec<u8>) -> Bytes {
+        let len = data.len();
+        Bytes {
+            buf: data.into(),
+            start: 0,
+            len,
+        }
+    }
+
+    fn from_slice(data: &[u8]) -> Bytes {
+        Bytes {
+            buf: data.into(),
+            start: 0,
+            len: data.len(),
+        }
+    }
+
+    fn as_slice(&self) -> &[u8] {
+        &self.buf[self.start..self.start + self.len]
+    }
+
+    // The view's length, never the buffer's: every observable byte count — `bytes_len`, the
+    // range traps, `<bytes N>` — is the window.
+    fn len(&self) -> usize {
+        self.len
+    }
+}
+
+impl PartialEq for Bytes {
+    fn eq(&self, other: &Bytes) -> bool {
+        self.as_slice() == other.as_slice()
+    }
+}
+
+impl PartialOrd for Bytes {
+    fn partial_cmp(&self, other: &Bytes) -> Option<std::cmp::Ordering> {
+        self.as_slice().partial_cmp(other.as_slice())
+    }
+}
+
+fn bytes_slice(data: Bytes, start: i64, end: i64, func: &str) -> Result<Bytes, Trap> {
     let len = data.len() as i64;
     if start < 0 || end < start || end > len {
         return Err(Trap::new(
@@ -180,25 +236,30 @@ fn bytes_slice(data: Rc<[u8]>, start: i64, end: i64, func: &str) -> Result<Rc<[u
             func,
         ));
     }
-    // A slice copies in v0, deliberately matching the interpreter; the cheap representation is
-    // 6b's Bytes views.
-    Ok(data[start as usize..end as usize].into())
+    Ok(Bytes {
+        buf: data.buf,
+        start: data.start + start as usize,
+        len: (end - start) as usize,
+    })
 }
 
-fn byte(value: i64, func: &str) -> Result<Rc<[u8]>, Trap> {
+fn byte(value: i64, func: &str) -> Result<Bytes, Trap> {
     if value < 0 || value > 255 {
         return Err(Trap::new(format!("`byte` out of range: {value}"), func));
     }
-    Ok([value as u8].into())
+    Ok(Bytes::from_slice(&[value as u8]))
 }
 
-fn bytes_concat(a: Rc<[u8]>, b: Rc<[u8]>) -> Rc<[u8]> {
+fn bytes_concat(a: Bytes, b: Bytes) -> Bytes {
     // `+` on Bytes lowers here. Concatenation allocates a fresh buffer, deliberately matching
     // the interpreter — that is the operator's honest cost, permanently.
-    [&a[..], &b[..]].concat().into()
+    let mut out = Vec::with_capacity(a.len + b.len);
+    out.extend_from_slice(a.as_slice());
+    out.extend_from_slice(b.as_slice());
+    Bytes::from_vec(out)
 }
 
-fn bytes_at(data: Rc<[u8]>, index: i64, func: &str) -> Result<i64, Trap> {
+fn bytes_at(data: Bytes, index: i64, func: &str) -> Result<i64, Trap> {
     let len = data.len() as i64;
     if index < 0 || index >= len {
         return Err(Trap::new(
@@ -206,11 +267,11 @@ fn bytes_at(data: Rc<[u8]>, index: i64, func: &str) -> Result<i64, Trap> {
             func,
         ));
     }
-    Ok(data[index as usize] as i64)
+    Ok(data.as_slice()[index as usize] as i64)
 }
 
-fn text_unchecked(data: Rc<[u8]>, func: &str) -> Result<Rc<str>, Trap> {
-    match std::str::from_utf8(&data) {
+fn text_unchecked(data: Bytes, func: &str) -> Result<Rc<str>, Trap> {
+    match std::str::from_utf8(data.as_slice()) {
         Ok(text) => Ok(text.into()),
         Err(err) => Err(Trap::new(
             format!(

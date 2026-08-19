@@ -183,7 +183,8 @@ impl<'p> Registry<'p> {
             Ty::F64 => "f64".into(),
             Ty::Bool => "bool".into(),
             Ty::Str => "Rc<str>".into(),
-            Ty::Bytes => "Rc<[u8]>".into(),
+            // The prelude's byte view — buffer, offset, length — so `bytes_slice` is O(1).
+            Ty::Bytes => "Bytes".into(),
             Ty::Struct(id) => format!("S{}", id.index()),
             Ty::Enum(id) => format!("E{}", id.index()),
             Ty::Option(_) | Ty::Result(..) => format!("E{}", self.synthetic_id(ty)),
@@ -355,7 +356,7 @@ impl<'p> Registry<'p> {
         let _ = writeln!(out, "    Float(f64),");
         let _ = writeln!(out, "    Bool(bool),");
         let _ = writeln!(out, "    Str(Rc<str>),");
-        let _ = writeln!(out, "    Bytes(Rc<[u8]>),");
+        let _ = writeln!(out, "    Bytes(Bytes),");
         let _ = writeln!(out, "    Task(Rc<TaskVal>),");
         let _ = writeln!(out, "    Resource(ResourceKind, ResourceId),");
         let _ = writeln!(out, "    Reactor(ReactorId),");
@@ -388,13 +389,7 @@ impl<'p> Registry<'p> {
         pair("f64", "f64", "Value::Float(v)", "Value::Float(v)", "v");
         pair("bool", "bool", "Value::Bool(v)", "Value::Bool(v)", "v");
         pair("str", "Rc<str>", "Value::Str(v)", "Value::Str(v)", "v");
-        pair(
-            "bytes",
-            "Rc<[u8]>",
-            "Value::Bytes(v)",
-            "Value::Bytes(v)",
-            "v",
-        );
+        pair("bytes", "Bytes", "Value::Bytes(v)", "Value::Bytes(v)", "v");
         pair(
             "task",
             "Rc<TaskVal>",
