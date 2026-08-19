@@ -703,7 +703,6 @@ pub enum Builtin {
     Bytes,
     BytesLen,
     BytesSlice,
-    BytesText,
     /// The trusting half of bytes→text: traps on invalid UTF-8 rather than returning `Option`.
     /// The checked half is `std/bytes`'s `to_string`, a validator written in Norn — this is the
     /// intrinsic it stands on, the first `_unchecked` name in the table.
@@ -746,7 +745,6 @@ impl Builtin {
         Builtin::Bytes,
         Builtin::BytesLen,
         Builtin::BytesSlice,
-        Builtin::BytesText,
         Builtin::TextUnchecked,
         Builtin::Byte,
         Builtin::BytesConcat,
@@ -778,7 +776,6 @@ impl Builtin {
             "bytes" => Some(Builtin::Bytes),
             "bytes_len" => Some(Builtin::BytesLen),
             "bytes_slice" => Some(Builtin::BytesSlice),
-            "bytes_text" => Some(Builtin::BytesText),
             "text_unchecked" => Some(Builtin::TextUnchecked),
             "byte" => Some(Builtin::Byte),
             "bytes_concat" => Some(Builtin::BytesConcat),
@@ -812,7 +809,6 @@ impl Builtin {
             Builtin::Bytes => "bytes",
             Builtin::BytesLen => "bytes_len",
             Builtin::BytesSlice => "bytes_slice",
-            Builtin::BytesText => "bytes_text",
             Builtin::TextUnchecked => "text_unchecked",
             Builtin::Byte => "byte",
             Builtin::BytesConcat => "bytes_concat",
@@ -843,7 +839,6 @@ impl Builtin {
             | Builtin::Bytes
             | Builtin::BytesLen
             | Builtin::BytesSlice
-            | Builtin::BytesText
             | Builtin::TextUnchecked
             | Builtin::Byte
             | Builtin::BytesConcat
@@ -887,7 +882,6 @@ impl Builtin {
             | Builtin::Bytes
             | Builtin::BytesLen
             | Builtin::BytesSlice
-            | Builtin::BytesText
             | Builtin::TextUnchecked
             | Builtin::Byte
             | Builtin::BytesConcat
@@ -945,7 +939,6 @@ impl Builtin {
             Builtin::Bytes => (vec![Ty::Str], Ty::Bytes),
             Builtin::BytesLen => (vec![Ty::Bytes], Ty::I64),
             Builtin::BytesSlice => (vec![Ty::Bytes, Ty::I64, Ty::I64], Ty::Bytes),
-            Builtin::BytesText => (vec![Ty::Bytes], Ty::Option(Box::new(Ty::Str))),
             Builtin::TextUnchecked => (vec![Ty::Bytes], Ty::Str),
             Builtin::Byte => (vec![Ty::I64], Ty::Bytes),
             Builtin::BytesConcat => (vec![Ty::Bytes, Ty::Bytes], Ty::Bytes),

@@ -571,19 +571,6 @@ impl Interpreter<'_> {
                 }
                 Value::Int(data[index as usize] as i64)
             }
-            Builtin::BytesText => {
-                let data = blob("bytes_text", &args[0])?;
-                match std::str::from_utf8(&data) {
-                    Ok(text) => Value::Variant(
-                        EnumId::OPTION.index(),
-                        EnumId::SOME,
-                        Rc::new(vec![Value::Str(text.into())]),
-                    ),
-                    Err(_) => {
-                        Value::Variant(EnumId::OPTION.index(), EnumId::NONE, Rc::new(Vec::new()))
-                    }
-                }
-            }
             Builtin::TextUnchecked => {
                 let data = blob("text_unchecked", &args[0])?;
                 match std::str::from_utf8(&data) {

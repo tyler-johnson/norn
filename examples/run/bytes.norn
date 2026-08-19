@@ -3,8 +3,12 @@
 // There is no bytes literal — data arrives from I/O, from `bytes(s)`, which is a string's UTF-8,
 // or is built up from `byte(n)` and `bytes_concat(a, b)`.
 // A slice copies in v0 (the clone-everything engines cannot make zero-copy observable), decoding
-// back to text is fallible because not every octet sequence is UTF-8, and printing a bytes value
-// shows its length rather than inventing an escape syntax for its contents.
+// back to text is fallible because not every octet sequence is UTF-8 — and that decoding is
+// `std/bytes`'s `to_string`, the first builtin dissolved into std: the validator is ordinary
+// Norn over `data[i]`, with only the trusting `text_unchecked` beneath it. Printing a bytes
+// value shows its length rather than inventing an escape syntax for its contents.
+
+import { to_string } from "std/bytes"
 
 fn main() -> () {
     let data = bytes("hello, norn")
@@ -12,16 +16,27 @@ fn main() -> () {
     print(bytes_len(data))
 
     let head = bytes_slice(data, 0, 5)
-    match bytes_text(head) {
+    match to_string(head) {
         Some(text) => print(text)
         None => print("not text")
     }
 
     // Slicing through the middle of a multi-byte character is not text any more.
     let snowman = bytes("☃")
-    match bytes_text(bytes_slice(snowman, 0, 1)) {
+    match to_string(bytes_slice(snowman, 0, 1)) {
         Some(text) => print(text)
         None => print("a torn character is not text")
+    }
+
+    // Well-formedness is more than complete sequences: an overlong spelling of NUL and half a
+    // surrogate pair are the subtle refusals, the shapes a length check alone would miss.
+    match to_string(bytes_concat(byte(192), byte(128))) {
+        Some(text) => print(text)
+        None => print("an overlong encoding is not text")
+    }
+    match to_string(bytes_concat(bytes_concat(byte(237), byte(160)), byte(128))) {
+        Some(text) => print(text)
+        None => print("a surrogate half is not text")
     }
 
     // `data[i]` reads one octet as an I64. Out of range traps, like `bytes_slice`.
@@ -40,7 +55,7 @@ fn main() -> () {
     // Building: `byte` is one octet — it traps outside 0..255 — and `bytes_concat` joins two
     // buffers.
     print(byte(110) == bytes("n"))
-    match bytes_text(bytes_concat(bytes("hello, "), bytes("norn"))) {
+    match to_string(bytes_concat(bytes("hello, "), bytes("norn"))) {
         Some(text) => print(text)
         None => print("not text")
     }

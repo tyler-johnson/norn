@@ -133,7 +133,6 @@ pub enum Builtin {
     Bytes,
     BytesLen,
     BytesSlice,
-    BytesText,
     TextUnchecked,
     Byte,
     BytesConcat,
@@ -167,7 +166,6 @@ impl Builtin {
             Builtin::Bytes => "bytes",
             Builtin::BytesLen => "bytes_len",
             Builtin::BytesSlice => "bytes_slice",
-            Builtin::BytesText => "bytes_text",
             Builtin::TextUnchecked => "text_unchecked",
             Builtin::Byte => "byte",
             Builtin::BytesConcat => "bytes_concat",
@@ -596,14 +594,6 @@ fn eval_builtin(
             }
             Value::Int(data[index as usize] as i64)
         }
-        Builtin::BytesText => match std::str::from_utf8(&blob("bytes_text", &args[0])?) {
-            Ok(text) => Value::Variant(
-                ENUM_OPTION,
-                TAG_SOME,
-                Rc::new(vec![Value::Str(text.into())]),
-            ),
-            Err(_) => Value::Variant(ENUM_OPTION, TAG_NONE, Rc::new(Vec::new())),
-        },
         Builtin::TextUnchecked => match std::str::from_utf8(&blob("text_unchecked", &args[0])?) {
             Ok(text) => Value::Str(text.into()),
             Err(err) => {

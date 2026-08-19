@@ -9,11 +9,11 @@ fn main #0()
     local _2/text
     local _3/snowman
     local _4/text
-    local _5/sum
-    local _6/i
-    local _7/text
-    local _8
-    local _9
+    local _5/text
+    local _6/text
+    local _7/sum
+    local _8/i
+    local _9/text
     local _10
     local _11
     local _12
@@ -66,135 +66,458 @@ fn main #0()
     local _59
     local _60
     local _61
+    local _62
+    local _63
+    local _64
+    local _65
+    local _66
+    local _67
+    local _68
+    local _69
+    local _70
+    local _71
+    local _72
+    local _73
+    local _74
+    local _75
+    local _76
+    local _77
+    local _78
+    local _79
   b0:
-    _8 = builtin bytes("hello, norn")
-    _0/data = _8
-    _9 = builtin print(_0/data)
-    _10 = builtin bytes_len(_0/data)
-    _11 = builtin print(_10)
-    _12 = builtin bytes_slice(_0/data, 0, 5)
-    _1/head = _12
-    _14 = builtin bytes_text(_1/head)
+    _10 = builtin bytes("hello, norn")
+    _0/data = _10
+    _11 = builtin print(_0/data)
+    _12 = builtin bytes_len(_0/data)
+    _13 = builtin print(_12)
+    _14 = builtin bytes_slice(_0/data, 0, 5)
+    _1/head = _14
+    _16 = call bytes.to_string#1(_1/head)
     goto b2
   b1:
-    _17 = builtin bytes("☃")
-    _3/snowman = _17
-    _19 = builtin bytes_slice(_3/snowman, 0, 1)
-    _20 = builtin bytes_text(_19)
+    _19 = builtin bytes("☃")
+    _3/snowman = _19
+    _21 = builtin bytes_slice(_3/snowman, 0, 1)
+    _22 = call bytes.to_string#1(_21)
     goto b10
   b2:
-    switch tag _14 [1 => b6] else b3
+    switch tag _16 [1 => b6] else b3
   b3:
-    switch tag _14 [0 => b8] else b4
+    switch tag _16 [0 => b8] else b4
   b4:
     trap "no match arm applied"
   b5:
-    _15 = builtin print(_2/text)
-    _13 = _15
+    _17 = builtin print(_2/text)
+    _15 = _17
     goto b1
   b6:
-    _2/text = _14.0
+    _2/text = _16.0
     goto b5
   b7:
-    _16 = builtin print("not text")
-    _13 = _16
+    _18 = builtin print("not text")
+    _15 = _18
     goto b1
   b8:
     goto b7
   b9:
-    _23 = builtin bytes_at(_0/data, 0)
-    _24 = builtin print(_23)
-    _25 = builtin bytes_len(_0/data)
-    _26 = _25 sub.i 1
-    _27 = builtin bytes_at(_0/data, _26)
-    _28 = builtin print(_27)
-    _5/sum = 0
-    _6/i = 0
-    goto b17
+    _26 = builtin byte(192)
+    _27 = builtin byte(128)
+    _28 = builtin bytes_concat(_26, _27)
+    _29 = call bytes.to_string#1(_28)
+    goto b18
   b10:
-    switch tag _20 [1 => b14] else b11
+    switch tag _22 [1 => b14] else b11
   b11:
-    switch tag _20 [0 => b16] else b12
+    switch tag _22 [0 => b16] else b12
   b12:
     trap "no match arm applied"
   b13:
-    _21 = builtin print(_4/text)
-    _18 = _21
+    _23 = builtin print(_4/text)
+    _20 = _23
     goto b9
   b14:
-    _4/text = _20.0
+    _4/text = _22.0
     goto b13
   b15:
-    _22 = builtin print("a torn character is not text")
-    _18 = _22
+    _24 = builtin print("a torn character is not text")
+    _20 = _24
     goto b9
   b16:
     goto b15
   b17:
-    _29 = builtin bytes_len(_0/data)
-    _30 = _6/i lt _29
-    branch _30 ? b19 : b18
-  b18:
-    _34 = builtin print(_5/sum)
-    _35 = builtin byte(110)
-    _36 = builtin bytes("n")
-    _37 = _35 eq _36
-    _38 = builtin print(_37)
-    _40 = builtin bytes("hello, ")
-    _41 = builtin bytes("norn")
-    _42 = builtin bytes_concat(_40, _41)
-    _43 = builtin bytes_text(_42)
-    goto b21
-  b19:
-    _31 = builtin bytes_at(_0/data, _6/i)
-    _32 = _5/sum add.i _31
-    _5/sum = _32
-    _33 = _6/i add.i 1
-    _6/i = _33
-    goto b17
-  b20:
-    _46 = builtin bytes("")
-    _47 = builtin bytes_concat(_0/data, _46)
-    _48 = _47 eq _0/data
-    _49 = builtin print(_48)
-    _50 = builtin bytes_slice(_0/data, 7, 11)
-    _51 = builtin bytes("norn")
-    _52 = _50 eq _51
-    _53 = builtin print(_52)
-    _54 = builtin bytes("abc")
-    _55 = builtin bytes("abd")
-    _56 = _54 lt _55
-    _57 = builtin print(_56)
-    _58 = builtin bytes("")
-    _59 = builtin bytes_slice(_0/data, 4, 4)
-    _60 = _58 eq _59
-    _61 = builtin print(_60)
-    return _61
-  b21:
-    switch tag _43 [1 => b25] else b22
-  b22:
-    switch tag _43 [0 => b27] else b23
-  b23:
-    trap "no match arm applied"
-  b24:
-    _44 = builtin print(_7/text)
-    _39 = _44
-    goto b20
-  b25:
-    _7/text = _43.0
-    goto b24
-  b26:
-    _45 = builtin print("not text")
-    _39 = _45
-    goto b20
-  b27:
+    _33 = builtin byte(237)
+    _34 = builtin byte(160)
+    _35 = builtin bytes_concat(_33, _34)
+    _36 = builtin byte(128)
+    _37 = builtin bytes_concat(_35, _36)
+    _38 = call bytes.to_string#1(_37)
     goto b26
+  b18:
+    switch tag _29 [1 => b22] else b19
+  b19:
+    switch tag _29 [0 => b24] else b20
+  b20:
+    trap "no match arm applied"
+  b21:
+    _30 = builtin print(_5/text)
+    _25 = _30
+    goto b17
+  b22:
+    _5/text = _29.0
+    goto b21
+  b23:
+    _31 = builtin print("an overlong encoding is not text")
+    _25 = _31
+    goto b17
+  b24:
+    goto b23
+  b25:
+    _41 = builtin bytes_at(_0/data, 0)
+    _42 = builtin print(_41)
+    _43 = builtin bytes_len(_0/data)
+    _44 = _43 sub.i 1
+    _45 = builtin bytes_at(_0/data, _44)
+    _46 = builtin print(_45)
+    _7/sum = 0
+    _8/i = 0
+    goto b33
+  b26:
+    switch tag _38 [1 => b30] else b27
+  b27:
+    switch tag _38 [0 => b32] else b28
+  b28:
+    trap "no match arm applied"
+  b29:
+    _39 = builtin print(_6/text)
+    _32 = _39
+    goto b25
+  b30:
+    _6/text = _38.0
+    goto b29
+  b31:
+    _40 = builtin print("a surrogate half is not text")
+    _32 = _40
+    goto b25
+  b32:
+    goto b31
+  b33:
+    _47 = builtin bytes_len(_0/data)
+    _48 = _8/i lt _47
+    branch _48 ? b35 : b34
+  b34:
+    _52 = builtin print(_7/sum)
+    _53 = builtin byte(110)
+    _54 = builtin bytes("n")
+    _55 = _53 eq _54
+    _56 = builtin print(_55)
+    _58 = builtin bytes("hello, ")
+    _59 = builtin bytes("norn")
+    _60 = builtin bytes_concat(_58, _59)
+    _61 = call bytes.to_string#1(_60)
+    goto b37
+  b35:
+    _49 = builtin bytes_at(_0/data, _8/i)
+    _50 = _7/sum add.i _49
+    _7/sum = _50
+    _51 = _8/i add.i 1
+    _8/i = _51
+    goto b33
+  b36:
+    _64 = builtin bytes("")
+    _65 = builtin bytes_concat(_0/data, _64)
+    _66 = _65 eq _0/data
+    _67 = builtin print(_66)
+    _68 = builtin bytes_slice(_0/data, 7, 11)
+    _69 = builtin bytes("norn")
+    _70 = _68 eq _69
+    _71 = builtin print(_70)
+    _72 = builtin bytes("abc")
+    _73 = builtin bytes("abd")
+    _74 = _72 lt _73
+    _75 = builtin print(_74)
+    _76 = builtin bytes("")
+    _77 = builtin bytes_slice(_0/data, 4, 4)
+    _78 = _76 eq _77
+    _79 = builtin print(_78)
+    return _79
+  b37:
+    switch tag _61 [1 => b41] else b38
+  b38:
+    switch tag _61 [0 => b43] else b39
+  b39:
+    trap "no match arm applied"
+  b40:
+    _62 = builtin print(_9/text)
+    _57 = _62
+    goto b36
+  b41:
+    _9/text = _61.0
+    goto b40
+  b42:
+    _63 = builtin print("not text")
+    _57 = _63
+    goto b36
+  b43:
+    goto b42
+
+fn bytes.to_string #1(_0/data)
+    local _1/len
+    local _2/i
+    local _3/width
+    local _4
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+    local _10
+    local _11
+    local _12
+  b0:
+    _4 = builtin bytes_len(_0/data)
+    _1/len = _4
+    _2/i = 0
+    goto b1
+  b1:
+    _5 = _2/i lt _1/len
+    branch _5 ? b3 : b2
+  b2:
+    _11 = builtin text_unchecked(_0/data)
+    _12 = Option.Some(_11)
+    return _12
+  b3:
+    _6 = call bytes.sequence#2(_0/data, _2/i, _1/len)
+    _3/width = _6
+    _8 = _3/width eq 0
+    branch _8 ? b4 : b5
+  b4:
+    _9 = Option.None()
+    return _9
+  b5:
+    _7 = ()
+    goto b6
+  b6:
+    _10 = _2/i add.i _3/width
+    _2/i = _10
+    goto b1
+
+fn bytes.sequence #2(_0/data, _1/i, _2/len)
+    local _3/lead
+    local _4/low
+    local _5/high
+    local _6/low
+    local _7/high
+    local _8
+    local _9
+    local _10
+    local _11
+    local _12
+    local _13
+    local _14
+    local _15
+    local _16
+    local _17
+    local _18
+    local _19
+    local _20
+    local _21
+    local _22
+    local _23
+    local _24
+    local _25
+    local _26
+    local _27
+    local _28
+    local _29
+    local _30
+    local _31
+    local _32
+    local _33
+    local _34
+    local _35
+    local _36
+    local _37
+    local _38
+    local _39
+    local _40
+    local _41
+    local _42
+    local _43
+    local _44
+  b0:
+    _8 = builtin bytes_at(_0/data, _1/i)
+    _3/lead = _8
+    _10 = _3/lead lt 128
+    branch _10 ? b1 : b2
+  b1:
+    return 1
+  b2:
+    _9 = ()
+    goto b3
+  b3:
+    _13 = _3/lead lt 194
+    _12 = _13
+    branch _12 ? b5 : b4
+  b4:
+    _14 = _3/lead gt 244
+    _12 = _14
+    goto b5
+  b5:
+    branch _12 ? b6 : b7
+  b6:
+    return 0
+  b7:
+    _11 = ()
+    goto b8
+  b8:
+    _16 = _3/lead lt 224
+    branch _16 ? b9 : b10
+  b9:
+    _18 = _1/i add.i 1
+    _19 = call bytes.within#3(_0/data, _18, _2/len, 128, 191)
+    branch _19 ? b12 : b13
+  b10:
+    _15 = ()
+    goto b11
+  b11:
+    _21 = _3/lead lt 240
+    branch _21 ? b15 : b16
+  b12:
+    return 2
+  b13:
+    _17 = ()
+    goto b14
+  b14:
+    return 0
+  b15:
+    _4/low = 128
+    _5/high = 191
+    _23 = _3/lead eq 224
+    branch _23 ? b18 : b19
+  b16:
+    _20 = ()
+    goto b17
+  b17:
+    _6/low = 128
+    _7/high = 191
+    _33 = _3/lead eq 240
+    branch _33 ? b29 : b30
+  b18:
+    _4/low = 160
+    _22 = ()
+    goto b20
+  b19:
+    _22 = ()
+    goto b20
+  b20:
+    _25 = _3/lead eq 237
+    branch _25 ? b21 : b22
+  b21:
+    _5/high = 159
+    _24 = ()
+    goto b23
+  b22:
+    _24 = ()
+    goto b23
+  b23:
+    _28 = _1/i add.i 1
+    _29 = call bytes.within#3(_0/data, _28, _2/len, _4/low, _5/high)
+    _27 = _29
+    branch _27 ? b24 : b25
+  b24:
+    _30 = _1/i add.i 2
+    _31 = call bytes.within#3(_0/data, _30, _2/len, 128, 191)
+    _27 = _31
+    goto b25
+  b25:
+    branch _27 ? b26 : b27
+  b26:
+    return 3
+  b27:
+    _26 = ()
+    goto b28
+  b28:
+    return 0
+  b29:
+    _6/low = 144
+    _32 = ()
+    goto b31
+  b30:
+    _32 = ()
+    goto b31
+  b31:
+    _35 = _3/lead eq 244
+    branch _35 ? b32 : b33
+  b32:
+    _7/high = 143
+    _34 = ()
+    goto b34
+  b33:
+    _34 = ()
+    goto b34
+  b34:
+    _39 = _1/i add.i 1
+    _40 = call bytes.within#3(_0/data, _39, _2/len, _6/low, _7/high)
+    _38 = _40
+    branch _38 ? b35 : b36
+  b35:
+    _41 = _1/i add.i 2
+    _42 = call bytes.within#3(_0/data, _41, _2/len, 128, 191)
+    _38 = _42
+    goto b36
+  b36:
+    _37 = _38
+    branch _37 ? b37 : b38
+  b37:
+    _43 = _1/i add.i 3
+    _44 = call bytes.within#3(_0/data, _43, _2/len, 128, 191)
+    _37 = _44
+    goto b38
+  b38:
+    branch _37 ? b39 : b40
+  b39:
+    return 4
+  b40:
+    _36 = ()
+    goto b41
+  b41:
+    return 0
+
+fn bytes.within #3(_0/data, _1/i, _2/len, _3/low, _4/high)
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+    local _10
+    local _11
+  b0:
+    _7 = _1/i lt _2/len
+    _6 = _7
+    branch _6 ? b1 : b2
+  b1:
+    _8 = builtin bytes_at(_0/data, _1/i)
+    _9 = _8 ge _3/low
+    _6 = _9
+    goto b2
+  b2:
+    _5 = _6
+    branch _5 ? b3 : b4
+  b3:
+    _10 = builtin bytes_at(_0/data, _1/i)
+    _11 = _10 le _4/high
+    _5 = _11
+    goto b4
+  b4:
+    return _5
 
 === output ===
 <bytes 11>
 11
 hello
 a torn character is not text
+an overlong encoding is not text
+a surrogate half is not text
 104
 110
 1053
