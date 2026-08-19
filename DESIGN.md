@@ -203,7 +203,7 @@ If one input replaces `user`, no observer sees a new first name with an old last
 
 ### State and feedback
 
-This section and §5 and §10 write reactors in an operator-chain style; §6 writes them with explicit `state` and `on` handlers. Both are sketches of the same semantics, and **the v0 subset implements §6's**: explicit state cells with signals as pure derived views. The operator style needs generics and method resolution, which v0 does not have; §6's needs neither, and the last of the open questions below notes that explicit durable state cells are also the friendlier model for snapshotting.
+This section and §5 and §10 write reactors in an operator-chain style; §6 writes them with explicit `state` and `on` handlers. Both are sketches of the same semantics, and **the v0 subset implements §6's**: explicit state cells with signals as pure derived views. The operator style needs generics, method resolution, and the operator vocabulary itself; the first two have since landed (BOOTSTRAP §8 item 7), and the vocabulary remains M7's. §6's needs none of them, and the last of the open questions below notes that explicit durable state cells are also the friendlier model for snapshotting.
 
 State is explicit through operators such as `hold`, `scan`, and `delay`. An instantaneous dependency cycle is rejected:
 

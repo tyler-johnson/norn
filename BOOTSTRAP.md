@@ -469,9 +469,64 @@ Ordered roughly by when it becomes worth doing, not by importance:
    `bytes_concat`, because a clone-everything representation cannot make sharing observable — and
    so does `+` on `Bytes`, which is only worth having once concatenation has a cost model to
    answer to.
-7. **Generics and traits.** Required before a real standard library, and the gate every collection
-   sits behind: without them a container cannot be written once, which is why v0's lists are
-   retyped by hand. Item 12 records what "collections" was decided to mean.
+7. **Generics and traits — landed.** The gate on the general standard library, shipped as one
+   wave (2026-08-19) because each half is the other's first consumer: bounds need traits to
+   name, and a trait's worth shows first on a type parameter. Item 12 records what "collections"
+   was decided to mean; std/list is the first of them.
+
+   The surface: type parameters on `struct`, `enum`, and `fn` declarations (`List<T>`,
+   `swap<A, B>`); call-site inference — the expectation solves return-position parameters first,
+   then the arguments left to right — with the explicit `f<I64>(…)` spelling as the fallback and
+   an "annotate or say it explicitly" refusal where nothing pins a parameter down; `trait` and
+   `impl` declarations, with `trait`, `impl`, and `for` promoted out of the reserved list.
+   Trait members are signatures only, first parameter `Self` by value, and the method spelling
+   `value.to_string()` is exactly the rewrite it looks like: receiver prepended, plain call —
+   a local head shadows enum and namespace heads in call position the way it always did in value
+   position. Impls are held to three rules: orphan (the trait's module or the receiver's;
+   builtin receivers only the trait's, which is how std/fmt owns `impl Display for I64`),
+   coherence (one impl per trait and receiver, program-wide), and conformance (the trait's
+   method set exactly, signatures equal under `Self := receiver`). Bounds live on functions
+   alone — `fn contains<T: Eq>`, `+`-separated — and propagate by declaration, never search.
+   `Eq` is the compiler's method-less marker, satisfied by exactly the five scalar types until
+   item 9's derives, and it is what `==` on a bounded `T` costs: nothing, both engines already
+   comparing structurally. `Display` (`to_string(Self) -> String`, infallible rendering only)
+   lives in std/fmt beside the free function its I64 impl delegates to.
+
+   The architecture, allowed by one enabling fact: types are fully erased at lowering, so the
+   whole implementation is check-time monomorphization inside `norn-hir` — NIR, both engines,
+   the backend, and the prelude changed zero lines. A template body is checked once, its
+   parameters opaque (Rust's model; a bound adds capabilities, it never re-checks), and a
+   monomorphization pass between bodies and the whole-program passes clones each requested
+   instance with types substituted and callees remapped — generic-calls-generic composes through
+   symbolic instances, a method on a bounded `T` through symbolic trait-call stubs resolved per
+   instance via the impls. Instances are ordinary monomorphic defs with names like
+   `list.take<I64>`, appended in deterministic insertion order (no map iteration anywhere in
+   discovery — instance ids are a pure function of the AST), deduped on (template, arguments),
+   and fused against polymorphic recursion at depth 32 with a 4096-instance ceiling behind it.
+   Templates and stubs are neutered to inert unit bodies afterwards. Traits are entirely
+   checker-side: `hir::Program` grew no tables.
+
+   The dogfood retired all three hand expansions: std/list wrote the cons list once
+   (structure-only — `length`, `empty`, `append`, `reverse`, `take`, `drop`, `nth`,
+   `contains<T: Eq>`, `join<T: Display>`, the last a std module bounding on a std trait;
+   map/filter/fold wait for M7's closures), std/http's `Headers` became `List<Header>` with
+   byte-identical wire behaviour, and posts.norn moved into the reactors corpus as
+   `List<Post>`/`List<Delta>` — its untested-example gap closing as a side effect, its trace now
+   pinned by the reactors snapshot corpus and the differential oracle. The migrations settled a
+   placement rule: functions that compare an element's fields (`named`, `insert`) stay beside
+   the fields they read, not in std/list.
+
+   The deferral ledger, each a recorded narrowing: associated types; default method bodies;
+   trait objects (never planned — dispatch is static, a bound is not a type); generic traits;
+   generic impls (`impl<T> Display for List<T>` parses and is refused); user `Eq` impls and
+   derived equality (item 9); `Ord` and operator traits (comparisons stay builtin-typed);
+   inherent impls — methods come from traits only, so `req.header(h)` stays `header(req, h)`;
+   extension methods on builtin types (`2.seconds` still waits); `self` receiver sugar; `where`
+   clauses (still reserved); borrow receivers (`&Self` is refused — receivers move); and `task`
+   members with `uses` clauses (parse-permissive, check-refused). One plan amendment made in
+   flight: "unified under one trait" became *unified where the signatures agree* — `Display` is
+   infallible rendering only, and std/bytes's fallible `to_string(Bytes) -> Option<String>`
+   stays a free function, fallibility living in the type as the naming format demands.
 8. **Capability inference, test handlers.** `uses { ... }` is checked but not inferred in v0.
 9. **Derives and constrained attributes.** `@derive(Json)`, `@http_api` — `DESIGN.md` §8 stage 2.
 10. **Durable state projections, supervision policy.**
@@ -481,8 +536,9 @@ Ordered roughly by when it becomes worth doing, not by importance:
     server-only); route patterns with bound parameters (`files.norn` dispatches on
     `match req.method` because there is nothing to bind a path segment to). General flow sources
     and sinks wait here too — `flow_next` itself has since landed with the std/http wave (item
-    12), but in v0 a flow still only ever comes from a file, and `Flow<T>` beyond `Bytes` waits
-    on item 7. `coalesce_latest` remains a
+    12), but in v0 a flow still only ever comes from a file, and `Flow<T>` beyond `Bytes` waited
+    on item 7's generics, now landed: this entry's own work is what gates it today.
+    `coalesce_latest` remains a
     §10 gap rather than M6 work: it is an overflow policy, not a wire feature.
 12. **Modules — landed — and the standard library that dissolves the builtins.** Earlier than its
     position suggests: modules gate the standard library, and item 7 does not — the ordering
@@ -539,7 +595,8 @@ Ordered roughly by when it becomes worth doing, not by importance:
     and reading unchanged as the future method (`n.to_string()`). The source type lives in the
     module today and the receiver tomorrow, never in the function name — `i64_to_string` would
     re-import the builtin-table disease std exists to cure, and the same name in different std
-    modules is the intended pattern, unified under one trait when item 7 lands rather than by
+    modules is the intended pattern, unified under one trait — `Display`, now that item 7 has
+    landed, exactly where the signatures agree — rather than by
     ad-hoc overloading, which is deliberately not built. Quantity constructors stay bare nouns
     (`seconds(2)` reads as "2 seconds", later the literal-like `2.seconds`); effects stay bare
     imperative verbs (`wait`, `send`), which is what makes a reactor's `after` list read as a
@@ -583,18 +640,22 @@ Ordered roughly by when it becomes worth doing, not by importance:
     the client surface it sketches does not exist; its `std/fs`/`std/json` imports still
     diagnose as unknown std modules and stand until those exist. Its `std/time` line
     half-landed: `seconds` is real, `mebibytes` is not time's to provide.)
-    The general std — collections, `Flow<T>` beyond `Bytes`, and the method spelling that turns
-    `request_header(&req, h)` into `req.header(h)` — waits for item 7's generics and traits.
+    The general std's gate has lifted: item 7's generics and traits landed, and std/list opened
+    the collections lane (the record lives on item 7). Two of the three things this sentence
+    used to wait for remain waiting on other grounds — `Flow<T>` beyond `Bytes` on item 11's own
+    flow work, and `req.header(h)` on inherent impls, which item 7 deliberately did not ship:
+    methods come from traits, and `header` belongs to no trait.
     "Collections" means both sequence shapes rather than a choice between them (2026-08-19): the
-    persistent cons list that every v0 collection already is by hand — `Headers`, `Rows`, `Deltas`
-    are three copies of one list, monomorphized by retyping — and a contiguous growable sequence.
+    persistent cons list that every v0 collection was by hand — `Headers`, `Rows`, `Deltas`
+    were three copies of one list, monomorphized by retyping, and all three now ride std/list's
+    `List<T>` — and a contiguous growable sequence.
     The two do not overlap, they trade: O(1) prepend with full tail sharing against O(1) index and
     dense iteration, and a language whose turns are pure and whose old values must stay valid wants
     the sharing as much as a byte-pusher wants the buffer. Maps and sets follow them; `DESIGN.md`
     §11 wants the incremental kind, which is a propagation property and not a second type. `List<T>`
-    is the cons list's name — `DESIGN.md`'s core semantics already writes `List<EffectRequest>`, so
-    the name is load-bearing before the library exists — which leaves the contiguous one's spelling
-    the open question. That half additionally waits on item 6: a clone-everything representation
+    is the cons list's name — `DESIGN.md`'s core semantics already writes `List<EffectRequest>`,
+    so the name was load-bearing before the library existed, and std/list now spells it — which
+    leaves the contiguous one's spelling the open question. That half additionally waits on item 6: a clone-everything representation
     cannot price a buffer honestly, the same reason zero-copy `Bytes` slices wait there. Whatever
     lands must make finiteness structural, because `for` earns its way into a turn only by being
     bounded by the data (`DESIGN.md` §14).
