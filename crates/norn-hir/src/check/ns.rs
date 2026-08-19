@@ -114,6 +114,12 @@ impl Checker {
             loops: Vec::new(),
             generics: Generics::new(),
             type_params_in_scope: Vec::new(),
+            traits: Vec::new(),
+            impls: Vec::new(),
+            self_ty: None,
+            struct_owner: Vec::new(),
+            // Parallel to the three seeded enums, which no module declared.
+            enum_owner: vec![usize::MAX; 3],
         }
     }
 
@@ -157,8 +163,12 @@ impl Checker {
         self.generics.defining_types = true;
         self.each(inputs, Checker::define_types);
         self.drain_type_fills();
+        // Trait member signatures resolve after the fills so they may mention an instance;
+        // impls wait until every function exists, because their conformance appends functions.
+        self.each(inputs, Checker::define_traits);
         self.each(inputs, Checker::declare_fns);
         self.bind_fn_imports();
+        self.each(inputs, Checker::declare_impls);
         // Reactors are declared, scanned, and checked between signatures and bodies, because a
         // `task fn` body may mention a reactor and a node body may call any function.
         self.each(inputs, Checker::declare_reactors);
@@ -210,9 +220,10 @@ impl Checker {
                 ast::Item::Struct(decl) => (&decl.name, DeclKind::Struct, decl.exported),
                 ast::Item::Enum(decl) => (&decl.name, DeclKind::Enum, decl.exported),
                 ast::Item::Reactor(decl) => (&decl.name, DeclKind::Reactor, decl.exported),
-                // Parsed ahead of the checking that gives them meaning; `declare_types` reports
-                // them, so they contribute nothing to the exports view.
-                ast::Item::Trait(_) | ast::Item::Impl(_) => continue,
+                ast::Item::Trait(decl) => (&decl.name, DeclKind::Trait, decl.exported),
+                // An impl declares no name: it travels with its trait and its type, which is
+                // why there is no `export impl` for this view to record.
+                ast::Item::Impl(_) => continue,
             };
             decls
                 .entry(name.name.clone())
@@ -375,6 +386,14 @@ impl Checker {
                                 source.clone(),
                                 item.span,
                             )),
+                            DeclKind::Trait => {
+                                // Trait ids exist already: every module's `declare_types` has
+                                // run, and traits register there beside the types.
+                                let Some(&id) = self.ns[target].traits.get(source) else {
+                                    continue;
+                                };
+                                self.ns[self.current].traits.insert(local.name.clone(), id);
+                            }
                             DeclKind::Struct | DeclKind::Enum | DeclKind::Reactor => {
                                 // The target's namespaces are populated: every module's
                                 // `declare_types` has run by the time any module binds.
@@ -466,6 +485,16 @@ impl Checker {
             let name = member.name.clone();
             let shown = head.name.clone();
             self.not_exported(&name, &shown, target, span);
+            return Some(Err(()));
+        }
+        // A trait is neither a value nor a type, so every caller of this resolver would only
+        // mis-teach it; the one diagnostic lives here instead.
+        if kind == DeclKind::Trait {
+            self.push(
+                Diagnostic::new(span, format!("`{}` is a trait", path.text()))
+                    .label("not a value or a type")
+                    .note("a trait names behaviour: implement it with `impl`, and reach its methods on a value"),
+            );
             return Some(Err(()));
         }
         let item = match kind {

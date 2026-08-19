@@ -224,6 +224,9 @@ impl Checker {
         }
         let name = self.instance_name(&self.program.structs[template.index()].name.clone(), &args);
         let id = StructId(self.program.structs.len() as u32);
+        // The instance belongs to its template's module: that is where its fields' spans point,
+        // and it is the "receiver's module" the orphan rule means for `impl … for List<I64>`.
+        self.struct_owner.push(self.struct_owner[template.index()]);
         self.program.structs.push(StructDef {
             name,
             type_params: Vec::new(),
@@ -275,6 +278,7 @@ impl Checker {
         }
         let name = self.instance_name(&self.program.enums[template.index()].name.clone(), &args);
         let id = EnumId(self.program.enums.len() as u32);
+        self.enum_owner.push(self.enum_owner[template.index()]);
         self.program.enums.push(EnumDef {
             name,
             type_params: Vec::new(),

@@ -1,10 +1,16 @@
-// Formatting and parsing: the int↔string pair.
+// Formatting and parsing: the int↔string pair, and the trait that names the first half.
 //
 // The first standard-library module. `to_string` retires the hand-written copies the examples
 // grew while the language had no std to import it from; `to_int` is its inverse, written on the
 // byte primitives — and it is HTTP's `Content-Length` parser in waiting. The names follow the
 // std format: conversions are `to_<target>`, the source type lives in the module today and the
-// receiver tomorrow (`n.to_string()`), and fallibility lives in the type, not the name.
+// receiver through `Display` (`n.to_string()`), and fallibility lives in the type, not the name.
+
+// Infallible rendering. Fallible conversions stay free functions returning Option or Result —
+// the trait unifies `to_string` where the signatures agree, not wherever the name matches.
+export trait Display {
+    fn to_string(value: Self) -> String
+}
 
 export fn to_string(n: I64) -> String {
     let mut rest = if n < 0 {
@@ -21,6 +27,14 @@ export fn to_string(n: I64) -> String {
         "-" + out
     } else {
         out
+    }
+}
+
+// The delegation is not a recursion: an impl's functions live in no namespace, so `to_string`
+// here can only mean the free function above.
+impl Display for I64 {
+    fn to_string(value: Self) -> String {
+        to_string(value)
     }
 }
 

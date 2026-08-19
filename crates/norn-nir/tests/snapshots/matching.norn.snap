@@ -517,6 +517,12 @@ fn fmt.digit #6(_0/n)
     _1 = "?"
     goto b1
 
+fn fmt.Display.to_string for I64 #7(_0/value)
+    local _1
+  b0:
+    _1 = call fmt.to_string#4(_0/value)
+    return _1
+
 === output ===
 empty
 dot at the origin

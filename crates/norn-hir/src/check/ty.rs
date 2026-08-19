@@ -54,6 +54,29 @@ impl Checker {
                 Ty::Error
             }
             ast::TypeKind::Path { path, args } => {
+                // `Self` answers before anything else could: inside a trait it is the reserved
+                // parameter slot, inside an impl it is the receiver, and anywhere else it is a
+                // teaching diagnostic rather than a name lookup.
+                if path.segments.len() == 1 && path.segments[0].name == "Self" {
+                    if !args.is_empty() {
+                        self.push(
+                            Diagnostic::new(ty.span, "`Self` takes no type arguments")
+                                .note("it stands for the implementing type whole"),
+                        );
+                        return Ty::Error;
+                    }
+                    match &self.self_ty {
+                        Some(resolved) => return resolved.clone(),
+                        None => {
+                            self.push(
+                                Diagnostic::new(ty.span, "`Self` has no meaning here")
+                                    .label("outside a trait or impl")
+                                    .note("`Self` names the implementing type, so it is written inside `trait` and `impl` declarations"),
+                            );
+                            return Ty::Error;
+                        }
+                    }
+                }
                 // A declared type parameter answers first: inside `fn map<T>(…)`, `T` is the
                 // parameter whatever else the module calls `T`.
                 if path.segments.len() == 1
@@ -177,6 +200,14 @@ impl Checker {
                 }
                 match self.ns[self.current].types.get(name).cloned() {
                     Some(resolved) => self.named_ty(resolved, name, args, ty.span),
+                    None if self.ns[self.current].traits.contains_key(name) => {
+                        self.push(
+                            Diagnostic::new(path.span, format!("`{name}` is a trait, not a type"))
+                                .label("names behaviour, not a shape")
+                                .note("a value's type is what implements the trait; there are no trait objects"),
+                        );
+                        Ty::Error
+                    }
                     None => {
                         self.error(path.span, format!("unknown type `{name}`"));
                         Ty::Error

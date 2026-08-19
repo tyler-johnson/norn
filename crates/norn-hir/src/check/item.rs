@@ -57,32 +57,40 @@ impl Checker {
                 ast::Item::Enum(decl) => (&decl.name, decl.span),
                 ast::Item::Reactor(decl) => (&decl.name, decl.span),
                 ast::Item::Fn(_) => continue,
-                // Temporary, deleted when the trait passes land later in the item 7 wave: the
-                // grammar is ahead of the checker, and saying so beats an unknown-name cascade.
+                // A trait is registered in this pass — its members resolve in `define_traits`,
+                // after every type is defined — and shares the duplicate rule with types: the
+                // namespaces are disjoint, but one name meaning two declarations helps nobody.
                 ast::Item::Trait(decl) => {
-                    self.push(
-                        Diagnostic::new(
-                            decl.name.span,
-                            "`trait` declarations are parsed but not checked yet",
-                        )
-                        .label("not checked yet")
-                        .note("traits land later in the generics wave; see BOOTSTRAP.md §8 item 7"),
-                    );
+                    if self.ns[self.current].types.contains_key(&decl.name.name)
+                        || self.ns[self.current].traits.contains_key(&decl.name.name)
+                    {
+                        self.push(
+                            Diagnostic::new(
+                                decl.name.span,
+                                format!("`{}` is declared twice", decl.name.name),
+                            )
+                            .label("duplicate declaration"),
+                        );
+                        continue;
+                    }
+                    let id = TraitId(self.traits.len() as u32);
+                    self.traits.push(TraitDef {
+                        name: self.qualified(&decl.name.name),
+                        module: self.current,
+                        methods: Vec::new(),
+                    });
+                    self.ns[self.current]
+                        .traits
+                        .insert(decl.name.name.clone(), id);
                     continue;
                 }
-                ast::Item::Impl(decl) => {
-                    self.push(
-                        Diagnostic::new(
-                            decl.trait_path.span,
-                            "`impl` blocks are parsed but not checked yet",
-                        )
-                        .label("not checked yet")
-                        .note("traits land later in the generics wave; see BOOTSTRAP.md §8 item 7"),
-                    );
-                    continue;
-                }
+                // An impl declares no name; it is registered by `declare_impls`, after every
+                // function signature exists for its bodies to call.
+                ast::Item::Impl(_) => continue,
             };
-            if self.ns[self.current].types.contains_key(&name.name) {
+            if self.ns[self.current].types.contains_key(&name.name)
+                || self.ns[self.current].traits.contains_key(&name.name)
+            {
                 self.push(
                     Diagnostic::new(name.span, format!("`{}` is declared twice", name.name))
                         .label("duplicate type"),
@@ -93,6 +101,7 @@ impl Checker {
                 ast::Item::Struct(decl) => {
                     let id = StructId(self.program.structs.len() as u32);
                     let type_params = self.type_param_names(&decl.type_params);
+                    self.struct_owner.push(self.current);
                     self.program.structs.push(StructDef {
                         name: decl.name.name.clone(),
                         type_params,
@@ -104,6 +113,7 @@ impl Checker {
                 ast::Item::Enum(decl) => {
                     let id = EnumId(self.program.enums.len() as u32);
                     let type_params = self.type_param_names(&decl.type_params);
+                    self.enum_owner.push(self.current);
                     self.program.enums.push(EnumDef {
                         name: decl.name.name.clone(),
                         type_params,
@@ -146,6 +156,14 @@ impl Checker {
     fn type_param_names(&mut self, params: &[ast::TypeParam]) -> Vec<String> {
         let mut names: Vec<String> = Vec::new();
         for param in params {
+            if param.name.name == "Self" {
+                self.push(
+                    Diagnostic::new(param.name.span, "`Self` cannot be a type parameter")
+                        .label("a reserved name")
+                        .note("`Self` always names the implementing type of a `trait` or `impl`"),
+                );
+                continue;
+            }
             if names.contains(&param.name.name) {
                 self.push(
                     Diagnostic::new(
@@ -382,42 +400,76 @@ impl Checker {
 
     pub(super) fn check_fns(&mut self, module: &ast::Module) {
         for (index, item) in module.items.iter().enumerate() {
-            let ast::Item::Fn(decl) = item else { continue };
-            // Bodies pair with declarations by position, not by name: a display-name prefix or a
-            // duplicate must never silently skip a body or check one against the wrong signature.
-            let Some(id) = self.fn_of_item[self.current][index] else {
-                continue;
-            };
-            if !decl.is_task && !decl.uses.is_empty() {
-                // The parser already rejects `uses` on a non-task function, so this is unreachable
-                // in practice; keeping it means the checker never silently ignores a capability.
-                self.error(decl.span, "capabilities are only meaningful on a `task fn`");
+            match item {
+                ast::Item::Fn(decl) => {
+                    // Bodies pair with declarations by position, not by name: a display-name
+                    // prefix or a duplicate must never silently skip a body or check one against
+                    // the wrong signature.
+                    let Some(id) = self.fn_of_item[self.current][index] else {
+                        continue;
+                    };
+                    self.check_fn_body(id, decl, decl.name.name.clone());
+                }
+                // An impl's functions are ordinary bodies against the signatures
+                // `declare_impls` resolved, paired by position exactly like `fn_of_item`. `Self`
+                // stays meaningful inside them: it is the receiver.
+                ast::Item::Impl(decl) => {
+                    let Some(position) = self
+                        .impls
+                        .iter()
+                        .position(|imp| imp.module == self.current && imp.item == index)
+                    else {
+                        continue;
+                    };
+                    let receiver = self.impls[position].receiver.clone();
+                    for (member, fn_decl) in
+                        self.impls[position].methods.clone().iter().zip(&decl.fns)
+                    {
+                        let Some(id) = member.1 else { continue };
+                        self.self_ty = Some(receiver.clone());
+                        let display = self.program.fns[id.index()].name.clone();
+                        self.check_fn_body(id, fn_decl, display);
+                        self.self_ty = None;
+                    }
+                }
+                _ => continue,
             }
-
-            let (params, ret) = self.signatures[id.index()].clone();
-            self.locals = Vec::new();
-            self.scopes = vec![Vec::new()];
-            self.ret = ret.clone();
-            self.fn_name = decl.name.name.clone();
-            self.ctx = if decl.is_task { Ctx::Task } else { Ctx::Plain };
-            self.members = HashMap::new();
-            self.reactor = None;
-            self.in_handler = false;
-            self.uses = self.program.fns[id.index()].uses.clone();
-            self.scope_depth = 0;
-            self.loops = Vec::new();
-            // A template body is checked exactly once, its parameters opaque: this scope is what
-            // lets a `let` annotation inside it spell `List<T>`.
-            self.type_params_in_scope = self.program.fns[id.index()].type_params.clone();
-            for ((name, ty), param) in params.iter().zip(&decl.params) {
-                self.declare_param(name.clone(), ty.clone(), param.name.span);
-            }
-            let body = self.check_block(&decl.body, Some(&ret), decl.body.span);
-            self.type_params_in_scope.clear();
-            let locals = std::mem::take(&mut self.locals);
-            self.program.fns[id.index()].locals = locals;
-            self.program.fns[id.index()].body = body;
         }
+    }
+
+    /// One function body, whatever declared it: shared by top-level functions and the functions
+    /// of an `impl`. The caller has set anything beyond the function's own state — an impl sets
+    /// `self_ty` so the body may still spell `Self`.
+    fn check_fn_body(&mut self, id: FnId, decl: &ast::FnDecl, display: String) {
+        if !decl.is_task && !decl.uses.is_empty() {
+            // The parser already rejects `uses` on a non-task function, so this is unreachable
+            // in practice; keeping it means the checker never silently ignores a capability.
+            self.error(decl.span, "capabilities are only meaningful on a `task fn`");
+        }
+
+        let (params, ret) = self.signatures[id.index()].clone();
+        self.locals = Vec::new();
+        self.scopes = vec![Vec::new()];
+        self.ret = ret.clone();
+        self.fn_name = display;
+        self.ctx = if decl.is_task { Ctx::Task } else { Ctx::Plain };
+        self.members = HashMap::new();
+        self.reactor = None;
+        self.in_handler = false;
+        self.uses = self.program.fns[id.index()].uses.clone();
+        self.scope_depth = 0;
+        self.loops = Vec::new();
+        // A template body is checked exactly once, its parameters opaque: this scope is what
+        // lets a `let` annotation inside it spell `List<T>`.
+        self.type_params_in_scope = self.program.fns[id.index()].type_params.clone();
+        for ((name, ty), param) in params.iter().zip(&decl.params) {
+            self.declare_param(name.clone(), ty.clone(), param.name.span);
+        }
+        let body = self.check_block(&decl.body, Some(&ret), decl.body.span);
+        self.type_params_in_scope.clear();
+        let locals = std::mem::take(&mut self.locals);
+        self.program.fns[id.index()].locals = locals;
+        self.program.fns[id.index()].body = body;
     }
 
     // ---------------------------------------------------------------- reactors

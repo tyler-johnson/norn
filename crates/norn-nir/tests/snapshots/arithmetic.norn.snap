@@ -482,6 +482,12 @@ fn fmt.digit #8(_0/n)
     _1 = "?"
     goto b1
 
+fn fmt.Display.to_string for I64 #9(_0/value)
+    local _1
+  b0:
+    _1 = call fmt.to_string#6(_0/value)
+    return _1
+
 === output ===
 factorial(10) = 3628800
 fib(15) = 610

@@ -1,5 +1,6 @@
 === ast ===
 (module
+  (trait Display export (sig to_string (params (param value Self)) (ret String)))
   (fn to_string export
     (params (param n I64))
     (ret String)
@@ -23,6 +24,12 @@
         (binary < (path n) (int 0))
         (block (binary + (str "-") (path out)))
         (else (block (path out))))))
+  (impl Display
+    (for I64)
+    (fn to_string
+      (params (param value Self))
+      (ret String)
+      (block (call (path to_string) (arg (path value))))))
   (fn to_int export
     (params (param s String))
     (ret (ty Option I64))
@@ -71,6 +78,10 @@
         (arm _ (str "?"))))))
 
 === canonical ===
+export trait Display {
+    fn to_string(value: Self) -> String
+}
+
 export fn to_string(n: I64) -> String {
     let mut rest = if n < 0 {
         0 - n
@@ -86,6 +97,12 @@ export fn to_string(n: I64) -> String {
         "-" + out
     } else {
         out
+    }
+}
+
+impl Display for I64 {
+    fn to_string(value: Self) -> String {
+        to_string(value)
     }
 }
 

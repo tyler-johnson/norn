@@ -1,0 +1,50 @@
+// Method resolution: what the receiver's type refuses. One file, because every case is the
+// same resolver answering a different receiver.
+
+trait Loud {
+    fn shout(value: Self) -> String
+}
+
+trait Quiet {
+    fn shout(value: Self) -> String
+}
+
+impl Loud for I64 {
+    fn shout(value: Self) -> String {
+        "LOUD"
+    }
+}
+
+impl Quiet for I64 {
+    fn shout(value: Self) -> String {
+        "quiet"
+    }
+}
+
+enum Shape {
+    Empty
+    Dot(I64)
+}
+
+struct User {
+    name: String
+}
+
+// A bare parameter has no methods until a bound gives it some.
+fn describe<T>(value: T) -> String {
+    value.to_string()
+}
+
+fn main() {
+    // A local shadows an enum head in call position, exactly as it does in value position:
+    // this is a method lookup on I64, not a variant construction.
+    let Shape = 1
+    let a = Shape.Empty()
+    // No impl anywhere provides `frobnicate`.
+    let b = 7.frobnicate()
+    // A field is a value, not a method.
+    let user = User(name: "ada")
+    let c = user.name()
+    // Two traits provide `shout` for I64, and a method call cannot say which.
+    let d = 3.shout()
+}

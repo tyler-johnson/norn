@@ -261,6 +261,74 @@ reactor Journal() {
     );
 }
 
+/// Traits land mid-wave, ahead of std/list's `join<T: Display>` dogfood, so the acceptance side
+/// is pinned here: both call spellings, conformance through `Self`, and a method beside a free
+/// function of the same name.
+#[test]
+fn trait_methods_resolve() {
+    // The dotted-path spelling (`p.to_string()`) and the field-callee spelling
+    // (`p.x.to_string()` — the receiver is itself a projection) resolve through one resolver.
+    // The impl's `to_string` delegating to the free `to_string` is not a recursion, because an
+    // impl's functions live in no namespace.
+    accepted(
+        "both method spellings resolve, beside a free function of the same name",
+        "\
+trait Display {
+    fn to_string(value: Self) -> String
+}
+
+struct Point {
+    x: I64
+    y: I64
+}
+
+fn to_string(n: I64) -> String {
+    \"n\"
+}
+
+impl Display for Point {
+    fn to_string(value: Self) -> String {
+        \"(\" + to_string(value.x) + \", \" + value.y.to_string() + \")\"
+    }
+}
+
+impl Display for I64 {
+    fn to_string(value: Self) -> String {
+        to_string(value)
+    }
+}
+
+fn main() {
+    let p = Point(x: 3, y: 4)
+    print(p.to_string())
+    print(42.to_string())
+}
+",
+    );
+
+    // A method with parameters beyond the receiver: the rewrite prepends the receiver and the
+    // written arguments fill the rest, named or positional.
+    accepted(
+        "a method takes arguments after its receiver",
+        "\
+trait Scale {
+    fn scaled(value: Self, factor: I64) -> I64
+}
+
+impl Scale for I64 {
+    fn scaled(value: Self, factor: I64) -> I64 {
+        value * factor
+    }
+}
+
+fn main() {
+    print(6.scaled(7))
+    print(6.scaled(factor: 7))
+}
+",
+    );
+}
+
 fn accepted(what: &str, source: &str) {
     let parsed = parse(source);
     assert!(parsed.ok(), "{what}: did not parse");

@@ -416,6 +416,11 @@ impl Checker {
                         .label(format!("`{}` can only be called", head.name))
                         .note("first-class functions arrive with closures in M7"),
                 );
+            } else if self.ns[self.current].traits.contains_key(&head.name) {
+                self.push(
+                    Diagnostic::new(span, format!("`{}` is a trait, not a value", head.name))
+                        .note("a trait names behaviour: implement it with `impl`, and reach its methods on a value"),
+                );
             } else {
                 self.error(span, format!("unknown name `{}`", head.name));
             }

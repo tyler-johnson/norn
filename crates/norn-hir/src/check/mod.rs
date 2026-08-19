@@ -30,10 +30,12 @@ mod item;
 mod moves;
 mod ns;
 mod reactor;
+mod traits;
 mod turns;
 mod ty;
 
 use generics::Generics;
+use traits::{ImplDef, TraitDef, TraitId};
 
 pub struct Checked {
     pub program: Program,
@@ -172,6 +174,7 @@ enum DeclKind {
     Fn,
     Struct,
     Enum,
+    Trait,
     Reactor,
 }
 
@@ -181,6 +184,7 @@ impl DeclKind {
             DeclKind::Fn => "function",
             DeclKind::Struct => "struct",
             DeclKind::Enum => "enum",
+            DeclKind::Trait => "trait",
             DeclKind::Reactor => "reactor",
         }
     }
@@ -265,6 +269,9 @@ struct ModuleNs {
     types: HashMap<String, TypeName>,
     fns: HashMap<String, FnId>,
     reactors: HashMap<String, ReactorId>,
+    /// Traits are their own namespace: a trait name appears in bounds and `impl` headers, never
+    /// in type or value position, so it cannot collide with resolution anywhere else.
+    traits: HashMap<String, TraitId>,
     /// `import * as fmt` bindings: local name → module index.
     namespaces: HashMap<String, usize>,
 }
@@ -275,6 +282,7 @@ impl ModuleNs {
             types: HashMap::new(),
             fns: HashMap::new(),
             reactors: HashMap::new(),
+            traits: HashMap::new(),
             namespaces: HashMap::new(),
         }
     }
@@ -343,6 +351,21 @@ struct Checker {
     /// The type parameters of the declaration being resolved or checked, in declaration order —
     /// what `resolve_ty` answers a bare `T` from. Set per item, cleared after.
     type_params_in_scope: Vec<String>,
+    /// Every trait in the program, in declaration order; ids index this table. Traits are a
+    /// checker-only fact: `hir::Program` never grows trait tables, because every method call is
+    /// rewritten to a plain call before lowering sees it.
+    traits: Vec<TraitDef>,
+    /// Every impl in the program, in declaration order — the table method resolution scans.
+    /// Methods are receiver-keyed rather than imported, so the scan is global on purpose.
+    impls: Vec<ImplDef>,
+    /// What `Self` names where the current signature or body sits: the reserved parameter slot
+    /// inside a trait declaration, the receiver type inside an impl, nothing anywhere else.
+    self_ty: Option<Ty>,
+    /// The module that declared each struct and enum, parallel to the program tables — what the
+    /// orphan rule consults. Seeded enums and instances of another module's template carry their
+    /// owner's index; the seeded three have no module and carry `usize::MAX`.
+    struct_owner: Vec<usize>,
+    enum_owner: Vec<usize>,
 }
 
 /// One enclosing loop, as `break` and `continue` see it.

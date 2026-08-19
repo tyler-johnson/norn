@@ -551,6 +551,12 @@ fn fmt.digit #11(_0/n)
     _1 = "?"
     goto b1
 
+fn fmt.Display.to_string for I64 #12(_0/value)
+    local _1
+  b0:
+    _1 = call fmt.to_string#9(_0/value)
+    return _1
+
 === output ===
 listening on localhost:8080
 port is out of range: 0

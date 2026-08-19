@@ -1,0 +1,36 @@
+error: a bare `T` has no methods
+  --> methods.norn:35:5
+   |
+35 |     value.to_string()
+   |     ^^^^^^^^^^^^^^^^^ `to_string` called on a type parameter
+   = note: `T` is opaque inside `describe`: without a bound it can only be moved, stored, matched by binding, or passed on
+
+error: I64 has no method `Empty`
+  --> methods.norn:42:19
+   |
+42 |     let a = Shape.Empty()
+   |                   ^^^^^ no impl provides it
+   = note: a method comes from a trait: an `impl` with a `fn Empty` taking I64 is what declares one
+
+error: I64 has no method `frobnicate`
+  --> methods.norn:44:15
+   |
+44 |     let b = 7.frobnicate()
+   |               ^^^^^^^^^^ no impl provides it
+   = note: a method comes from a trait: an `impl` with a `fn frobnicate` taking I64 is what declares one
+
+error: `name` is a field of User, not a method
+  --> methods.norn:47:18
+   |
+47 |     let c = user.name()
+   |                  ^^^^ fields hold values; they cannot be called
+   = note: an `impl` is what gives a type methods
+
+error: I64 has more than one method named `shout`
+  --> methods.norn:49:15
+   |
+49 |     let d = 3.shout()
+   |               ^^^^^ ambiguous method
+   = note: `Loud` provides one
+   = note: `Quiet` provides one
+   = note: methods share one name and functions do not: call the function form the impl delegates to

@@ -1907,6 +1907,12 @@ fn http.reason #26(_0/status)
     _1 = ""
     goto b1
 
+fn fmt.Display.to_string for I64 #27(_0/value)
+    local _1
+  b0:
+    _1 = call fmt.to_string#2(_0/value)
+    return _1
+
 === output ===
 prefixes settled early: 0
 complete GET / consuming 27

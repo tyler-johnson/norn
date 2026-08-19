@@ -17,16 +17,30 @@ impl Checker {
         } else {
             Some(type_args.iter().map(|arg| self.resolve_ty(arg)).collect())
         };
-        let ast::ExprKind::Path(path) = &callee.kind else {
-            self.push(
-                Diagnostic::new(callee.span, "only a named function can be called")
-                    .note("methods and function values arrive with M7; a reactor's members are reached as `handle.member`, and nothing else has any"),
-            );
-            return Expr {
-                kind: ExprKind::Error,
-                ty: Ty::Error,
-                span,
-            };
+        let path = match &callee.kind {
+            ast::ExprKind::Path(path) => path,
+            // `load()?.to_string()` — a method on whatever expression produced the value. The
+            // dotted-name spelling of the same call parses as a path and is answered below.
+            ast::ExprKind::Field { base, name } => {
+                let receiver = self.check_expr(base, None);
+                return self.method_call(receiver, name, explicit, args, span);
+            }
+            _ => {
+                self.push(
+                    Diagnostic::new(
+                        callee.span,
+                        "only a named function or a method can be called",
+                    )
+                    .note(
+                        "function values arrive with M7; nothing else produces something callable",
+                    ),
+                );
+                return Expr {
+                    kind: ExprKind::Error,
+                    ty: Ty::Error,
+                    span,
+                };
+            }
         };
         let name = &path.last().name;
 
@@ -45,6 +59,20 @@ impl Checker {
                 "None" | "Some" => self.check_option(path, args, expected, span),
                 _ => self.check_result(path, args, expected, span),
             };
+        }
+
+        // A local head answers before an enum or a namespace head could — the `check_path`
+        // doctrine, now in call position: a local shadows everything. The chain up to the last
+        // segment is the receiver, and the last segment is the method.
+        if path.segments.len() >= 2 && self.lookup_local(&path.segments[0].name).is_some() {
+            let receiver_path = ast::Path {
+                segments: path.segments[..path.segments.len() - 1].to_vec(),
+                span: path.segments[0]
+                    .span
+                    .to(path.segments[path.segments.len() - 2].span),
+            };
+            let receiver = self.check_path(&receiver_path, None);
+            return self.method_call(receiver, path.last(), explicit, args, span);
         }
 
         // `Enum.Variant(…)` is a construction spelled like a call, which is what it is.
@@ -164,6 +192,16 @@ impl Checker {
                     }
                     TypeName::Builtin(_) => {}
                 }
+            }
+            if self.ns[self.current].traits.contains_key(name) {
+                self.push(
+                    Diagnostic::new(path.span, format!("`{name}` is a trait"))
+                        .label("not a function")
+                        .note(format!(
+                            "implement it with `impl {name} for …`; its methods are reached on a value"
+                        )),
+                );
+                return self.error_expr(span);
             }
             if explicit.is_some() {
                 self.no_type_args(name, span);
