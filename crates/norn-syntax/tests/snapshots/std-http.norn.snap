@@ -1,12 +1,12 @@
 === ast ===
 (module
   (import "std/fmt" (item to_string) (item to_int))
+  (import "std/list" (item List))
   (struct Header export (field name String) (field value String))
-  (enum Headers export (variant Nil) (variant Cons (tuple Header Headers)))
   (struct Request export
     (field method String)
     (field path String)
-    (field headers Headers)
+    (field headers (ty List Header))
     (field content_length I64)
     (field leftover Bytes))
   (enum HeadParse export
@@ -320,7 +320,7 @@
             (call
               (path HeadParse.Invalid)
               (arg (str "only HTTP/1.1 is spoken here"))))))
-      (let headers mut (path Headers.Nil))
+      (let headers mut (ty (ty List Header)) (path List.Nil))
       (let cursor mut (path line_end))
       (while
         (binary < (path cursor) (path stop))
@@ -343,7 +343,7 @@
               (block
                 (assign
                   (path headers)
-                  (call (path Headers.Cons) (arg (path h)) (arg (path headers))))))
+                  (call (path List.Cons) (arg (path h)) (arg (path headers))))))
             (arm
               (construct Err (arg (bind rule)))
               (block (return (call (path HeadParse.Invalid) (arg (path rule)))))))
@@ -598,14 +598,14 @@
           (assign (path i) (binary + (path i) (int 1)))))
       (call (path text_unchecked) (arg (path out)))))
   (fn named
-    (params (param headers Headers) (param name String))
+    (params (param headers (ty List Header)) (param name String))
     (ret I64)
     (block
       (match
         (path headers)
-        (arm (construct Headers.Nil) (int 0))
+        (arm (construct List.Nil) (int 0))
         (arm
-          (construct Headers.Cons (arg (bind h)) (arg (bind rest)))
+          (construct List.Cons (arg (bind h)) (arg (bind rest)))
           (block
             (if
               (binary == (path h.name) (path name))
@@ -615,14 +615,14 @@
                   (call (path named) (arg (path rest)) (arg (path name)))))
               (else (block (call (path named) (arg (path rest)) (arg (path name)))))))))))
   (fn lookup
-    (params (param headers Headers) (param name String))
+    (params (param headers (ty List Header)) (param name String))
     (ret (ty Option String))
     (block
       (match
         (path headers)
-        (arm (construct Headers.Nil) (path None))
+        (arm (construct List.Nil) (path None))
         (arm
-          (construct Headers.Cons (arg (bind h)) (arg (bind rest)))
+          (construct List.Cons (arg (bind h)) (arg (bind rest)))
           (block
             (if
               (binary == (path h.name) (path name))
@@ -646,21 +646,17 @@
 
 === canonical ===
 import { to_string, to_int } from "std/fmt"
+import { List } from "std/list"
 
 export struct Header {
     name: String
     value: String
 }
 
-export enum Headers {
-    Nil
-    Cons(Header, Headers)
-}
-
 export struct Request {
     method: String
     path: String
-    headers: Headers
+    headers: List<Header>
     content_length: I64
     leftover: Bytes
 }
@@ -809,14 +805,14 @@ fn parse(data: Bytes, end: I64) -> HeadParse {
     if bytes_slice(data, sp2 + 1, line_end) != bytes("HTTP/1.1") {
         return HeadParse.Invalid("only HTTP/1.1 is spoken here")
     }
-    let mut headers = Headers.Nil
+    let mut headers: List<Header> = List.Nil
     let mut cursor = line_end
     while cursor < stop {
         cursor = cursor + 2
         let brk = line_break(data, cursor, stop)
         match header_line(data, cursor, brk) {
             Ok(h) => {
-                headers = Headers.Cons(h, headers)
+                headers = List.Cons(h, headers)
             }
             Err(rule) => {
                 return HeadParse.Invalid(rule)
@@ -945,10 +941,10 @@ fn lower(data: Bytes, from: I64, stop: I64) -> String {
     text_unchecked(out)
 }
 
-fn named(headers: Headers, name: String) -> I64 {
+fn named(headers: List<Header>, name: String) -> I64 {
     match headers {
-        Headers.Nil => 0
-        Headers.Cons(h, rest) => {
+        List.Nil => 0
+        List.Cons(h, rest) => {
             if h.name == name {
                 1 + named(rest, name)
             } else {
@@ -958,10 +954,10 @@ fn named(headers: Headers, name: String) -> I64 {
     }
 }
 
-fn lookup(headers: Headers, name: String) -> Option<String> {
+fn lookup(headers: List<Header>, name: String) -> Option<String> {
     match headers {
-        Headers.Nil => None
-        Headers.Cons(h, rest) => {
+        List.Nil => None
+        List.Cons(h, rest) => {
             if h.name == name {
                 Some(h.value)
             } else {

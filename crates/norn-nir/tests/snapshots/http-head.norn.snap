@@ -4,8 +4,9 @@ struct Request #1 (method, path, headers, content_length, leftover)
 enum Option #0 (None/0, Some/1)
 enum Result #1 (Ok/1, Err/1)
 enum IoError #2 (NotFound/0, Denied/0, InUse/0, Refused/0, Closed/0, Other/1)
-enum Headers #3 (Nil/0, Cons/2)
-enum HeadParse #4 (Incomplete/0, Complete/2, Invalid/1)
+enum HeadParse #3 (Incomplete/0, Complete/2, Invalid/1)
+enum List #4 (Nil/0, Cons/2)
+enum List<Header> #5 (Nil/0, Cons/2)
 
 fn verdict #0(_0/data)
     local _1/req
@@ -1205,7 +1206,7 @@ fn http.parse #15(_0/data, _1/end)
     _42 = ()
     goto b20
   b20:
-    _48 = Headers.Nil()
+    _48 = List<Header>.Nil()
     _7/headers = _48
     _8/cursor = _4/line_end
     goto b21
@@ -1233,7 +1234,7 @@ fn http.parse #15(_0/data, _1/end)
   b27:
     trap "no match arm applied"
   b28:
-    _54 = Headers.Cons(_10/h, _7/headers)
+    _54 = List<Header>.Cons(_10/h, _7/headers)
     _7/headers = _54
     _52 = ()
     goto b24
@@ -1907,11 +1908,55 @@ fn http.reason #26(_0/status)
     _1 = ""
     goto b1
 
-fn fmt.Display.to_string for I64 #27(_0/value)
+fn list.length #27(_0/items)
+  b0:
+    return ()
+
+fn list.empty #28()
+  b0:
+    return ()
+
+fn list.append #29(_0/items, _1/tail)
+  b0:
+    return ()
+
+fn list.reverse #30(_0/items)
+  b0:
+    return ()
+
+fn list.walk #31(_0/items, _1/out)
+  b0:
+    return ()
+
+fn list.take #32(_0/items, _1/count)
+  b0:
+    return ()
+
+fn list.drop #33(_0/items, _1/count)
+  b0:
+    return ()
+
+fn list.nth #34(_0/items, _1/index)
+  b0:
+    return ()
+
+fn list.contains #35(_0/items, _1/wanted)
+  b0:
+    return ()
+
+fn list.join #36(_0/items, _1/separator)
+  b0:
+    return ()
+
+fn fmt.Display.to_string for I64 #37(_0/value)
     local _1
   b0:
     _1 = call fmt.to_string#2(_0/value)
     return _1
+
+fn fmt.Display.to_string for T #38(_0)
+  b0:
+    return ()
 
 === output ===
 prefixes settled early: 0

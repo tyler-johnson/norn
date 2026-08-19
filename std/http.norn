@@ -17,23 +17,18 @@
 // reason phrase HTTP permits, where the builtin used to trap outside 100..=999.
 
 import { to_string, to_int } from "std/fmt"
+import { List } from "std/list"
 
 export struct Header {
     name: String
     value: String
 }
 
-// A hand-monomorphized cons list, the posts.norn idiom, until item 7's generics arrive. Parsing
-// prepends, so the newest appearance of a name sits first and lookup is last-wins.
-export enum Headers {
-    Nil
-    Cons(Header, Headers)
-}
-
 export struct Request {
     method: String
     path: String
-    headers: Headers
+    // Parsing prepends, so the newest appearance of a name sits first and lookup is last-wins.
+    headers: List<Header>
     content_length: I64
     // Body bytes that arrived in the same reads as the head. `save_body` writes them first.
     leftover: Bytes
@@ -223,14 +218,14 @@ fn parse(data: Bytes, end: I64) -> HeadParse {
 
     // The terminator search found the *first* blank line, so the head region holds no `\r\n\r\n`
     // and every header line between breaks is nonempty.
-    let mut headers = Headers.Nil
+    let mut headers: List<Header> = List.Nil
     let mut cursor = line_end
     while cursor < stop {
         cursor = cursor + 2
         let brk = line_break(data, cursor, stop)
         match header_line(data, cursor, brk) {
             Ok(h) => {
-                headers = Headers.Cons(h, headers)
+                headers = List.Cons(h, headers)
             }
             Err(rule) => {
                 return HeadParse.Invalid(rule)
@@ -371,11 +366,13 @@ fn lower(data: Bytes, from: I64, stop: I64) -> String {
     text_unchecked(out)
 }
 
-// Walks are recursive because a cons list is: the depth is bounded by the head cap.
-fn named(headers: Headers, name: String) -> I64 {
+// Walks are recursive because a cons list is: the depth is bounded by the head cap. These stay
+// local rather than moving to std/list, because they compare an element's *field* — a `Header`'s
+// name — and element-field functions live beside the fields they read.
+fn named(headers: List<Header>, name: String) -> I64 {
     match headers {
-        Headers.Nil => 0
-        Headers.Cons(h, rest) => {
+        List.Nil => 0
+        List.Cons(h, rest) => {
             if h.name == name {
                 1 + named(rest, name)
             } else {
@@ -385,10 +382,10 @@ fn named(headers: Headers, name: String) -> I64 {
     }
 }
 
-fn lookup(headers: Headers, name: String) -> Option<String> {
+fn lookup(headers: List<Header>, name: String) -> Option<String> {
     match headers {
-        Headers.Nil => None
-        Headers.Cons(h, rest) => {
+        List.Nil => None
+        List.Cons(h, rest) => {
             if h.name == name {
                 Some(h.value)
             } else {
