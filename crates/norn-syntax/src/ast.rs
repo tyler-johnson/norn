@@ -77,6 +77,8 @@ pub enum Item {
     Struct(StructDecl),
     Enum(EnumDecl),
     Fn(FnDecl),
+    Trait(TraitDecl),
+    Impl(ImplDecl),
     Reactor(ReactorDecl),
 }
 
@@ -149,6 +151,44 @@ pub struct FnDecl {
 pub struct Param {
     pub name: Ident,
     pub ty: Type,
+    pub span: Span,
+}
+
+/// `export trait Display { fn to_string(value: Self) -> String }` — a named set of function
+/// signatures a type can implement. Members are signatures only; every body lives in an `impl`.
+/// `Self` is an ordinary identifier here, resolved by the checker rather than the grammar.
+#[derive(Debug)]
+pub struct TraitDecl {
+    pub exported: Option<Span>,
+    pub name: Ident,
+    pub type_params: Vec<TypeParam>,
+    pub members: Vec<FnSig>,
+    pub span: Span,
+}
+
+/// A function signature without a body: what a trait asks its implementors for. `task` and
+/// `uses` parse here — the grammar is permissive, and which member shapes cohere is the
+/// checker's question.
+#[derive(Debug)]
+pub struct FnSig {
+    pub is_task: bool,
+    pub name: Ident,
+    pub type_params: Vec<TypeParam>,
+    pub params: Vec<Param>,
+    pub ret: Option<Type>,
+    pub uses: Vec<Path>,
+    pub span: Span,
+}
+
+/// `impl Display for I64 { … }` — a trait's functions, written for one type. There is no
+/// `export impl`: an impl travels with its trait and its type. The parameter list on `impl<T>`
+/// parses for the future; whether it means anything yet is the checker's question.
+#[derive(Debug)]
+pub struct ImplDecl {
+    pub type_params: Vec<TypeParam>,
+    pub trait_path: Path,
+    pub receiver: Type,
+    pub fns: Vec<FnDecl>,
     pub span: Span,
 }
 

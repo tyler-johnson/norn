@@ -129,35 +129,43 @@ fn print_item(item: &Item) -> String {
             out
         }
         Item::Fn(decl) => {
-            let mut out = String::new();
-            if decl.exported.is_some() {
-                out.push_str("export ");
-            }
-            if decl.is_task {
-                out.push_str("task ");
-            }
-            let params: Vec<_> = decl
-                .params
-                .iter()
-                .map(|p| format!("{}: {}", p.name.name, print_type(&p.ty)))
-                .collect();
-            out.push_str(&format!(
-                "fn {}{}({})",
-                decl.name.name,
-                print_type_params(&decl.type_params),
-                params.join(", ")
-            ));
-            if let Some(ret) = &decl.ret {
-                out.push_str(&format!(" -> {}", print_type(ret)));
-            }
-            if decl.uses.is_empty() {
-                out.push(' ');
-            } else {
-                let caps: Vec<_> = decl.uses.iter().map(|p| p.text()).collect();
-                out.push_str(&format!("\n{INDENT}uses {{ {} }}\n", caps.join(", ")));
-            }
-            out.push_str(&print_block(&decl.body, 0));
+            let mut out = print_fn(decl, 0);
             out.push('\n');
+            out
+        }
+        Item::Trait(decl) => {
+            let export = if decl.exported.is_some() {
+                "export "
+            } else {
+                ""
+            };
+            let mut out = format!(
+                "{export}trait {}{} {{\n",
+                decl.name.name,
+                print_type_params(&decl.type_params)
+            );
+            for member in &decl.members {
+                out.push_str(&print_fn_sig(member, 1));
+                out.push('\n');
+            }
+            out.push_str("}\n");
+            out
+        }
+        Item::Impl(decl) => {
+            let mut out = format!(
+                "impl{} {} for {} {{\n",
+                print_type_params(&decl.type_params),
+                decl.trait_path.text(),
+                print_type(&decl.receiver)
+            );
+            for (index, decl) in decl.fns.iter().enumerate() {
+                if index > 0 {
+                    out.push('\n');
+                }
+                out.push_str(&print_fn(decl, 1));
+                out.push('\n');
+            }
+            out.push_str("}\n");
             out
         }
         Item::Reactor(decl) => {
@@ -188,6 +196,79 @@ fn print_item(item: &Item) -> String {
             out
         }
     }
+}
+
+/// A whole function at the given indent — at 0 a top-level item, at 1 an `impl` member. The
+/// leading pad is included; the trailing newline is the caller's.
+fn print_fn(decl: &FnDecl, indent: usize) -> String {
+    let pad = INDENT.repeat(indent);
+    let mut out = pad.clone();
+    if decl.exported.is_some() {
+        out.push_str("export ");
+    }
+    out.push_str(&print_fn_head(
+        decl.is_task,
+        &decl.name.name,
+        &decl.type_params,
+        &decl.params,
+        decl.ret.as_ref(),
+    ));
+    if decl.uses.is_empty() {
+        out.push(' ');
+    } else {
+        let caps: Vec<_> = decl.uses.iter().map(|p| p.text()).collect();
+        out.push_str(&format!(
+            "\n{pad}{INDENT}uses {{ {} }}\n{pad}",
+            caps.join(", ")
+        ));
+    }
+    out.push_str(&print_block(&decl.body, indent));
+    out
+}
+
+/// A trait member: the head of a function with nothing after it.
+fn print_fn_sig(sig: &FnSig, indent: usize) -> String {
+    let pad = INDENT.repeat(indent);
+    let mut out = pad.clone();
+    out.push_str(&print_fn_head(
+        sig.is_task,
+        &sig.name.name,
+        &sig.type_params,
+        &sig.params,
+        sig.ret.as_ref(),
+    ));
+    if !sig.uses.is_empty() {
+        let caps: Vec<_> = sig.uses.iter().map(|p| p.text()).collect();
+        out.push_str(&format!("\n{pad}{INDENT}uses {{ {} }}", caps.join(", ")));
+    }
+    out
+}
+
+/// `task fn name<T>(a: T) -> T` — everything a declaration and a signature spell the same way.
+fn print_fn_head(
+    is_task: bool,
+    name: &str,
+    type_params: &[TypeParam],
+    params: &[Param],
+    ret: Option<&Type>,
+) -> String {
+    let mut out = String::new();
+    if is_task {
+        out.push_str("task ");
+    }
+    let params: Vec<_> = params
+        .iter()
+        .map(|p| format!("{}: {}", p.name.name, print_type(&p.ty)))
+        .collect();
+    out.push_str(&format!(
+        "fn {name}{}({})",
+        print_type_params(type_params),
+        params.join(", ")
+    ));
+    if let Some(ret) = ret {
+        out.push_str(&format!(" -> {}", print_type(ret)));
+    }
+    out
 }
 
 fn print_member(member: &Member) -> String {

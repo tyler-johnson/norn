@@ -57,6 +57,30 @@ impl Checker {
                 ast::Item::Enum(decl) => (&decl.name, decl.span),
                 ast::Item::Reactor(decl) => (&decl.name, decl.span),
                 ast::Item::Fn(_) => continue,
+                // Temporary, deleted when the trait passes land later in the item 7 wave: the
+                // grammar is ahead of the checker, and saying so beats an unknown-name cascade.
+                ast::Item::Trait(decl) => {
+                    self.push(
+                        Diagnostic::new(
+                            decl.name.span,
+                            "`trait` declarations are parsed but not checked yet",
+                        )
+                        .label("not checked yet")
+                        .note("traits land later in the generics wave; see BOOTSTRAP.md §8 item 7"),
+                    );
+                    continue;
+                }
+                ast::Item::Impl(decl) => {
+                    self.push(
+                        Diagnostic::new(
+                            decl.trait_path.span,
+                            "`impl` blocks are parsed but not checked yet",
+                        )
+                        .label("not checked yet")
+                        .note("traits land later in the generics wave; see BOOTSTRAP.md §8 item 7"),
+                    );
+                    continue;
+                }
             };
             if self.ns[self.current].types.contains_key(&name.name) {
                 self.push(
@@ -109,7 +133,7 @@ impl Checker {
                         .insert(decl.name.name.clone(), id);
                     TypeName::Reactor(id)
                 }
-                ast::Item::Fn(_) => unreachable!(),
+                ast::Item::Fn(_) | ast::Item::Trait(_) | ast::Item::Impl(_) => unreachable!(),
             };
             self.ns[self.current]
                 .types
@@ -214,7 +238,10 @@ impl Checker {
                     }
                     self.program.enums[id.index()].variants = variants;
                 }
-                ast::Item::Fn(_) | ast::Item::Reactor(_) => {}
+                ast::Item::Fn(_)
+                | ast::Item::Reactor(_)
+                | ast::Item::Trait(_)
+                | ast::Item::Impl(_) => {}
             }
         }
         self.type_params_in_scope.clear();

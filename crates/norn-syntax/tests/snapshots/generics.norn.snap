@@ -43,6 +43,23 @@
     (params (param value T))
     (ret String)
     (block (call (path value.to_string))))
+  (trait Display export (sig to_string (params (param value Self)) (ret String)))
+  (trait Sink
+    (sig label (params (param value Self)) (ret String))
+    (sig send task
+      (params (param value Self) (param target String))
+      (ret Bool)
+      (uses net.io)))
+  (impl Display
+    (for I64)
+    (fn to_string
+      (params (param value Self))
+      (ret String)
+      (block (call (path digits) (arg (path value))))))
+  (impl Display
+    (type-params T)
+    (for (ty List T))
+    (fn to_string (params (param value Self)) (ret String) (block (str "list"))))
   (fn main
     (params)
     (block
@@ -80,6 +97,28 @@ export fn contains<T: Eq>(items: List<T>, wanted: T) -> Bool {
 
 fn describe<T: Eq + Display>(value: T) -> String {
     value.to_string()
+}
+
+export trait Display {
+    fn to_string(value: Self) -> String
+}
+
+trait Sink {
+    fn label(value: Self) -> String
+    task fn send(value: Self, target: String) -> Bool
+        uses { net.io }
+}
+
+impl Display for I64 {
+    fn to_string(value: Self) -> String {
+        digits(value)
+    }
+}
+
+impl<T> Display for List<T> {
+    fn to_string(value: Self) -> String {
+        "list"
+    }
 }
 
 fn main() {

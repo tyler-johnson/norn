@@ -1,0 +1,27 @@
+error: a trait member is a signature, not a definition
+ --> traits.norn:6:37
+  |
+6 |     fn speak(value: Self) -> String {
+  |                                     ^ body on a trait member
+  = note: the body belongs in an `impl`; the trait names what implementors provide
+
+error: expected `for` naming the implementing type, found `{`
+  --> traits.norn:12:14
+   |
+12 | impl Display {}
+   |              ^
+   = note: an `impl` names both halves: `impl Display for I64 { … }`
+
+error: an `impl` cannot be exported
+  --> traits.norn:15:8
+   |
+15 | export impl Display for I64 {}
+   |        ^^^^ `export` on an `impl`
+   = note: an impl travels with its trait and its type: it is visible wherever they are
+
+error: expected `fn` in an `impl`, found `state`
+  --> traits.norn:19:5
+   |
+19 |     state count: I64 = 0
+   |     ^^^^^ not a function
+   = note: an `impl` block holds the trait's functions and nothing else

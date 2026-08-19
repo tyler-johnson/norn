@@ -1,7 +1,8 @@
-// Declarations with type parameters, ahead of the checker that gives them meaning. Parse-only,
-// the tasks.norn precedent: the shapes here pin the grammar — the corpus round-trips and
-// truncates them — and the executable dogfood lives in examples/run/generics.norn once the
-// item 7 checker lands.
+// Declarations with type parameters, traits, and impls, ahead of the checker that gives them
+// meaning. Parse-only, the tasks.norn precedent: the shapes here pin the grammar — the corpus
+// round-trips and truncates them, and some (the generic impl) are deferred surface the checker
+// will refuse — and the executable dogfood lives in examples/run/generics.norn once the item 7
+// checker lands.
 
 struct Pair<A, B> {
     first: A
@@ -33,6 +34,28 @@ export fn contains<T: Eq>(items: List<T>, wanted: T) -> Bool {
 
 fn describe<T: Eq + Display>(value: T) -> String {
     value.to_string()
+}
+
+export trait Display {
+    fn to_string(value: Self) -> String
+}
+
+trait Sink {
+    fn label(value: Self) -> String
+    task fn send(value: Self, target: String) -> Bool
+        uses { net.io }
+}
+
+impl Display for I64 {
+    fn to_string(value: Self) -> String {
+        digits(value)
+    }
+}
+
+impl<T> Display for List<T> {
+    fn to_string(value: Self) -> String {
+        "list"
+    }
 }
 
 fn main() {

@@ -162,6 +162,8 @@ impl Parser {
             TokenKind::Kw(Kw::Fn) | TokenKind::Kw(Kw::Task) => {
                 items.push(Item::Fn(self.fn_decl(None)?))
             }
+            TokenKind::Kw(Kw::Trait) => items.push(Item::Trait(self.trait_decl(None)?)),
+            TokenKind::Kw(Kw::Impl) => items.push(Item::Impl(self.impl_decl()?)),
             TokenKind::Kw(Kw::Reactor) => items.push(Item::Reactor(self.reactor_decl(None)?)),
             TokenKind::Kw(Kw::Export) => {
                 let exported = Some(self.advance().span);
@@ -173,15 +175,24 @@ impl Parser {
                     TokenKind::Kw(Kw::Fn) | TokenKind::Kw(Kw::Task) => {
                         items.push(Item::Fn(self.fn_decl(exported)?))
                     }
+                    TokenKind::Kw(Kw::Trait) => items.push(Item::Trait(self.trait_decl(exported)?)),
                     TokenKind::Kw(Kw::Reactor) => {
                         items.push(Item::Reactor(self.reactor_decl(exported)?))
+                    }
+                    TokenKind::Kw(Kw::Impl) => {
+                        let span = self.peek().span;
+                        return Err(self.push(
+                            Diagnostic::new(span, "an `impl` cannot be exported")
+                                .label("`export` on an `impl`")
+                                .note("an impl travels with its trait and its type: it is visible wherever they are"),
+                        ));
                     }
                     TokenKind::Kw(Kw::Signal) => {
                         let span = self.peek().span;
                         return Err(self.push(
                             Diagnostic::new(span, "`export signal` lives inside a reactor")
                                 .label("a signal is a reactor member")
-                                .note("at the top level, `export` prefixes `fn`, `task fn`, `struct`, `enum`, and `reactor`"),
+                                .note("at the top level, `export` prefixes `fn`, `task fn`, `struct`, `enum`, `trait`, and `reactor`"),
                         ));
                     }
                     other => {
@@ -194,7 +205,7 @@ impl Parser {
                                     other.describe()
                                 ),
                             )
-                            .note("`export` prefixes `fn`, `task fn`, `struct`, `enum`, and `reactor`"),
+                            .note("`export` prefixes `fn`, `task fn`, `struct`, `enum`, `trait`, and `reactor`"),
                         ));
                     }
                 }
@@ -228,7 +239,7 @@ impl Parser {
                     _ => diagnostic,
                 };
                 return Err(self.push(diagnostic.note(
-                    "a file contains `import`, `export`, `struct`, `enum`, `fn`, `task fn`, and `reactor` declarations",
+                    "a file contains `import`, `export`, `struct`, `enum`, `fn`, `task fn`, `trait`, `impl`, and `reactor` declarations",
                 )));
             }
         }
@@ -325,6 +336,8 @@ impl Parser {
                     | TokenKind::Kw(Kw::Enum)
                     | TokenKind::Kw(Kw::Fn)
                     | TokenKind::Kw(Kw::Task)
+                    | TokenKind::Kw(Kw::Trait)
+                    | TokenKind::Kw(Kw::Impl)
                     | TokenKind::Kw(Kw::Reactor)
             );
             if starts_decl && token.nl_before {
@@ -468,7 +481,7 @@ impl Parser {
         let name = self.ident()?;
         let type_params = self.type_params()?;
 
-        let params = self.param_list()?;
+        let (params, _) = self.param_list()?;
 
         let ret = if self.eat(&TokenKind::ThinArrow) {
             Some(self.ty()?)
@@ -506,7 +519,9 @@ impl Parser {
         })
     }
 
-    fn param_list(&mut self) -> PResult<Vec<Param>> {
+    /// The parenthesised parameters and the closing paren's span — the span is where a bodiless
+    /// signature ends when it has no return type.
+    fn param_list(&mut self) -> PResult<(Vec<Param>, Span)> {
         self.expect(TokenKind::LParen)?;
         let mut params = Vec::new();
         while !self.at(&TokenKind::RParen) && !self.at_eof() {
@@ -519,8 +534,8 @@ impl Parser {
                 break;
             }
         }
-        self.expect(TokenKind::RParen)?;
-        Ok(params)
+        let close = self.expect(TokenKind::RParen)?.span;
+        Ok((params, close))
     }
 
     /// `uses { clock, net.io }`. The caller has already decided whether a `uses` is allowed here.
@@ -536,11 +551,140 @@ impl Parser {
         Ok(uses)
     }
 
+    /// `export trait Display { fn to_string(value: Self) -> String }`. Members are signatures
+    /// only — a body here is refused with directions to `impl` — separated like fields.
+    fn trait_decl(&mut self, exported: Option<Span>) -> PResult<TraitDecl> {
+        let start = exported.unwrap_or(self.peek().span);
+        self.advance();
+        let name = self.ident()?;
+        let type_params = self.type_params()?;
+        self.expect(TokenKind::LBrace)?;
+        let mut members = Vec::new();
+        while !self.at(&TokenKind::RBrace) && !self.at_eof() {
+            members.push(self.fn_sig()?);
+            self.separator(&TokenKind::RBrace, "member")?;
+        }
+        let end = self.expect(TokenKind::RBrace)?.span;
+        Ok(TraitDecl {
+            exported,
+            name,
+            type_params,
+            members,
+            span: start.to(end),
+        })
+    }
+
+    /// One trait member: `fn_decl`'s header with no body allowed after it. `task` and a `uses`
+    /// clause parse — the grammar is permissive about member shapes, the checker is not — but the
+    /// pure-function rule is the parser's here exactly as it is in `fn_decl`.
+    fn fn_sig(&mut self) -> PResult<FnSig> {
+        let start = self.peek().span;
+        let is_task = self.eat(&TokenKind::Kw(Kw::Task));
+        self.expect(TokenKind::Kw(Kw::Fn))?;
+        let name = self.ident()?;
+        let type_params = self.type_params()?;
+        let (params, close) = self.param_list()?;
+        let mut end = close;
+        let ret = if self.eat(&TokenKind::ThinArrow) {
+            let ty = self.ty()?;
+            end = ty.span;
+            Some(ty)
+        } else {
+            None
+        };
+        let mut uses = Vec::new();
+        if self.at(&TokenKind::Kw(Kw::Uses)) {
+            let uses_span = self.peek().span;
+            if !is_task {
+                self.errors.push(
+                    Diagnostic::new(uses_span, "only a `task fn` may declare capabilities")
+                        .label("`uses` on an ordinary function")
+                        .note(
+                            "ordinary functions are pure; move the effectful work into a `task fn`",
+                        ),
+                );
+            }
+            uses = self.uses_clause()?;
+            end = uses.last().map_or(end, |path| path.span);
+        }
+        if self.at(&TokenKind::LBrace) {
+            let span = self.peek().span;
+            return Err(self.push(
+                Diagnostic::new(span, "a trait member is a signature, not a definition")
+                    .label("body on a trait member")
+                    .note(
+                        "the body belongs in an `impl`; the trait names what implementors provide",
+                    ),
+            ));
+        }
+        Ok(FnSig {
+            is_task,
+            name,
+            type_params,
+            params,
+            ret,
+            uses,
+            span: start.to(end),
+        })
+    }
+
+    /// `impl Display for I64 { … }`. The block holds function declarations and nothing else;
+    /// like top-level declarations, consecutive functions are separated by line breaks.
+    fn impl_decl(&mut self) -> PResult<ImplDecl> {
+        let start = self.advance().span;
+        let type_params = self.type_params()?;
+        let trait_path = self.path()?;
+        if !self.at(&TokenKind::Kw(Kw::For)) {
+            let found = self.peek_kind().describe();
+            let span = self.peek().span;
+            return Err(self.push(
+                Diagnostic::new(
+                    span,
+                    format!("expected `for` naming the implementing type, found {found}"),
+                )
+                .note("an `impl` names both halves: `impl Display for I64 { … }`"),
+            ));
+        }
+        self.advance();
+        let receiver = self.ty()?;
+        self.expect(TokenKind::LBrace)?;
+        let mut fns = Vec::new();
+        while !self.at(&TokenKind::RBrace) && !self.at_eof() {
+            if !fns.is_empty() && !self.peek().nl_before {
+                let found = self.peek_kind().describe();
+                return Err(self.error(format!(
+                    "expected a line break before {found}, found it on the same line as the previous function"
+                )));
+            }
+            if !matches!(
+                self.peek_kind(),
+                TokenKind::Kw(Kw::Fn) | TokenKind::Kw(Kw::Task)
+            ) {
+                let found = self.peek_kind().describe();
+                let span = self.peek().span;
+                return Err(self.push(
+                    Diagnostic::new(span, format!("expected `fn` in an `impl`, found {found}"))
+                        .label("not a function")
+                        .note("an `impl` block holds the trait's functions and nothing else"),
+                ));
+            }
+            fns.push(self.fn_decl(None)?);
+        }
+        let end = self.expect(TokenKind::RBrace)?.span;
+        Ok(ImplDecl {
+            type_params,
+            trait_path,
+            receiver,
+            fns,
+            span: start.to(end),
+        })
+    }
+
     fn reactor_decl(&mut self, exported: Option<Span>) -> PResult<ReactorDecl> {
         let start = exported.unwrap_or(self.peek().span);
         self.advance();
         let name = self.ident()?;
-        let params = self.param_list()?;
+        let (params, _) = self.param_list()?;
         let uses = if self.at(&TokenKind::Kw(Kw::Uses)) {
             self.uses_clause()?
         } else {

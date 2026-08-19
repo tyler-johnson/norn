@@ -398,7 +398,9 @@ fn a_top_level_export_signal_is_pointed_home() {
 fn export_prefixes_only_declarations() {
     let rendered = errors("export let x = 1\n");
     assert!(
-        rendered.contains("`export` prefixes `fn`, `task fn`, `struct`, `enum`, and `reactor`"),
+        rendered.contains(
+            "`export` prefixes `fn`, `task fn`, `struct`, `enum`, `trait`, and `reactor`"
+        ),
         "{rendered}"
     );
 }
@@ -454,6 +456,81 @@ fn an_empty_type_parameter_list_is_refused() {
 fn a_trailing_comma_in_type_parameters_is_tolerated() {
     let dumped = ast("fn f<T, U,>(x: T) {}\n");
     assert!(dumped.contains("(type-params T U)"), "{dumped}");
+}
+
+#[test]
+fn trait_declarations_dump_signatures() {
+    let dumped = ast("export trait Display {\n    fn to_string(value: Self) -> String\n}\n")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(
+        dumped.contains(
+            "(trait Display export (sig to_string (params (param value Self)) (ret String)))"
+        ),
+        "{dumped}"
+    );
+}
+
+#[test]
+fn impl_declarations_dump_both_halves() {
+    let dumped = ast(
+        "impl<T> Display for List<T> {\n    fn to_string(value: Self) -> String {\n        \"list\"\n    }\n}\n",
+    )
+    .split_whitespace()
+    .collect::<Vec<_>>()
+    .join(" ");
+    assert!(
+        dumped.contains("(impl Display (type-params T) (for (ty List T))"),
+        "{dumped}"
+    );
+    assert!(dumped.contains("(fn to_string"), "{dumped}");
+}
+
+#[test]
+fn traits_and_impls_round_trip() {
+    let source = "trait Sink {\n    fn label(value: Self) -> String\n    task fn send(value: Self, target: String) -> Bool\n        uses { net.io }\n}\n\nimpl Display for I64 {\n    fn first(value: Self) -> String {\n        digits(value)\n    }\n\n    fn second(value: Self) -> String {\n        digits(value)\n    }\n}\n";
+    let parsed = parse(source);
+    assert!(parsed.ok(), "{}", errors(source));
+    assert_eq!(print::module(&parsed.module), source);
+}
+
+#[test]
+fn a_trait_member_has_no_body() {
+    let rendered = errors(
+        "trait Speak {\n    fn speak(value: Self) -> String {\n        \"woof\"\n    }\n}\n",
+    );
+    assert!(
+        rendered.contains("a trait member is a signature, not a definition"),
+        "{rendered}"
+    );
+}
+
+#[test]
+fn an_impl_names_the_type_it_is_for() {
+    let rendered = errors("impl Display {}\n");
+    assert!(
+        rendered.contains("expected `for` naming the implementing type"),
+        "{rendered}"
+    );
+}
+
+#[test]
+fn an_impl_cannot_be_exported() {
+    let rendered = errors("export impl Display for I64 {}\n");
+    assert!(
+        rendered.contains("an `impl` cannot be exported"),
+        "{rendered}"
+    );
+}
+
+#[test]
+fn an_impl_holds_only_functions() {
+    let rendered = errors("impl Display for Bool {\n    state count: I64 = 0\n}\n");
+    assert!(
+        rendered.contains("expected `fn` in an `impl`, found `state`"),
+        "{rendered}"
+    );
 }
 
 #[test]

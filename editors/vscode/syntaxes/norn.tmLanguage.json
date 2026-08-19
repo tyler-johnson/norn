@@ -28,6 +28,12 @@
       "include": "#enum-decl"
     },
     {
+      "include": "#trait-decl"
+    },
+    {
+      "include": "#impl-decl"
+    },
+    {
       "include": "#reactor-decl"
     },
     {
@@ -564,10 +570,58 @@
         }
       ]
     },
+    "trait-decl": {
+      "comment": "`trait Display {` — the header line; the member signatures inside colour through #fn-decl and #return-type.",
+      "match": "\\b(trait)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(<[^>{]*>)?",
+      "captures": {
+        "1": {
+          "name": "storage.type.trait.norn"
+        },
+        "2": {
+          "name": "entity.name.type.trait.norn"
+        },
+        "3": {
+          "patterns": [
+            {
+              "include": "#type"
+            }
+          ]
+        }
+      }
+    },
+    "impl-decl": {
+      "comment": "`impl Display for I64 {` — both halves are types.",
+      "match": "\\b(impl)\\s*(<[^>{]*>)?\\s*([A-Za-z_][A-Za-z0-9_.]*)\\s+(for)\\s+([^{]+)",
+      "captures": {
+        "1": {
+          "name": "storage.type.impl.norn"
+        },
+        "2": {
+          "patterns": [
+            {
+              "include": "#type"
+            }
+          ]
+        },
+        "3": {
+          "name": "entity.name.type.trait.norn"
+        },
+        "4": {
+          "name": "keyword.other.for.norn"
+        },
+        "5": {
+          "patterns": [
+            {
+              "include": "#type"
+            }
+          ]
+        }
+      }
+    },
     "reserved": {
       "comment": "Words held for a later milestone. The lexer refuses them as names, so showing them as errors is the truth rather than a warning.",
       "name": "invalid.illegal.reserved.norn",
-      "match": "\\b(?:blocking|const|delay|event|for|impl|in|interface|macro|pub|source|static|trait|type|where)\\b"
+      "match": "\\b(?:blocking|const|delay|event|in|interface|macro|pub|source|static|type|where)\\b"
     },
     "keywords": {
       "patterns": [
@@ -599,7 +653,11 @@
         },
         {
           "name": "storage.type.norn",
-          "match": "\\b(?:fn|struct|enum|reactor)\\b"
+          "match": "\\b(?:fn|struct|enum|reactor|trait|impl)\\b"
+        },
+        {
+          "name": "keyword.other.for.norn",
+          "match": "\\b(?:for)\\b"
         },
         {
           "name": "storage.modifier.export.norn",

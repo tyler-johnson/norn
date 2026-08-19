@@ -1,0 +1,20 @@
+// What the trait and impl grammar refuses. Each case recovers to the next declaration, so one
+// file pins the whole set.
+
+// A trait member is a signature; the body lives in an impl.
+trait Speak {
+    fn speak(value: Self) -> String {
+        "woof"
+    }
+}
+
+// An impl names both halves: the trait, and the type it implements it for.
+impl Display {}
+
+// An impl cannot be exported; it travels with its trait and its type.
+export impl Display for I64 {}
+
+// An impl block holds the trait's functions and nothing else.
+impl Display for Bool {
+    state count: I64 = 0
+}

@@ -169,35 +169,36 @@ fn dump_item(item: &Item) -> Node {
             }
             list("enum", children)
         }
-        Item::Fn(decl) => {
+        Item::Fn(decl) => dump_fn(decl),
+        Item::Trait(decl) => {
             let mut children = vec![atom(&decl.name.name)];
             if decl.exported.is_some() {
                 children.push(atom("export"));
             }
-            if decl.is_task {
-                children.push(atom("task"));
-            }
             if !decl.type_params.is_empty() {
                 children.push(dump_type_params(&decl.type_params));
             }
-            children.push(list(
-                "params",
-                decl.params
-                    .iter()
-                    .map(|p| list("param", vec![atom(&p.name.name), dump_type(&p.ty)]))
-                    .collect(),
-            ));
-            if let Some(ret) = &decl.ret {
-                children.push(list("ret", vec![dump_type(ret)]));
-            }
-            if !decl.uses.is_empty() {
-                children.push(list(
-                    "uses",
-                    decl.uses.iter().map(|p| atom(p.text())).collect(),
+            for member in &decl.members {
+                let mut parts = vec![atom(&member.name.name)];
+                parts.extend(dump_fn_head(
+                    member.is_task,
+                    &member.type_params,
+                    &member.params,
+                    member.ret.as_ref(),
+                    &member.uses,
                 ));
+                children.push(list("sig", parts));
             }
-            children.push(dump_block(&decl.body));
-            list("fn", children)
+            list("trait", children)
+        }
+        Item::Impl(decl) => {
+            let mut children = vec![atom(decl.trait_path.text())];
+            if !decl.type_params.is_empty() {
+                children.push(dump_type_params(&decl.type_params));
+            }
+            children.push(list("for", vec![dump_type(&decl.receiver)]));
+            children.extend(decl.fns.iter().map(dump_fn));
+            list("impl", children)
         }
         Item::Reactor(decl) => {
             let mut children = vec![atom(&decl.name.name)];
@@ -221,6 +222,54 @@ fn dump_item(item: &Item) -> Node {
             list("reactor", children)
         }
     }
+}
+
+fn dump_fn(decl: &FnDecl) -> Node {
+    let mut children = vec![atom(&decl.name.name)];
+    if decl.exported.is_some() {
+        children.push(atom("export"));
+    }
+    children.extend(dump_fn_head(
+        decl.is_task,
+        &decl.type_params,
+        &decl.params,
+        decl.ret.as_ref(),
+        &decl.uses,
+    ));
+    children.push(dump_block(&decl.body));
+    list("fn", children)
+}
+
+/// The head a declaration and a trait signature share: `task`, type parameters, parameters,
+/// return type, and the `uses` clause, each emitted only when present.
+fn dump_fn_head(
+    is_task: bool,
+    type_params: &[TypeParam],
+    params: &[Param],
+    ret: Option<&Type>,
+    uses: &[Path],
+) -> Vec<Node> {
+    let mut children = Vec::new();
+    if is_task {
+        children.push(atom("task"));
+    }
+    if !type_params.is_empty() {
+        children.push(dump_type_params(type_params));
+    }
+    children.push(list(
+        "params",
+        params
+            .iter()
+            .map(|p| list("param", vec![atom(&p.name.name), dump_type(&p.ty)]))
+            .collect(),
+    ));
+    if let Some(ret) = ret {
+        children.push(list("ret", vec![dump_type(ret)]));
+    }
+    if !uses.is_empty() {
+        children.push(list("uses", uses.iter().map(|p| atom(p.text())).collect()));
+    }
+    children
 }
 
 fn dump_member(member: &Member) -> Node {

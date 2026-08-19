@@ -210,6 +210,9 @@ impl Checker {
                 ast::Item::Struct(decl) => (&decl.name, DeclKind::Struct, decl.exported),
                 ast::Item::Enum(decl) => (&decl.name, DeclKind::Enum, decl.exported),
                 ast::Item::Reactor(decl) => (&decl.name, DeclKind::Reactor, decl.exported),
+                // Parsed ahead of the checking that gives them meaning; `declare_types` reports
+                // them, so they contribute nothing to the exports view.
+                ast::Item::Trait(_) | ast::Item::Impl(_) => continue,
             };
             decls
                 .entry(name.name.clone())
