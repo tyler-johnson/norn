@@ -516,6 +516,11 @@ pub struct FnDef {
     pub locals: Vec<LocalDef>,
     pub ret: Ty,
     pub body: Expr,
+    /// Neutered by the generics drain: a template, symbolic instance, or trait-call stub whose
+    /// body was cut to `()`. Nothing executable references it — it survives only because ids are
+    /// positional. The signature may still carry `Ty::Param`, so consumers that need real types
+    /// must test this flag rather than scan for parameters.
+    pub inert: bool,
     pub span: Span,
 }
 

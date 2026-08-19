@@ -410,6 +410,7 @@ impl Checker {
                     ty: Ty::Error,
                     span: decl.span,
                 },
+                inert: false,
                 span: decl.span,
             });
             // Only the entry module's `main` is an entry point; an imported `main` is an ordinary
@@ -581,6 +582,7 @@ impl Checker {
                 ty: Ty::Error,
                 span,
             },
+            inert: false,
             span,
         });
         id

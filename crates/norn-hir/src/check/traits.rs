@@ -380,6 +380,7 @@ impl Checker {
                         ty: Ty::Error,
                         span: member.span,
                     },
+                    inert: false,
                     span: member.span,
                 });
                 methods.push((name, Some(id)));

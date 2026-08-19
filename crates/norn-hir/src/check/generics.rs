@@ -904,6 +904,7 @@ impl Checker {
                 ty: Ty::Error,
                 span: at,
             },
+            inert: false,
             span: at,
         });
         let index = self.generics.trait_calls.len();
@@ -1052,6 +1053,7 @@ impl Checker {
                 ty: Ty::Error,
                 span,
             },
+            inert: false,
             span,
         });
         let symbolic = args.iter().any(|arg| self.mentions_param(arg));
@@ -1509,6 +1511,7 @@ impl Checker {
             let def = &mut self.program.fns[id.index()];
             let params = def.params;
             def.locals.truncate(params);
+            def.inert = true;
             def.body = Expr {
                 kind: ExprKind::Unit,
                 ty: Ty::Unit,
