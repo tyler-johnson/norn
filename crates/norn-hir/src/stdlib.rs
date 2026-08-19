@@ -12,6 +12,7 @@
 pub const STD: &[(&str, &str)] = &[
     ("std/fmt", include_str!("../../../std/fmt.norn")),
     ("std/time", include_str!("../../../std/time.norn")),
+    ("std/bytes", include_str!("../../../std/bytes.norn")),
 ];
 
 /// The text of the standard-library module `key` names, if there is one.

@@ -1,0 +1,73 @@
+// Bytes → text: the checked half of the pair whose trusting half is the `text_unchecked`
+// intrinsic. The first std function that retired a builtin — `bytes_text` left the table when
+// this landed, and the validation it did in Rust is now ordinary Norn, differentially tested
+// like any user file.
+//
+// Import the names you need (`import { to_string } from "std/bytes"`): the namespace spelling
+// `import * as bytes` is refused while `bytes` itself remains a builtin.
+
+export fn to_string(data: Bytes) -> Option<String> {
+    let len = bytes_len(data)
+    let mut i = 0
+    while i < len {
+        let width = sequence(data, i, len)
+        if width == 0 {
+            return None
+        }
+        i = i + width
+    }
+    Some(text_unchecked(data))
+}
+
+// The width of the well-formed UTF-8 sequence starting at `i`, or 0 if there is none.
+// RFC 3629's table: leads C2..DF, E0..EF, F0..F4; continuations 80..BF, with the first
+// continuation narrowed at the edges — E0 excludes overlongs (A0..BF), ED excludes surrogates
+// (80..9F), F0 excludes overlongs (90..BF), F4 caps the code space (80..8F). Leads 80..C1 and
+// F5..FF are never valid.
+fn sequence(data: Bytes, i: I64, len: I64) -> I64 {
+    let lead = data[i]
+    if lead < 128 {
+        return 1
+    }
+    if lead < 194 || lead > 244 {
+        return 0
+    }
+    if lead < 224 {
+        if within(data, i + 1, len, 128, 191) {
+            return 2
+        }
+        return 0
+    }
+    if lead < 240 {
+        let mut low = 128
+        let mut high = 191
+        if lead == 224 {
+            low = 160
+        }
+        if lead == 237 {
+            high = 159
+        }
+        if within(data, i + 1, len, low, high) && within(data, i + 2, len, 128, 191) {
+            return 3
+        }
+        return 0
+    }
+    let mut low = 128
+    let mut high = 191
+    if lead == 240 {
+        low = 144
+    }
+    if lead == 244 {
+        high = 143
+    }
+    if within(data, i + 1, len, low, high) && within(data, i + 2, len, 128, 191) && within(data, i + 3, len, 128, 191) {
+        return 4
+    }
+    0
+}
+
+// True when `i` is in range and `data[i]` lies in `low..=high` — the guard order is what makes
+// the `data[i]` safe.
+fn within(data: Bytes, i: I64, len: I64, low: I64, high: I64) -> Bool {
+    i < len && data[i] >= low && data[i] <= high
+}

@@ -1,0 +1,173 @@
+=== ast ===
+(module
+  (fn to_string export
+    (params (param data Bytes))
+    (ret (ty Option String))
+    (block
+      (let len (call (path bytes_len) (arg (path data))))
+      (let i mut (int 0))
+      (while
+        (binary < (path i) (path len))
+        (block
+          (let width
+            (call (path sequence) (arg (path data)) (arg (path i)) (arg (path len))))
+          (if (binary == (path width) (int 0)) (block (return (path None))))
+          (assign (path i) (binary + (path i) (path width)))))
+      (call (path Some) (arg (call (path text_unchecked) (arg (path data)))))))
+  (fn sequence
+    (params (param data Bytes) (param i I64) (param len I64))
+    (ret I64)
+    (block
+      (let lead (index (path data) (path i)))
+      (if (binary < (path lead) (int 128)) (block (return (int 1))))
+      (if
+        (binary ||
+          (binary < (path lead) (int 194))
+          (binary > (path lead) (int 244)))
+        (block (return (int 0))))
+      (if
+        (binary < (path lead) (int 224))
+        (block
+          (if
+            (call
+              (path within)
+              (arg (path data))
+              (arg (binary + (path i) (int 1)))
+              (arg (path len))
+              (arg (int 128))
+              (arg (int 191)))
+            (block (return (int 2))))
+          (return (int 0))))
+      (if
+        (binary < (path lead) (int 240))
+        (block
+          (let low mut (int 128))
+          (let high mut (int 191))
+          (if
+            (binary == (path lead) (int 224))
+            (block (assign (path low) (int 160))))
+          (if
+            (binary == (path lead) (int 237))
+            (block (assign (path high) (int 159))))
+          (if
+            (binary &&
+              (call
+                (path within)
+                (arg (path data))
+                (arg (binary + (path i) (int 1)))
+                (arg (path len))
+                (arg (path low))
+                (arg (path high)))
+              (call
+                (path within)
+                (arg (path data))
+                (arg (binary + (path i) (int 2)))
+                (arg (path len))
+                (arg (int 128))
+                (arg (int 191))))
+            (block (return (int 3))))
+          (return (int 0))))
+      (let low mut (int 128))
+      (let high mut (int 191))
+      (if (binary == (path lead) (int 240)) (block (assign (path low) (int 144))))
+      (if (binary == (path lead) (int 244)) (block (assign (path high) (int 143))))
+      (if
+        (binary &&
+          (binary &&
+            (call
+              (path within)
+              (arg (path data))
+              (arg (binary + (path i) (int 1)))
+              (arg (path len))
+              (arg (path low))
+              (arg (path high)))
+            (call
+              (path within)
+              (arg (path data))
+              (arg (binary + (path i) (int 2)))
+              (arg (path len))
+              (arg (int 128))
+              (arg (int 191))))
+          (call
+            (path within)
+            (arg (path data))
+            (arg (binary + (path i) (int 3)))
+            (arg (path len))
+            (arg (int 128))
+            (arg (int 191))))
+        (block (return (int 4))))
+      (int 0)))
+  (fn within
+    (params
+      (param data Bytes)
+      (param i I64)
+      (param len I64)
+      (param low I64)
+      (param high I64))
+    (ret Bool)
+    (block
+      (binary &&
+        (binary &&
+          (binary < (path i) (path len))
+          (binary >= (index (path data) (path i)) (path low)))
+        (binary <= (index (path data) (path i)) (path high))))))
+
+=== canonical ===
+export fn to_string(data: Bytes) -> Option<String> {
+    let len = bytes_len(data)
+    let mut i = 0
+    while i < len {
+        let width = sequence(data, i, len)
+        if width == 0 {
+            return None
+        }
+        i = i + width
+    }
+    Some(text_unchecked(data))
+}
+
+fn sequence(data: Bytes, i: I64, len: I64) -> I64 {
+    let lead = data[i]
+    if lead < 128 {
+        return 1
+    }
+    if lead < 194 || lead > 244 {
+        return 0
+    }
+    if lead < 224 {
+        if within(data, i + 1, len, 128, 191) {
+            return 2
+        }
+        return 0
+    }
+    if lead < 240 {
+        let mut low = 128
+        let mut high = 191
+        if lead == 224 {
+            low = 160
+        }
+        if lead == 237 {
+            high = 159
+        }
+        if within(data, i + 1, len, low, high) && within(data, i + 2, len, 128, 191) {
+            return 3
+        }
+        return 0
+    }
+    let mut low = 128
+    let mut high = 191
+    if lead == 240 {
+        low = 144
+    }
+    if lead == 244 {
+        high = 143
+    }
+    if within(data, i + 1, len, low, high) && within(data, i + 2, len, 128, 191) && within(data, i + 3, len, 128, 191) {
+        return 4
+    }
+    0
+}
+
+fn within(data: Bytes, i: I64, len: I64, low: I64, high: I64) -> Bool {
+    i < len && data[i] >= low && data[i] <= high
+}
