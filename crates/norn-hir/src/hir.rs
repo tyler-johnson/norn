@@ -714,7 +714,16 @@ pub enum Builtin {
     /// only way to spell it.
     BytesAt,
     FileCreate,
+    /// The write half of the file seam: `file_create` opens with authority, and these two drive
+    /// the open handle — which is why neither needs a capability of its own.
+    FileWrite,
+    FileClose,
     FlowOfFile,
+    /// One chunk of a flow, empty when the flow is exhausted. With `flow_len` and `flow_close`
+    /// this is what lets a flow be consumed from Norn — `std/flow`'s `pipe` is the first taker.
+    FlowNext,
+    FlowLen,
+    FlowClose,
     PipeTo,
     HttpReadRequest,
     RequestMethod,
@@ -749,7 +758,12 @@ impl Builtin {
         Builtin::Byte,
         Builtin::BytesConcat,
         Builtin::FileCreate,
+        Builtin::FileWrite,
+        Builtin::FileClose,
         Builtin::FlowOfFile,
+        Builtin::FlowNext,
+        Builtin::FlowLen,
+        Builtin::FlowClose,
         Builtin::PipeTo,
         Builtin::HttpReadRequest,
         Builtin::RequestMethod,
@@ -780,7 +794,12 @@ impl Builtin {
             "byte" => Some(Builtin::Byte),
             "bytes_concat" => Some(Builtin::BytesConcat),
             "file_create" => Some(Builtin::FileCreate),
+            "file_write" => Some(Builtin::FileWrite),
+            "file_close" => Some(Builtin::FileClose),
             "flow_of_file" => Some(Builtin::FlowOfFile),
+            "flow_next" => Some(Builtin::FlowNext),
+            "flow_len" => Some(Builtin::FlowLen),
+            "flow_close" => Some(Builtin::FlowClose),
             "pipe_to" => Some(Builtin::PipeTo),
             "http_read_request" => Some(Builtin::HttpReadRequest),
             "request_method" => Some(Builtin::RequestMethod),
@@ -814,7 +833,12 @@ impl Builtin {
             Builtin::BytesConcat => "bytes_concat",
             Builtin::BytesAt => "bytes_at",
             Builtin::FileCreate => "file_create",
+            Builtin::FileWrite => "file_write",
+            Builtin::FileClose => "file_close",
             Builtin::FlowOfFile => "flow_of_file",
+            Builtin::FlowNext => "flow_next",
+            Builtin::FlowLen => "flow_len",
+            Builtin::FlowClose => "flow_close",
             Builtin::PipeTo => "pipe_to",
             Builtin::HttpReadRequest => "http_read_request",
             Builtin::RequestMethod => "request_method",
@@ -843,6 +867,7 @@ impl Builtin {
             | Builtin::Byte
             | Builtin::BytesConcat
             | Builtin::BytesAt
+            | Builtin::FlowLen
             | Builtin::RequestMethod
             | Builtin::RequestPath
             | Builtin::RequestHeader => true,
@@ -853,10 +878,14 @@ impl Builtin {
             | Builtin::TcpRead
             | Builtin::TcpWrite
             | Builtin::TcpClose
+            | Builtin::FileCreate
+            | Builtin::FileWrite
+            | Builtin::FileClose
+            | Builtin::FlowOfFile
+            | Builtin::FlowNext
+            | Builtin::FlowClose
             | Builtin::Send
             | Builtin::Latest
-            | Builtin::FileCreate
-            | Builtin::FlowOfFile
             | Builtin::PipeTo
             | Builtin::HttpReadRequest
             // `request_body` computes nothing, but it opens a traced resource, and a turn must
@@ -886,6 +915,14 @@ impl Builtin {
             | Builtin::Byte
             | Builtin::BytesConcat
             | Builtin::BytesAt
+            // The open handle is the authority: `file_create` and `flow_of_file` checked a
+            // capability when they opened it, and driving or closing what is already open asks
+            // for nothing more — the `pipe_to` precedent.
+            | Builtin::FileWrite
+            | Builtin::FileClose
+            | Builtin::FlowNext
+            | Builtin::FlowLen
+            | Builtin::FlowClose
             | Builtin::PipeTo
             | Builtin::RequestMethod
             | Builtin::RequestPath
@@ -944,7 +981,14 @@ impl Builtin {
             Builtin::BytesConcat => (vec![Ty::Bytes, Ty::Bytes], Ty::Bytes),
             Builtin::BytesAt => (vec![Ty::Bytes, Ty::I64], Ty::I64),
             Builtin::FileCreate => (vec![Ty::Str], task(fallible(file()))),
+            Builtin::FileWrite => (vec![borrowed(file()), Ty::Bytes], task(fallible(Ty::Unit))),
+            Builtin::FileClose => (vec![file()], task(Ty::Unit)),
             Builtin::FlowOfFile => (vec![Ty::Str], task(fallible(flow()))),
+            // An empty chunk means the flow is exhausted — a mid-stream end of input is already
+            // `UnexpectedEof` in the runtime, so empty is unambiguous.
+            Builtin::FlowNext => (vec![borrowed(flow())], task(fallible(Ty::Bytes))),
+            Builtin::FlowLen => (vec![borrowed(flow())], Ty::I64),
+            Builtin::FlowClose => (vec![flow()], task(Ty::Unit)),
             Builtin::PipeTo => (vec![flow(), file()], task(fallible(Ty::I64))),
             Builtin::HttpReadRequest => (vec![connection()], task(fallible(request()))),
             Builtin::RequestMethod => (vec![borrowed(request())], Ty::Str),

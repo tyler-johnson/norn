@@ -138,7 +138,12 @@ pub enum Builtin {
     BytesConcat,
     BytesAt,
     FileCreate,
+    FileWrite,
+    FileClose,
     FlowOfFile,
+    FlowNext,
+    FlowLen,
+    FlowClose,
     PipeTo,
     HttpReadRequest,
     RequestMethod,
@@ -171,7 +176,12 @@ impl Builtin {
             Builtin::BytesConcat => "bytes_concat",
             Builtin::BytesAt => "bytes_at",
             Builtin::FileCreate => "file_create",
+            Builtin::FileWrite => "file_write",
+            Builtin::FileClose => "file_close",
             Builtin::FlowOfFile => "flow_of_file",
+            Builtin::FlowNext => "flow_next",
+            Builtin::FlowLen => "flow_len",
+            Builtin::FlowClose => "flow_close",
             Builtin::PipeTo => "pipe_to",
             Builtin::HttpReadRequest => "http_read_request",
             Builtin::RequestMethod => "request_method",
@@ -482,6 +492,18 @@ fn eval_builtin(
                 }
             }
         }
+        Builtin::FlowLen => {
+            let id = resource("flow_len", &args[0])?;
+            let Some(cx) = cx else {
+                return Err(impure_trap("flow_len"));
+            };
+            match cx.flow_len(id) {
+                Ok(length) => Value::Int(length),
+                Err(err) => {
+                    return Err(Trap::new(format!("`flow_len`: {}", err.kind()), func));
+                }
+            }
+        }
         Builtin::Latest => {
             let Value::Signal(reactor, export) = &args[0] else {
                 return Err(Trap::new("`latest` of something that is not a signal", func));
@@ -652,7 +674,7 @@ fn poll_builtin(
                 Poll::Pending => Poll::Pending,
             }
         }
-        Builtin::TcpClose => {
+        Builtin::TcpClose | Builtin::FileClose | Builtin::FlowClose => {
             cx.close(resource(name, &args[0])?);
             Poll::Ready(Value::Unit)
         }
@@ -661,10 +683,22 @@ fn poll_builtin(
             cx.file_create(&text(name, &args[0])?)
                 .map(|id| Value::Resource(ResourceKind::File, id)),
         )),
+        // Neither does writing to a file: always ready, so it completes in one call.
+        Builtin::FileWrite => {
+            let file = resource(name, &args[0])?;
+            let data = blob(name, &args[1])?;
+            Poll::Ready(fallible(cx.file_write(file, &data).map(|()| Value::Unit)))
+        }
         Builtin::FlowOfFile => Poll::Ready(fallible(
             cx.flow_of_file(&text(name, &args[0])?)
                 .map(|id| Value::Resource(ResourceKind::Flow, id)),
         )),
+        Builtin::FlowNext => match cx.flow_next(resource(name, &args[0])?) {
+            Poll::Ready(outcome) => {
+                Poll::Ready(fallible(outcome.map(|chunk| Value::Bytes(chunk.into()))))
+            }
+            Poll::Pending => Poll::Pending,
+        },
         Builtin::PipeTo => {
             let flow = resource(name, &args[0])?;
             let sink = resource(name, &args[1])?;

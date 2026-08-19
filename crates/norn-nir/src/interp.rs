@@ -473,6 +473,15 @@ impl Interpreter<'_> {
                     }
                 }
             }
+            Builtin::FlowLen => {
+                let id = resource("flow_len", &args[0])?;
+                match impure(cx, "flow_len")?.flow_len(id) {
+                    Ok(length) => Value::Int(length),
+                    Err(err) => {
+                        return Err(self.trap(frame, format!("`flow_len`: {}", err.kind())));
+                    }
+                }
+            }
             Builtin::Latest => {
                 let Value::Signal(reactor, export) = &args[0] else {
                     return Err(self.trap(frame, "`latest` of something that is not a signal"));
@@ -637,7 +646,7 @@ impl Interpreter<'_> {
                     Poll::Pending => Poll::Pending,
                 }
             }
-            Builtin::TcpClose => {
+            Builtin::TcpClose | Builtin::FileClose | Builtin::FlowClose => {
                 cx.close(resource(name, &args[0])?);
                 Poll::Ready(Value::Unit)
             }
@@ -646,10 +655,22 @@ impl Interpreter<'_> {
                 cx.file_create(&text(name, &args[0])?)
                     .map(|id| Value::Resource(ResourceKind::File, id)),
             )),
+            // Neither does writing to a file: always ready, so it completes in one call.
+            Builtin::FileWrite => {
+                let file = resource(name, &args[0])?;
+                let data = blob(name, &args[1])?;
+                Poll::Ready(fallible(cx.file_write(file, &data).map(|()| Value::Unit)))
+            }
             Builtin::FlowOfFile => Poll::Ready(fallible(
                 cx.flow_of_file(&text(name, &args[0])?)
                     .map(|id| Value::Resource(ResourceKind::Flow, id)),
             )),
+            Builtin::FlowNext => match cx.flow_next(resource(name, &args[0])?) {
+                Poll::Ready(outcome) => {
+                    Poll::Ready(fallible(outcome.map(|chunk| Value::Bytes(chunk.into()))))
+                }
+                Poll::Pending => Poll::Pending,
+            },
             Builtin::PipeTo => {
                 let flow = resource(name, &args[0])?;
                 let sink = resource(name, &args[1])?;

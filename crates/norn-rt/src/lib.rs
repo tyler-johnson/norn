@@ -453,6 +453,34 @@ impl<'e, V: Clone> Cx<'_, 'e, V> {
         Ok(id)
     }
 
+    /// Write a whole buffer to a file. A regular file is always ready under `poll(2)`, so this
+    /// completes in one call rather than parking.
+    pub fn file_write(&mut self, file: ResourceId, data: &[u8]) -> io::Result<()> {
+        self.core.readiness.file_write(file, data)
+    }
+
+    /// One chunk of a flow, for a consumer written in Norn. An empty chunk means the flow is
+    /// exhausted. A file-backed flow is always ready and never parks; a request-body flow parks
+    /// reading on the stream its bytes arrive on.
+    pub fn flow_next(&mut self, flow: ResourceId) -> Poll<io::Result<Vec<u8>>> {
+        match self.core.readiness.flow_read(flow) {
+            Ok(Some(chunk)) => {
+                self.finish_wait();
+                Poll::Ready(Ok(chunk))
+            }
+            Ok(None) => self.park_on(flow, false),
+            Err(err) => {
+                self.finish_wait();
+                Poll::Ready(Err(err))
+            }
+        }
+    }
+
+    /// How many bytes the flow still promises to deliver.
+    pub fn flow_len(&mut self, flow: ResourceId) -> io::Result<i64> {
+        self.core.readiness.flow_len(flow).map(|len| len as i64)
+    }
+
     /// Drive `flow` into `sink` until everything the flow promised has arrived. One trace line per
     /// delivered chunk; all transfer state lives in the flow's table entry, so a parked transfer
     /// resumes by asking again. Completion — and failure — consumes both ends: the language moved

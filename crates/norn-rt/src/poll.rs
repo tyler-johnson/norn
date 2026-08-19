@@ -334,6 +334,83 @@ impl Readiness {
         ))
     }
 
+    /// Write a whole buffer into a file sink. A regular file is always ready under `poll(2)`, so
+    /// completing in one call is the accepted v0 behaviour — the same trade the pipe machinery's
+    /// file writes make.
+    pub fn file_write(&mut self, id: ResourceId, data: &[u8]) -> io::Result<()> {
+        match &mut self.entry(id)?.backing {
+            Backing::File(file) => file.write_all(data),
+            _ => Err(io::Error::from(io::ErrorKind::InvalidInput)),
+        }
+    }
+
+    /// One chunk off a flow, for a consumer written in Norn. Delivery is atomic in one call —
+    /// the buffered seed is drained first, then a fresh read of at most 4096 bytes with
+    /// `remaining` decremented in the same step — so a parked re-ask never repeats or loses
+    /// bytes. An empty chunk means the flow is exhausted; `Ok(None)` means nothing has arrived
+    /// yet and the caller parks reading.
+    pub fn flow_read(&mut self, id: ResourceId) -> io::Result<Option<Vec<u8>>> {
+        // The flow entry comes out of its slot so that a request-body source can be reached
+        // mutably beside it, exactly as `pipe_step` does.
+        let slot = self
+            .entries
+            .get_mut(id.index())
+            .and_then(Option::take)
+            .ok_or_else(|| io::Error::from(io::ErrorKind::NotConnected))?;
+        let Backing::Flow(mut state) = slot.backing else {
+            self.entries[id.index()] = Some(slot);
+            return Err(io::Error::from(io::ErrorKind::InvalidInput));
+        };
+        let outcome = self.flow_read_step(&mut state);
+        self.entries[id.index()] = Some(Entry {
+            kind: slot.kind,
+            backing: Backing::Flow(state),
+        });
+        outcome
+    }
+
+    fn flow_read_step(&mut self, state: &mut FlowEntry) -> io::Result<Option<Vec<u8>>> {
+        if state.buffered_written < state.buffered.len() {
+            let chunk = state.buffered.split_off(state.buffered_written);
+            state.buffered = Vec::new();
+            state.buffered_written = 0;
+            return Ok(Some(chunk));
+        }
+        if state.remaining == 0 {
+            return Ok(Some(Vec::new()));
+        }
+        let want = state.remaining.min(4096) as usize;
+        match &mut state.source {
+            FlowSource::File(file) => {
+                let mut chunk = vec![0u8; want];
+                let read = loop {
+                    match file.read(&mut chunk) {
+                        Ok(read) => break read,
+                        Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
+                        Err(err) => return Err(err),
+                    }
+                };
+                if read == 0 {
+                    // The file shrank under the transfer: the promised length cannot arrive.
+                    return Err(io::Error::from(io::ErrorKind::UnexpectedEof));
+                }
+                chunk.truncate(read);
+                state.remaining -= read as u64;
+                Ok(Some(chunk))
+            }
+            FlowSource::RequestBody(request) => {
+                let request = *request;
+                match self.request_body_read(request, want)? {
+                    Some(chunk) => {
+                        state.remaining -= chunk.len() as u64;
+                        Ok(Some(chunk))
+                    }
+                    None => Ok(None),
+                }
+            }
+        }
+    }
+
     /// Drive one flow-to-sink transfer forward by one observable step. The caller loops on
     /// `Chunk` — emitting a trace line per delivered chunk is its business — and parks on the
     /// `Park` variants, re-asking from the top when woken; every intermediate state lives in the
