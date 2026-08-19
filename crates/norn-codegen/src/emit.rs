@@ -445,7 +445,8 @@ impl Emitter<'_> {
                     format!("        frame.state = {resume}usize;"),
                     format!(
                         "        return Ok(Cont::AwaitTask {{ func: *callee, args: args.clone(), local: {}usize, proj: &{:?} }});",
-                        dest.local, dest.proj
+                        dest.local,
+                        flat_proj(dest)
                     ),
                     "    }".into(),
                     "    TaskKind::Builtin(builtin, args) => match poll_builtin(cx, *builtin, args)? {".into(),
@@ -819,6 +820,12 @@ fn operand_expr(ctx: Ctx, operand: &Operand) -> String {
     }
 }
 
+/// The projection path as the flat payload indices the dynamic representation walks. A
+/// `Downcast`'s variant is for a typed consumer; tagged values index by position alone.
+fn flat_proj(place: &Place) -> Vec<usize> {
+    place.proj.iter().map(|proj| proj.index()).collect()
+}
+
 fn read_place_expr(ctx: Ctx, place: &Place) -> String {
     let locals = ctx.locals();
     if place.proj.is_empty() {
@@ -826,7 +833,8 @@ fn read_place_expr(ctx: Ctx, place: &Place) -> String {
     } else {
         format!(
             "read_place(&{locals}, {}usize, &{:?})",
-            place.local, place.proj
+            place.local,
+            flat_proj(place)
         )
     }
 }
@@ -838,7 +846,8 @@ fn write_stmt(ctx: Ctx, place: &Place, value: &str) -> String {
     } else {
         format!(
             "write_place(&mut {locals}, {}usize, &{:?}, {value});",
-            place.local, place.proj
+            place.local,
+            flat_proj(place)
         )
     }
 }

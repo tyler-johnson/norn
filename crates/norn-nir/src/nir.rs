@@ -137,11 +137,35 @@ pub enum Instr {
     },
 }
 
+/// One step of a projection path.
+///
+/// `Field` indexes a struct's payload. `Downcast` indexes an enum variant's payload, and carries
+/// the variant because field 0 of an enum has a different type per variant — the surrounding
+/// control flow (a `SwitchTag`, a `?`) has always proved which variant the value is at every
+/// site that projects into one, so lowering records it (MIR's `PlaceElem::Downcast`, for the
+/// same reason). Downcasts appear on read paths only: an assignment left-hand side is
+/// checker-restricted to struct-field chains.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Proj {
+    Field(usize),
+    Downcast { variant: usize, field: usize },
+}
+
+impl Proj {
+    /// The payload index, however the step is typed. Consumers whose values store fields as one
+    /// flat vec regardless of variant — the interpreter — index by this alone.
+    pub fn index(&self) -> usize {
+        match self {
+            Proj::Field(index) | Proj::Downcast { field: index, .. } => *index,
+        }
+    }
+}
+
 /// A local, optionally projected into: `x`, `x.2`, `x.0.1`.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Place {
     pub local: LocalId,
-    pub proj: Vec<usize>,
+    pub proj: Vec<Proj>,
 }
 
 impl Place {
@@ -154,7 +178,16 @@ impl Place {
 
     pub fn field(&self, index: usize) -> Place {
         let mut proj = self.proj.clone();
-        proj.push(index);
+        proj.push(Proj::Field(index));
+        Place {
+            local: self.local,
+            proj,
+        }
+    }
+
+    pub fn downcast(&self, variant: usize, field: usize) -> Place {
+        let mut proj = self.proj.clone();
+        proj.push(Proj::Downcast { variant, field });
         Place {
             local: self.local,
             proj,
@@ -370,8 +403,8 @@ fn local_name(function: &Function, index: usize) -> String {
 
 fn print_place(function: &Function, place: &Place) -> String {
     let mut out = local_name(function, place.local);
-    for index in &place.proj {
-        out.push_str(&format!(".{index}"));
+    for proj in &place.proj {
+        out.push_str(&format!(".{}", proj.index()));
     }
     out
 }

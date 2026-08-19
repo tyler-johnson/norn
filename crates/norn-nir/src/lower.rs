@@ -727,7 +727,7 @@ impl Lowerer<'_> {
                 self.test_const(value, Const::Str(v.as_str().into()), success, fail)
             }
             hir::PatKind::Struct { args, .. } => {
-                self.test_fields(args, value, success, fail);
+                self.test_fields(args, value, None, success, fail);
             }
             hir::PatKind::Variant { variant, args, .. } => {
                 let matched = self.new_block();
@@ -737,7 +737,8 @@ impl Lowerer<'_> {
                     default: fail,
                 });
                 self.switch_to(matched);
-                self.test_fields(args, value, success, fail);
+                // The switch just proved the tag, so the field reads below are downcasts.
+                self.test_fields(args, value, Some(*variant), success, fail);
             }
             hir::PatKind::Or(alts) => {
                 // Alternatives bind nothing, so each may simply be tried in turn.
@@ -773,14 +774,25 @@ impl Lowerer<'_> {
         });
     }
 
-    /// Test each sub-pattern of an aggregate in turn; the last one jumps to `success`.
-    fn test_fields(&mut self, args: &[hir::Pat], value: &Place, success: BlockId, fail: BlockId) {
+    /// Test each sub-pattern of an aggregate in turn; the last one jumps to `success`. A variant's
+    /// payload projects with the tag the caller's switch established; a struct's projects plainly.
+    fn test_fields(
+        &mut self,
+        args: &[hir::Pat],
+        value: &Place,
+        variant: Option<usize>,
+        success: BlockId,
+        fail: BlockId,
+    ) {
         if args.is_empty() {
             self.terminate(Term::Goto(success));
             return;
         }
         for (index, arg) in args.iter().enumerate() {
-            let field = value.field(index);
+            let field = match variant {
+                Some(variant) => value.downcast(variant, index),
+                None => value.field(index),
+            };
             let next = if index + 1 == args.len() {
                 success
             } else {
@@ -818,7 +830,7 @@ impl Lowerer<'_> {
         if enum_id == norn_hir::hir::EnumId::RESULT.index() {
             // Rebuild `Err(e)` at the function's own error type, which the checker has already
             // proved is the same type.
-            let error = value.field(0);
+            let error = value.downcast(norn_hir::hir::EnumId::ERR, 0);
             let rebuilt = Place::local(self.temp());
             self.emit(
                 rebuilt.clone(),
@@ -839,7 +851,10 @@ impl Lowerer<'_> {
         }
 
         self.switch_to(ok_block);
-        self.emit(dest.clone(), Rvalue::Use(Operand::Copy(value.field(0))));
+        self.emit(
+            dest.clone(),
+            Rvalue::Use(Operand::Copy(value.downcast(ok_tag, 0))),
+        );
         Operand::Copy(dest)
     }
 }

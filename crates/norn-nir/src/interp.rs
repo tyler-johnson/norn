@@ -905,9 +905,11 @@ fn read_operand(frame: &Frame, operand: &Operand) -> Value {
 
 fn read_place(frame: &Frame, place: &Place) -> Value {
     let mut value = &frame.locals[place.local];
-    for index in &place.proj {
+    // A `Downcast` reads by its payload index alone: tagged values store every variant's fields
+    // in the same flat vec, so the variant it carries is for typed consumers, not for us.
+    for proj in &place.proj {
         value = match value {
-            Value::Struct(_, fields) | Value::Variant(_, _, fields) => &fields[*index],
+            Value::Struct(_, fields) | Value::Variant(_, _, fields) => &fields[proj.index()],
             // Only reachable if lowering produced a projection the checker did not sanction.
             other => return other.clone(),
         };
@@ -917,10 +919,10 @@ fn read_place(frame: &Frame, place: &Place) -> Value {
 
 fn write_place(frame: &mut Frame, place: &Place, value: Value) {
     let mut slot = &mut frame.locals[place.local];
-    for index in &place.proj {
+    for proj in &place.proj {
         slot = match slot {
             Value::Struct(_, fields) | Value::Variant(_, _, fields) => {
-                &mut Rc::make_mut(fields)[*index]
+                &mut Rc::make_mut(fields)[proj.index()]
             }
             other => {
                 *other = value;
