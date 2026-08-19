@@ -1,0 +1,164 @@
+=== nir ===
+enum Option #0 (None/0, Some/1)
+enum Result #1 (Ok/1, Err/1)
+enum IoError #2 (NotFound/0, Denied/0, InUse/0, Refused/0, Closed/0, Other/1)
+
+reactor Ticker #0
+    node 0 ms param slot 0 arg 0 <- []
+    node 1 n state slot 1 init Ticker.n.init#5 <- []
+    node 2 count signal Ticker.count#6 export <- [n]
+    order [ms, n, count]
+    input 0 tick capacity 1 overflow reject handler Ticker.on.tick#4
+        plan [n, count]
+    exports [count]
+
+task fn main #0()
+    local _0/ticker
+    local _1
+    local _2
+    local _3
+    local _4
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+    local _10
+  b0:
+    scope enter
+    _2 = spawn reactor Ticker#0(10)
+    _0/ticker = _2
+    _3 = input 0 of _0/ticker
+    _4 = task builtin send(_3, ())
+    await _4 -> _5, resume b1
+  b1:
+    _6 = task builtin sleep(45)
+    await _6 -> _7, resume b2
+  b2:
+    _8 = export 0 of _0/ticker
+    _9 = builtin latest(_8)
+    _10 = builtin print(_9)
+    _1 = _10
+    scope exit, resume b3
+  b3:
+    return _1
+
+task fn time.wait #1(_0/ms)
+    local _1
+    local _2
+  b0:
+    _1 = task builtin sleep(_0/ms)
+    await _1 -> _2, resume b1
+  b1:
+    return _2
+
+fn time.seconds #2(_0/n)
+    local _1
+  b0:
+    _1 = _0/n mul.i 1000
+    return _1
+
+fn time.minutes #3(_0/n)
+    local _1
+  b0:
+    _1 = _0/n mul.i 60000
+    return _1
+
+fn Ticker.on.tick #4(_0/ms, _1/n)
+    local _2
+    local _3
+  b0:
+    _2 = _1/n add.i 1
+    _1/n = _2
+    set slot 1 = _1/n
+    _3 = task time.wait#1(_0/ms)
+    emit _3 -> input 0
+    return ()
+
+fn Ticker.n.init #5()
+  b0:
+    return 0
+
+fn Ticker.count #6(_0/n)
+  b0:
+    return _0/n
+
+=== graph ===
+reactor Ticker #0
+    node 0 ms param slot 0 arg 0 <- []
+    node 1 n state slot 1 init Ticker.n.init#5 <- []
+    node 2 count signal Ticker.count#6 export <- [n]
+    order [ms, n, count]
+    input 0 tick capacity 1 overflow reject handler Ticker.on.tick#4
+        plan [n, count]
+    exports [count]
+
+=== output ===
+5
+=== result ===
+()
+=== trace ===
+0ms t0 spawn main root
+0ms t0 resume
+0ms t0 scope enter 1
+0ms R0 create Ticker in t0
+0ms R0 publish 0
+0ms t0 park timer 45ms
+0ms R0 turn 0 tick
+0ms R0 commit n
+0ms R0 recompute count
+0ms R0 publish 1
+0ms t1 spawn time.wait in t0
+0ms R0 effect time.wait t1 -> tick
+0ms t1 resume
+0ms t1 park timer 10ms
+10ms -- clock
+10ms t1 resume
+10ms t1 done
+10ms R0 turn 1 tick
+10ms R0 commit n
+10ms R0 recompute count
+10ms R0 publish 2
+10ms t2 spawn time.wait in t0
+10ms R0 effect time.wait t2 -> tick
+10ms t2 resume
+10ms t2 park timer 20ms
+20ms -- clock
+20ms t2 resume
+20ms t2 done
+20ms R0 turn 2 tick
+20ms R0 commit n
+20ms R0 recompute count
+20ms R0 publish 3
+20ms t3 spawn time.wait in t0
+20ms R0 effect time.wait t3 -> tick
+20ms t3 resume
+20ms t3 park timer 30ms
+30ms -- clock
+30ms t3 resume
+30ms t3 done
+30ms R0 turn 3 tick
+30ms R0 commit n
+30ms R0 recompute count
+30ms R0 publish 4
+30ms t4 spawn time.wait in t0
+30ms R0 effect time.wait t4 -> tick
+30ms t4 resume
+30ms t4 park timer 40ms
+40ms -- clock
+40ms t4 resume
+40ms t4 done
+40ms R0 turn 4 tick
+40ms R0 commit n
+40ms R0 recompute count
+40ms R0 publish 5
+40ms t5 spawn time.wait in t0
+40ms R0 effect time.wait t5 -> tick
+40ms t5 resume
+40ms t5 park timer 50ms
+45ms -- clock
+45ms t0 resume
+45ms t5 cancel
+45ms R0 stop
+45ms t0 scope exit 1
+45ms t0 done

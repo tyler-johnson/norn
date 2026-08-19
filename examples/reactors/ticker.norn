@@ -1,0 +1,46 @@
+// A reactor giving itself time: `DESIGN.md`'s causality rule — every feedback cycle crosses an
+// explicit temporal boundary — as running code.
+//
+// A reactor cannot originate time. Turns are pure and terminating, so `sleep` is refused inside
+// one; time arrives only as *feedback*, an effect whose result re-enters as a later input. That
+// is why `wait` is imported instead of `sleep` appearing here: `after` takes a named task fn so
+// the reactor's effect vocabulary stays explicit, and `wait` is std/time's named carrier of clock
+// authority. Each turn schedules the next tick, each tick is a fresh turn — a self-perpetuating
+// cycle whose every lap crosses the scheduler.
+//
+// The run is scope-bounded, not counter-bounded: `main` parks for 45ms while the ticker laps at
+// t = 0, 10, 20, 30, 40, then the scope closes and cancels the pending `wait` — the same
+// shutdown story as every server example. Deterministic under the virtual clock: the count is 5,
+// always.
+
+import { wait } from "std/time"
+
+reactor Ticker(ms: I64)
+    uses { clock }
+{
+    input tick: () [capacity: 1, overflow: reject]
+
+    state n: I64 = 0
+
+    on tick() {
+        n = n + 1
+        after wait(ms) -> tick
+    }
+
+    export signal count = n
+}
+
+task fn main() -> ()
+    uses { clock }
+{
+    scope {
+        let ticker = spawn reactor Ticker(ms: 10)
+
+        // There is no on-spawn hook — a reactor only ever reacts. The first tick is the task's
+        // to send; every one after that, the reactor feeds itself.
+        await send(ticker.tick, ())
+
+        await sleep(45)
+        print(latest(ticker.count))
+    }
+}
