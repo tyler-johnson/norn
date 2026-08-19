@@ -1,0 +1,12 @@
+error: a type parameter list cannot be empty
+ --> generics.norn:3:13
+  |
+3 | struct Empty<> {
+  |             ^^ nothing declared
+  = note: name a parameter, as in `<T>`, or drop the brackets
+
+error: expected `>`, found `(`
+ --> generics.norn:7:12
+  |
+7 | fn broken<T(value: T) -> T {
+  |            ^

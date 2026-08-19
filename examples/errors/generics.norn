@@ -1,0 +1,9 @@
+// Type-parameter lists that do not parse: the empty list, and one that never closes.
+
+struct Empty<> {
+    value: I64
+}
+
+fn broken<T(value: T) -> T {
+    value
+}

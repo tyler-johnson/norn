@@ -80,12 +80,23 @@ pub enum Item {
     Reactor(ReactorDecl),
 }
 
+/// One declared type parameter: `T`, or `T: Eq + Display` with its bounds. Bounds parse on any
+/// declaration that takes parameters; where they are meaningful is the checker's question, not
+/// the grammar's.
+#[derive(Debug)]
+pub struct TypeParam {
+    pub name: Ident,
+    pub bounds: Vec<Path>,
+    pub span: Span,
+}
+
 #[derive(Debug)]
 pub struct StructDecl {
     /// The span of the `export` keyword, when the declaration is public to importing files. A span
     /// rather than a flag, so the checker can point at the word itself.
     pub exported: Option<Span>,
     pub name: Ident,
+    pub type_params: Vec<TypeParam>,
     pub fields: Vec<FieldDecl>,
     pub span: Span,
 }
@@ -101,6 +112,7 @@ pub struct FieldDecl {
 pub struct EnumDecl {
     pub exported: Option<Span>,
     pub name: Ident,
+    pub type_params: Vec<TypeParam>,
     pub variants: Vec<Variant>,
     pub span: Span,
 }
@@ -124,6 +136,7 @@ pub struct FnDecl {
     pub exported: Option<Span>,
     pub is_task: bool,
     pub name: Ident,
+    pub type_params: Vec<TypeParam>,
     pub params: Vec<Param>,
     pub ret: Option<Type>,
     /// The declared capability set. Checked, not inferred; empty until M4 gives it meaning.

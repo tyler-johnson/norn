@@ -52,6 +52,26 @@ fn print_import(decl: &ImportDecl) -> String {
     }
 }
 
+/// The declared type parameters, or nothing at all when there are none — which is what keeps
+/// every existing snapshot byte-identical.
+fn print_type_params(params: &[TypeParam]) -> String {
+    if params.is_empty() {
+        return String::new();
+    }
+    let rendered: Vec<String> = params
+        .iter()
+        .map(|param| {
+            if param.bounds.is_empty() {
+                param.name.name.clone()
+            } else {
+                let bounds: Vec<_> = param.bounds.iter().map(|b| b.text()).collect();
+                format!("{}: {}", param.name.name, bounds.join(" + "))
+            }
+        })
+        .collect();
+    format!("<{}>", rendered.join(", "))
+}
+
 fn print_item(item: &Item) -> String {
     match item {
         Item::Struct(decl) => {
@@ -60,7 +80,11 @@ fn print_item(item: &Item) -> String {
             } else {
                 ""
             };
-            let mut out = format!("{export}struct {} {{\n", decl.name.name);
+            let mut out = format!(
+                "{export}struct {}{} {{\n",
+                decl.name.name,
+                print_type_params(&decl.type_params)
+            );
             for field in &decl.fields {
                 out.push_str(&format!(
                     "{INDENT}{}: {}\n",
@@ -77,7 +101,11 @@ fn print_item(item: &Item) -> String {
             } else {
                 ""
             };
-            let mut out = format!("{export}enum {} {{\n", decl.name.name);
+            let mut out = format!(
+                "{export}enum {}{} {{\n",
+                decl.name.name,
+                print_type_params(&decl.type_params)
+            );
             for variant in &decl.variants {
                 out.push_str(INDENT);
                 out.push_str(&variant.name.name);
@@ -113,7 +141,12 @@ fn print_item(item: &Item) -> String {
                 .iter()
                 .map(|p| format!("{}: {}", p.name.name, print_type(&p.ty)))
                 .collect();
-            out.push_str(&format!("fn {}({})", decl.name.name, params.join(", ")));
+            out.push_str(&format!(
+                "fn {}{}({})",
+                decl.name.name,
+                print_type_params(&decl.type_params),
+                params.join(", ")
+            ));
             if let Some(ret) = &decl.ret {
                 out.push_str(&format!(" -> {}", print_type(ret)));
             }

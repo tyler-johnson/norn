@@ -102,12 +102,35 @@ pub fn expr(expr: &Expr) -> String {
     out
 }
 
+/// `(type-params T (bound U Eq Display))` — emitted only when the list is non-empty, so every
+/// existing snapshot stays untouched.
+fn dump_type_params(params: &[TypeParam]) -> Node {
+    list(
+        "type-params",
+        params
+            .iter()
+            .map(|param| {
+                if param.bounds.is_empty() {
+                    atom(&param.name.name)
+                } else {
+                    let mut children = vec![atom(&param.name.name)];
+                    children.extend(param.bounds.iter().map(|b| atom(b.text())));
+                    list("bound", children)
+                }
+            })
+            .collect(),
+    )
+}
+
 fn dump_item(item: &Item) -> Node {
     match item {
         Item::Struct(decl) => {
             let mut children = vec![atom(&decl.name.name)];
             if decl.exported.is_some() {
                 children.push(atom("export"));
+            }
+            if !decl.type_params.is_empty() {
+                children.push(dump_type_params(&decl.type_params));
             }
             for field in &decl.fields {
                 children.push(list(
@@ -121,6 +144,9 @@ fn dump_item(item: &Item) -> Node {
             let mut children = vec![atom(&decl.name.name)];
             if decl.exported.is_some() {
                 children.push(atom("export"));
+            }
+            if !decl.type_params.is_empty() {
+                children.push(dump_type_params(&decl.type_params));
             }
             for variant in &decl.variants {
                 let mut parts = vec![atom(&variant.name.name)];
@@ -150,6 +176,9 @@ fn dump_item(item: &Item) -> Node {
             }
             if decl.is_task {
                 children.push(atom("task"));
+            }
+            if !decl.type_params.is_empty() {
+                children.push(dump_type_params(&decl.type_params));
             }
             children.push(list(
                 "params",

@@ -413,6 +413,50 @@ fn an_exported_signal_still_parses_inside_a_reactor() {
 }
 
 #[test]
+fn type_parameters_parse_on_declarations() {
+    // Collapse the dump's line wrapping: these assertions are about structure, not layout.
+    let dumped = ast(
+        "struct Pair<A, B> {\n    first: A\n}\n\nenum List<T> {\n    Nil\n}\n\nfn swap<A, B>(pair: Pair<A, B>) -> Pair<B, A> {\n    pair\n}\n",
+    )
+    .split_whitespace()
+    .collect::<Vec<_>>()
+    .join(" ");
+    assert!(
+        dumped.contains("(struct Pair (type-params A B)"),
+        "{dumped}"
+    );
+    assert!(dumped.contains("(enum List (type-params T)"), "{dumped}");
+    assert!(dumped.contains("(fn swap (type-params A B)"), "{dumped}");
+}
+
+#[test]
+fn bounds_dump_with_their_parameter() {
+    let dumped = ast("fn f<T: Eq, U: Eq + Display>(x: T) {}\n");
+    assert!(dumped.contains("(bound T Eq)"), "{dumped}");
+    assert!(dumped.contains("(bound U Eq Display)"), "{dumped}");
+}
+
+#[test]
+fn type_parameters_round_trip() {
+    let source = "struct Pair<A, B> {\n    first: A\n    second: B\n}\n\nfn describe<T: Eq + Display>(value: T) -> String {\n    name(value)\n}\n";
+    let parsed = parse(source);
+    assert!(parsed.ok(), "{}", errors(source));
+    assert_eq!(print::module(&parsed.module), source);
+}
+
+#[test]
+fn an_empty_type_parameter_list_is_refused() {
+    let rendered = errors("struct Empty<> {\n    value: I64\n}\n");
+    assert!(rendered.contains("cannot be empty"), "{rendered}");
+}
+
+#[test]
+fn a_trailing_comma_in_type_parameters_is_tolerated() {
+    let dumped = ast("fn f<T, U,>(x: T) {}\n");
+    assert!(dumped.contains("(type-params T U)"), "{dumped}");
+}
+
+#[test]
 fn spawn_takes_a_whole_call() {
     // Not just the callee: `spawn f(x)` starts `f(x)`, and nothing else would be worth writing.
     assert_eq!(

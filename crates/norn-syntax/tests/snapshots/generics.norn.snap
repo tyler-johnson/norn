@@ -1,0 +1,88 @@
+=== ast ===
+(module
+  (struct Pair (type-params A B) (field first A) (field second B))
+  (enum List export
+    (type-params T)
+    (variant Nil)
+    (variant Cons (tuple T (ty List T))))
+  (fn swap
+    (type-params A B)
+    (params (param pair (ty Pair A B)))
+    (ret (ty Pair B A))
+    (block
+      (call
+        (path Pair)
+        (arg first (path pair.second))
+        (arg second (path pair.first)))))
+  (fn length
+    (type-params T)
+    (params (param items (ty List T)))
+    (ret I64)
+    (block
+      (match
+        (path items)
+        (arm (construct List.Nil) (int 0))
+        (arm
+          (construct List.Cons (arg _) (arg (bind rest)))
+          (binary + (int 1) (call (path length) (arg (path rest))))))))
+  (fn contains export
+    (type-params (bound T Eq))
+    (params (param items (ty List T)) (param wanted T))
+    (ret Bool)
+    (block
+      (match
+        (path items)
+        (arm (construct List.Nil) (bool false))
+        (arm
+          (construct List.Cons (arg (bind head)) (arg (bind rest)))
+          (binary ||
+            (binary == (path head) (path wanted))
+            (call (path contains) (arg (path rest)) (arg (path wanted))))))))
+  (fn describe
+    (type-params (bound T Eq Display))
+    (params (param value T))
+    (ret String)
+    (block (call (path value.to_string))))
+  (fn main
+    (params)
+    (block
+      (let none (call (path length) (type-args I64) (arg (path List.Nil))))
+      (call (path print) (arg (path none))))))
+
+=== canonical ===
+struct Pair<A, B> {
+    first: A
+    second: B
+}
+
+export enum List<T> {
+    Nil
+    Cons(T, List<T>)
+}
+
+fn swap<A, B>(pair: Pair<A, B>) -> Pair<B, A> {
+    Pair(first: pair.second, second: pair.first)
+}
+
+fn length<T>(items: List<T>) -> I64 {
+    match items {
+        List.Nil => 0
+        List.Cons(_, rest) => 1 + length(rest)
+    }
+}
+
+export fn contains<T: Eq>(items: List<T>, wanted: T) -> Bool {
+    match items {
+        List.Nil => false
+        List.Cons(head, rest) => head == wanted || contains(rest, wanted)
+    }
+}
+
+fn describe<T: Eq + Display>(value: T) -> String {
+    value.to_string()
+}
+
+fn main() {
+    let none = length<I64>(List.Nil)
+    print(none)
+}

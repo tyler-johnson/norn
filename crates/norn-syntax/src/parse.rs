@@ -342,6 +342,7 @@ impl Parser {
         let start = exported.unwrap_or(self.peek().span);
         self.advance();
         let name = self.ident()?;
+        let type_params = self.type_params()?;
         self.expect(TokenKind::LBrace)?;
         let mut fields = Vec::new();
         while !self.at(&TokenKind::RBrace) && !self.at_eof() {
@@ -352,9 +353,54 @@ impl Parser {
         Ok(StructDecl {
             exported,
             name,
+            type_params,
             fields,
             span: start.to(end),
         })
+    }
+
+    /// The declared type parameters, when a `<` follows the name: `<T>`, `<T, U: Eq + Display>`.
+    ///
+    /// Non-speculative, unlike call-site type arguments: declaration position is unambiguous,
+    /// because a `struct Name` demands `{` next and a `fn name` demands `(`, so a `<` here can
+    /// only open a parameter list. The loops mirror `ty`'s argument loop, `!at_eof()`-guarded so
+    /// a truncated file terminates.
+    fn type_params(&mut self) -> PResult<Vec<TypeParam>> {
+        if !self.at(&TokenKind::Lt) {
+            return Ok(Vec::new());
+        }
+        let open = self.advance().span;
+        if self.at(&TokenKind::Gt) {
+            let span = open.to(self.peek().span);
+            self.advance();
+            return Err(self.push(
+                Diagnostic::new(span, "a type parameter list cannot be empty")
+                    .label("nothing declared")
+                    .note("name a parameter, as in `<T>`, or drop the brackets"),
+            ));
+        }
+        let mut params = Vec::new();
+        while !self.at(&TokenKind::Gt) && !self.at_eof() {
+            let name = self.ident()?;
+            let mut span = name.span;
+            let mut bounds = Vec::new();
+            if self.eat(&TokenKind::Colon) {
+                loop {
+                    let bound = self.path()?;
+                    span = span.to(bound.span);
+                    bounds.push(bound);
+                    if !self.eat(&TokenKind::Plus) {
+                        break;
+                    }
+                }
+            }
+            params.push(TypeParam { name, bounds, span });
+            if !self.eat(&TokenKind::Comma) {
+                break;
+            }
+        }
+        self.expect(TokenKind::Gt)?;
+        Ok(params)
     }
 
     fn field_decl(&mut self) -> PResult<FieldDecl> {
@@ -369,6 +415,7 @@ impl Parser {
         let start = exported.unwrap_or(self.peek().span);
         self.advance();
         let name = self.ident()?;
+        let type_params = self.type_params()?;
         self.expect(TokenKind::LBrace)?;
         let mut variants = Vec::new();
         while !self.at(&TokenKind::RBrace) && !self.at_eof() {
@@ -408,6 +455,7 @@ impl Parser {
         Ok(EnumDecl {
             exported,
             name,
+            type_params,
             variants,
             span: start.to(end),
         })
@@ -418,6 +466,7 @@ impl Parser {
         let is_task = self.eat(&TokenKind::Kw(Kw::Task));
         self.expect(TokenKind::Kw(Kw::Fn))?;
         let name = self.ident()?;
+        let type_params = self.type_params()?;
 
         let params = self.param_list()?;
 
@@ -448,6 +497,7 @@ impl Parser {
             exported,
             is_task,
             name,
+            type_params,
             params,
             ret,
             uses,

@@ -1,0 +1,41 @@
+// Declarations with type parameters, ahead of the checker that gives them meaning. Parse-only,
+// the tasks.norn precedent: the shapes here pin the grammar — the corpus round-trips and
+// truncates them — and the executable dogfood lives in examples/run/generics.norn once the
+// item 7 checker lands.
+
+struct Pair<A, B> {
+    first: A
+    second: B
+}
+
+export enum List<T> {
+    Nil
+    Cons(T, List<T>)
+}
+
+fn swap<A, B>(pair: Pair<A, B>) -> Pair<B, A> {
+    Pair(first: pair.second, second: pair.first)
+}
+
+fn length<T>(items: List<T>) -> I64 {
+    match items {
+        List.Nil => 0
+        List.Cons(_, rest) => 1 + length(rest)
+    }
+}
+
+export fn contains<T: Eq>(items: List<T>, wanted: T) -> Bool {
+    match items {
+        List.Nil => false
+        List.Cons(head, rest) => head == wanted || contains(rest, wanted)
+    }
+}
+
+fn describe<T: Eq + Display>(value: T) -> String {
+    value.to_string()
+}
+
+fn main() {
+    let none = length<I64>(List.Nil)
+    print(none)
+}
