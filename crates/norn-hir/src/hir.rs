@@ -729,7 +729,6 @@ pub enum Builtin {
     /// intrinsic it stands on, the first `_unchecked` name in the table.
     TextUnchecked,
     Byte,
-    BytesConcat,
     /// `data[i]`. Carried by syntax alone: not in `ALL` and not in `from_name`, so `bytes_at`
     /// stays a name users may define, and the checker's desugar of an index expression is the
     /// only way to spell it.
@@ -768,7 +767,6 @@ impl Builtin {
         Builtin::BytesSlice,
         Builtin::TextUnchecked,
         Builtin::Byte,
-        Builtin::BytesConcat,
         Builtin::FileCreate,
         Builtin::FileWrite,
         Builtin::FileClose,
@@ -795,7 +793,6 @@ impl Builtin {
             "bytes_slice" => Some(Builtin::BytesSlice),
             "text_unchecked" => Some(Builtin::TextUnchecked),
             "byte" => Some(Builtin::Byte),
-            "bytes_concat" => Some(Builtin::BytesConcat),
             "file_create" => Some(Builtin::FileCreate),
             "file_write" => Some(Builtin::FileWrite),
             "file_close" => Some(Builtin::FileClose),
@@ -824,7 +821,6 @@ impl Builtin {
             Builtin::BytesSlice => "bytes_slice",
             Builtin::TextUnchecked => "text_unchecked",
             Builtin::Byte => "byte",
-            Builtin::BytesConcat => "bytes_concat",
             Builtin::BytesAt => "bytes_at",
             Builtin::FileCreate => "file_create",
             Builtin::FileWrite => "file_write",
@@ -850,7 +846,6 @@ impl Builtin {
             | Builtin::BytesSlice
             | Builtin::TextUnchecked
             | Builtin::Byte
-            | Builtin::BytesConcat
             | Builtin::BytesAt
             | Builtin::FlowLen => true,
             Builtin::Print
@@ -887,7 +882,6 @@ impl Builtin {
             | Builtin::BytesSlice
             | Builtin::TextUnchecked
             | Builtin::Byte
-            | Builtin::BytesConcat
             | Builtin::BytesAt
             // The open handle is the authority: `file_create` and `flow_of_file` checked a
             // capability when they opened it, and driving or closing what is already open asks
@@ -942,7 +936,6 @@ impl Builtin {
             Builtin::BytesSlice => (vec![Ty::Bytes, Ty::I64, Ty::I64], Ty::Bytes),
             Builtin::TextUnchecked => (vec![Ty::Bytes], Ty::Str),
             Builtin::Byte => (vec![Ty::I64], Ty::Bytes),
-            Builtin::BytesConcat => (vec![Ty::Bytes, Ty::Bytes], Ty::Bytes),
             Builtin::BytesAt => (vec![Ty::Bytes, Ty::I64], Ty::I64),
             Builtin::FileCreate => (vec![Ty::Str], task(fallible(file()))),
             Builtin::FileWrite => (vec![borrowed(file()), Ty::Bytes], task(fallible(Ty::Unit))),

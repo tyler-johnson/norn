@@ -54,10 +54,10 @@ fn main() -> () {
     let mut endless = bytes("GET / HTTP/1.1\r\n")
     let padding = bytes("X-Padding: yes, quite a lot of padding rides on this line\r\n")
     while bytes_len(endless) < 8192 {
-        endless = bytes_concat(endless, padding)
+        endless = endless + padding
     }
     print(verdict(endless))
-    print(verdict(bytes_concat(endless, bytes("\r\n"))))
+    print(verdict(endless + bytes("\r\n")))
 
     // The body starts exactly where the head says it consumed.
     let put = bytes("PUT /f HTTP/1.1\r\nContent-Length: 5\r\n\r\nhello")

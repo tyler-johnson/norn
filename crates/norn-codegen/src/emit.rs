@@ -1163,7 +1163,11 @@ impl Emitter<'_> {
             // No trap: float division and remainder are IEEE, infinities and NaN included.
             BinOp::DivFloat => format!("({a}) / ({b})"),
             BinOp::RemFloat => format!("({a}) % ({b})"),
-            BinOp::Concat => format!("str_concat({a}, {b})"),
+            BinOp::Concat => match self.operand_ty(function, lhs).owned() {
+                Ty::Str => format!("str_concat({a}, {b})"),
+                Ty::Bytes => format!("bytes_concat({a}, {b})"),
+                other => panic!("concat on {other:?} survived checking"),
+            },
             // Eq reaches runtime only on the five comparable scalars, where the representations'
             // own equality is content equality (`Rc<str>`/`Rc<[u8]>` compare contents, and
             // NaN != NaN falls out of f64).
@@ -1246,7 +1250,6 @@ impl Emitter<'_> {
                 format!("bytes_slice({}, {}, {}, {fname})?", arg(0), arg(1), arg(2))
             }
             Builtin::Byte => format!("byte({}, {fname})?", arg(0)),
-            Builtin::BytesConcat => format!("bytes_concat({}, {})", arg(0), arg(1)),
             Builtin::BytesAt => format!("bytes_at({}, {}, {fname})?", arg(0), arg(1)),
             Builtin::TextUnchecked => format!("text_unchecked({}, {fname})?", arg(0)),
             task => panic!(

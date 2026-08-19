@@ -119,10 +119,9 @@
               (block
                 (assign
                   (path gathered)
-                  (call
-                    (path bytes_concat)
-                    (arg (path gathered))
-                    (arg (try (await (call (path tcp_read) (arg (path conn)))))))))))))))
+                  (binary +
+                    (path gathered)
+                    (try (await (call (path tcp_read) (arg (path conn))))))))))))))
   (fn respond export task
     (params (param conn Connection) (param status I64) (param body String))
     (ret (ty Result unit IoError))
@@ -135,17 +134,15 @@
             (path tcp_write)
             (arg (unary & (path conn)))
             (arg
-              (call
-                (path bytes_concat)
-                (arg
-                  (call
-                    (path bytes)
-                    (arg
-                      (call
-                        (path response_head)
-                        (arg (path status))
-                        (arg (call (path bytes_len) (arg (path payload))))))))
-                (arg (path payload)))))))
+              (binary +
+                (call
+                  (path bytes)
+                  (arg
+                    (call
+                      (path response_head)
+                      (arg (path status))
+                      (arg (call (path bytes_len) (arg (path payload)))))))
+                (path payload))))))
       (await (call (path tcp_close) (arg (path conn))))
       (path outcome)))
   (fn respond_empty export task
@@ -591,10 +588,7 @@
             (block (assign (path b) (binary + (path b) (int 32)))))
           (assign
             (path out)
-            (call
-              (path bytes_concat)
-              (arg (path out))
-              (arg (call (path byte) (arg (path b))))))
+            (binary + (path out) (call (path byte) (arg (path b)))))
           (assign (path i) (binary + (path i) (int 1)))))
       (call (path text_unchecked) (arg (path out)))))
   (fn named
@@ -712,7 +706,7 @@ export task fn read_request(conn: &Connection) -> Result<Request, IoError>
                 return Err(IoError.Other(rule))
             }
             HeadParse.Incomplete => {
-                gathered = bytes_concat(gathered, await tcp_read(conn)?)
+                gathered = gathered + await tcp_read(conn)?
             }
         }
     }
@@ -722,7 +716,7 @@ export task fn respond(conn: Connection, status: I64, body: String) -> Result<()
     uses { net.io }
 {
     let payload = bytes(body)
-    let outcome = await tcp_write(&conn, bytes_concat(bytes(response_head(status, bytes_len(payload))), payload))
+    let outcome = await tcp_write(&conn, bytes(response_head(status, bytes_len(payload))) + payload)
     await tcp_close(conn)
     outcome
 }
@@ -935,7 +929,7 @@ fn lower(data: Bytes, from: I64, stop: I64) -> String {
         if b >= 65 && b <= 90 {
             b = b + 32
         }
-        out = bytes_concat(out, byte(b))
+        out = out + byte(b)
         i = i + 1
     }
     text_unchecked(out)

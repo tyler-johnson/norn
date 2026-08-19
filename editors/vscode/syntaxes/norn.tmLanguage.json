@@ -703,7 +703,7 @@
     },
     "builtin-fns": {
       "name": "support.function.builtin.norn",
-      "match": "\\b(?:print|listener_port|sleep|tcp_listen|tcp_accept|tcp_read|tcp_write|tcp_close|send|latest|bytes_len|bytes_slice|text_unchecked|bytes_concat|bytes|byte|file_create|file_write|file_close|flow_of_file|flow_next|flow_len|flow_close)\\b(?=\\s*\\()"
+      "match": "\\b(?:print|listener_port|sleep|tcp_listen|tcp_accept|tcp_read|tcp_write|tcp_close|send|latest|bytes_len|bytes_slice|text_unchecked|bytes|byte|file_create|file_write|file_close|flow_of_file|flow_next|flow_len|flow_close)\\b(?=\\s*\\()"
     },
     "call-type-args": {
       "comment": "`length<I64>(…)` — explicit type arguments at a call site. The parser only accepts this shape when a call follows (try_type_args is speculative), and the lookahead mirrors that: without the paren, `a < b` stays the comparison it is. The inner charset excludes operator characters so `a < b && c > (d)` cannot masquerade as one.",

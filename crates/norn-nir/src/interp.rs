@@ -518,13 +518,6 @@ impl Interpreter<'_> {
                 }
                 Value::Bytes([value as u8].into())
             }
-            Builtin::BytesConcat => {
-                let a = blob("bytes_concat", &args[0])?;
-                let b = blob("bytes_concat", &args[1])?;
-                // Concatenation copies in v0, like `bytes_slice`: the cheap representation
-                // waits for typed layout (§8).
-                Value::Bytes([&a[..], &b[..]].concat().into())
-            }
             Builtin::BytesAt => {
                 let data = blob("bytes_at", &args[0])?;
                 let index = integer("bytes_at", &args[1])?;
@@ -668,6 +661,11 @@ impl Interpreter<'_> {
             (BinOp::DivFloat, Float(a), Float(b)) => Float(a / b),
             (BinOp::RemFloat, Float(a), Float(b)) => Float(a % b),
             (BinOp::Concat, Str(a), Str(b)) => Str(format!("{a}{b}").into()),
+            // Concatenation allocates a fresh buffer in both engines — that is `+`'s honest
+            // cost, permanently: two views cannot be one without a rope.
+            (BinOp::Concat, Value::Bytes(a), Value::Bytes(b)) => {
+                Value::Bytes([&a[..], &b[..]].concat().into())
+            }
             (BinOp::Eq, _, _) => Bool(lhs == rhs),
             (BinOp::Ne, _, _) => Bool(lhs != rhs),
             (BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge, _, _) => {

@@ -801,6 +801,7 @@ impl Checker {
                 Ty::I64 => Some((BinOp::AddInt, Ty::I64)),
                 Ty::F64 => Some((BinOp::AddFloat, Ty::F64)),
                 Ty::Str => Some((BinOp::Concat, Ty::Str)),
+                Ty::Bytes => Some((BinOp::Concat, Ty::Bytes)),
                 _ => None,
             },
             A::Sub => match operand {

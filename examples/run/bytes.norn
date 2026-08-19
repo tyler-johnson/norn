@@ -1,7 +1,7 @@
 // Bytes: the value the wire carries and a file holds.
 //
 // There is no bytes literal — data arrives from I/O, from `bytes(s)`, which is a string's UTF-8,
-// or is built up from `byte(n)` and `bytes_concat(a, b)`.
+// or is built up from `byte(n)` joined with `+`.
 // A slice copies in v0 (the clone-everything engines cannot make zero-copy observable), decoding
 // back to text is fallible because not every octet sequence is UTF-8 — and that decoding is
 // `std/bytes`'s `to_string`, the first builtin dissolved into std: the validator is ordinary
@@ -30,11 +30,11 @@ fn main() -> () {
 
     // Well-formedness is more than complete sequences: an overlong spelling of NUL and half a
     // surrogate pair are the subtle refusals, the shapes a length check alone would miss.
-    match to_string(bytes_concat(byte(192), byte(128))) {
+    match to_string(byte(192) + byte(128)) {
         Some(text) => print(text)
         None => print("an overlong encoding is not text")
     }
-    match to_string(bytes_concat(bytes_concat(byte(237), byte(160)), byte(128))) {
+    match to_string(byte(237) + byte(160) + byte(128)) {
         Some(text) => print(text)
         None => print("a surrogate half is not text")
     }
@@ -52,14 +52,14 @@ fn main() -> () {
     }
     print(sum)
 
-    // Building: `byte` is one octet — it traps outside 0..255 — and `bytes_concat` joins two
-    // buffers.
+    // Building: `byte` is one octet — it traps outside 0..255 — and `+` joins two buffers,
+    // allocating a fresh one.
     print(byte(110) == bytes("n"))
-    match to_string(bytes_concat(bytes("hello, "), bytes("norn"))) {
+    match to_string(bytes("hello, ") + bytes("norn")) {
         Some(text) => print(text)
         None => print("not text")
     }
-    print(bytes_concat(data, bytes("")) == data)
+    print(data + bytes("") == data)
 
     // Equality is by content, and ordering is lexicographic.
     print(bytes_slice(data, 7, 11) == bytes("norn"))

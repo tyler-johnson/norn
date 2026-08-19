@@ -242,7 +242,7 @@ fn main #1() -> ()
     _57 = call verdict#0(_3/endless)
     _58 = builtin print(_57)
     _59 = builtin bytes("\r\n")
-    _60 = builtin bytes_concat(_3/endless, _59)
+    _60 = _3/endless concat _59
     _61 = call verdict#0(_60)
     _62 = builtin print(_61)
     _63 = builtin bytes("PUT /f HTTP/1.1\r\nContent-Length: 5\r\n\r\nhello")
@@ -250,7 +250,7 @@ fn main #1() -> ()
     _65 = call http.head#5(_5/put)
     goto b14
   b12:
-    _56 = builtin bytes_concat(_3/endless, _4/padding)
+    _56 = _3/endless concat _4/padding
     _3/endless = _56
     goto b10
   b13:
@@ -812,7 +812,7 @@ task fn http.read_request #8(_0/conn: &Connection) -> Result<Request, IoError>
     switch tag _21 [0 => b18] else b19
   b18:
     _22 = _21.0@Ok
-    _24 = builtin bytes_concat(_1/gathered, _22)
+    _24 = _1/gathered concat _22
     _1/gathered = _24
     _9 = ()
     goto b2
@@ -838,7 +838,7 @@ task fn http.respond #9(_0/conn: Connection, _1/status: I64, _2/body: String) ->
     _6 = builtin bytes_len(_3/payload)
     _7 = call http.response_head#7(_1/status, _6)
     _8 = builtin bytes(_7)
-    _9 = builtin bytes_concat(_8, _3/payload)
+    _9 = _8 concat _3/payload
     _10 = task builtin tcp_write(_0/conn, _9)
     await _10 -> _11, resume b1
   b1:
@@ -1749,7 +1749,7 @@ fn http.lower #23(_0/data: Bytes, _1/from: I64, _2/stop: I64) -> String
     goto b8
   b8:
     _14 = builtin byte(_5/b)
-    _15 = builtin bytes_concat(_3/out, _14)
+    _15 = _3/out concat _14
     _3/out = _15
     _16 = _4/i add.i 1
     _4/i = _16

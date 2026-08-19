@@ -122,7 +122,7 @@ fn main #0() -> ()
   b9:
     _26 = builtin byte(192)
     _27 = builtin byte(128)
-    _28 = builtin bytes_concat(_26, _27)
+    _28 = _26 concat _27
     _29 = call bytes.to_string#1(_28)
     goto b18
   b10:
@@ -147,9 +147,9 @@ fn main #0() -> ()
   b17:
     _33 = builtin byte(237)
     _34 = builtin byte(160)
-    _35 = builtin bytes_concat(_33, _34)
+    _35 = _33 concat _34
     _36 = builtin byte(128)
-    _37 = builtin bytes_concat(_35, _36)
+    _37 = _35 concat _36
     _38 = call bytes.to_string#1(_37)
     goto b26
   b18:
@@ -212,7 +212,7 @@ fn main #0() -> ()
     _56 = builtin print(_55)
     _58 = builtin bytes("hello, ")
     _59 = builtin bytes("norn")
-    _60 = builtin bytes_concat(_58, _59)
+    _60 = _58 concat _59
     _61 = call bytes.to_string#1(_60)
     goto b37
   b35:
@@ -224,7 +224,7 @@ fn main #0() -> ()
     goto b33
   b36:
     _64 = builtin bytes("")
-    _65 = builtin bytes_concat(_0/data, _64)
+    _65 = _0/data concat _64
     _66 = _65 eq _0/data
     _67 = builtin print(_66)
     _68 = builtin bytes_slice(_0/data, 7, 11)

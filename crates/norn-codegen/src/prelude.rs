@@ -193,7 +193,8 @@ fn byte(value: i64, func: &str) -> Result<Rc<[u8]>, Trap> {
 }
 
 fn bytes_concat(a: Rc<[u8]>, b: Rc<[u8]>) -> Rc<[u8]> {
-    // Concatenation copies in v0, deliberately matching the interpreter; `+` on Bytes is 6b's.
+    // `+` on Bytes lowers here. Concatenation allocates a fresh buffer, deliberately matching
+    // the interpreter — that is the operator's honest cost, permanently.
     [&a[..], &b[..]].concat().into()
 }
 
