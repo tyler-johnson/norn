@@ -628,6 +628,20 @@ impl Checker {
         ty: &Ty,
         span: Span,
     ) -> Pat {
+        // A pattern naming a template matches through the scrutinee's instance: `Pair(a, b)`
+        // against a `Pair<I64, Bool>` proceeds with the instance id, whose fields are concrete,
+        // so the sub-patterns type through untouched machinery.
+        let id = match ty {
+            Ty::Struct(scrutinee)
+                if *scrutinee != id
+                    && self
+                        .struct_base(*scrutinee)
+                        .is_some_and(|(base, _)| base == id) =>
+            {
+                *scrutinee
+            }
+            _ => id,
+        };
         self.expect_pat_ty(&Ty::Struct(id), ty, span);
         let strukt = &self.program.structs[id.index()];
         let names: Vec<String> = strukt.fields.iter().map(|f| f.name.clone()).collect();
@@ -661,6 +675,19 @@ impl Checker {
         ty: &Ty,
         span: Span,
     ) -> Pat {
+        // The struct-pattern rule again: a template named in a pattern proceeds with the
+        // scrutinee's instance, whose payload types are concrete.
+        let id = match ty {
+            Ty::Enum(scrutinee)
+                if *scrutinee != id
+                    && self
+                        .enum_base(*scrutinee)
+                        .is_some_and(|(base, _)| base == id) =>
+            {
+                *scrutinee
+            }
+            _ => id,
+        };
         self.expect_pat_ty(&Ty::Enum(id), ty, span);
         let Some((index, variant)) = self.program.enums[id.index()].variant(variant_name) else {
             let message = format!("`{enum_display}` has no variant `{variant_name}`");

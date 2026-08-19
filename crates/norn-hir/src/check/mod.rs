@@ -25,12 +25,15 @@ use crate::hir::*;
 mod call;
 mod expr;
 mod flow;
+mod generics;
 mod item;
 mod moves;
 mod ns;
 mod reactor;
 mod turns;
 mod ty;
+
+use generics::Generics;
 
 pub struct Checked {
     pub program: Program,
@@ -334,6 +337,12 @@ struct Checker {
     /// The loops enclosing the expression being checked, innermost last. `break` and `continue`
     /// target the last frame; a `loop`'s frame is also where its `break value`s agree on a type.
     loops: Vec<LoopCtx>,
+    /// The generic-instantiation registry: which templates have been instantiated at which
+    /// arguments, and the ids the instances were appended under.
+    generics: Generics,
+    /// The type parameters of the declaration being resolved or checked, in declaration order —
+    /// what `resolve_ty` answers a bare `T` from. Set per item, cleared after.
+    type_params_in_scope: Vec<String>,
 }
 
 /// One enclosing loop, as `break` and `continue` see it.

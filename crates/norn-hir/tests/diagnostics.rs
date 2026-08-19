@@ -146,6 +146,91 @@ task fn main(session: Session) -> ()
     );
 }
 
+/// Generic *types* land ahead of the corpus that dogfoods them — std/list and the run example
+/// arrive later in the item 7 wave — so the acceptance side is pinned here: instantiation by
+/// annotation, by expectation, by field inference, through patterns, and inside reactor state.
+#[test]
+fn generic_types_are_accepted() {
+    accepted(
+        "a cons list instantiates, grows, and matches",
+        "\
+enum List<T> {
+    Nil
+    Cons(T, List<T>)
+}
+
+fn main() {
+    let mut items: List<I64> = List.Nil
+    items = List.Cons(1, items)
+    match items {
+        List.Nil => print(\"empty\")
+        List.Cons(head, _) => print(head)
+    }
+}
+",
+    );
+
+    // No annotation anywhere: the second field's synthesised type is what settles `B`.
+    accepted(
+        "field inference settles a template's parameters",
+        "\
+struct Pair<A, B> {
+    first: A
+    second: B
+}
+
+fn main() {
+    let pair = Pair(first: 1, second: \"x\")
+    print(pair.second)
+}
+",
+    );
+
+    // A self-referential nesting: `Tree<I64>` needs `List<Tree<I64>>`, which needs `Tree<I64>`
+    // again — the two-phase register-then-fill is what lets this converge.
+    accepted(
+        "a self-referential instance dedups to itself",
+        "\
+enum List<T> {
+    Nil
+    Cons(T, List<T>)
+}
+
+struct Tree<T> {
+    value: T
+    children: List<Tree<T>>
+}
+
+fn main() {
+    let tree = Tree(value: 7, children: List.Nil)
+    print(tree.value)
+}
+",
+    );
+
+    // The `state journal: List<Delta>` shape: the member's type resolves after the fill drain,
+    // so the eager affinity question `reactor_ty` asks sees real fields.
+    accepted(
+        "reactor state holds a generic instance",
+        "\
+enum List<T> {
+    Nil
+    Cons(T, List<T>)
+}
+
+reactor Journal() {
+    state journal: List<I64> = List.Nil
+
+    on record(entry: I64) [capacity: 4, overflow: reject] {
+        journal = List.Cons(entry, journal)
+    }
+
+    export signal history = journal
+}
+",
+    );
+}
+
 fn accepted(what: &str, source: &str) {
     let parsed = parse(source);
     assert!(parsed.ok(), "{what}: did not parse");

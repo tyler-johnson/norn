@@ -68,8 +68,10 @@ impl Checker {
             let resolved = match item {
                 ast::Item::Struct(decl) => {
                     let id = StructId(self.program.structs.len() as u32);
+                    let type_params = self.type_param_names(&decl.type_params);
                     self.program.structs.push(StructDef {
                         name: decl.name.name.clone(),
+                        type_params,
                         fields: Vec::new(),
                         span,
                     });
@@ -77,8 +79,10 @@ impl Checker {
                 }
                 ast::Item::Enum(decl) => {
                     let id = EnumId(self.program.enums.len() as u32);
+                    let type_params = self.type_param_names(&decl.type_params);
                     self.program.enums.push(EnumDef {
                         name: decl.name.name.clone(),
+                        type_params,
                         variants: Vec::new(),
                         span,
                     });
@@ -113,9 +117,31 @@ impl Checker {
         }
     }
 
-    /// Pass two: fill in field and payload types.
+    /// The declared type parameter names, duplicates refused: two `T`s would be one hole with
+    /// two spellings.
+    fn type_param_names(&mut self, params: &[ast::TypeParam]) -> Vec<String> {
+        let mut names: Vec<String> = Vec::new();
+        for param in params {
+            if names.contains(&param.name.name) {
+                self.push(
+                    Diagnostic::new(
+                        param.name.span,
+                        format!("type parameter `{}` is declared twice", param.name.name),
+                    )
+                    .label("duplicate parameter"),
+                );
+                continue;
+            }
+            names.push(param.name.name.clone());
+        }
+        names
+    }
+
+    /// Pass two: fill in field and payload types, each declaration's own type parameters in
+    /// scope while its fields resolve.
     pub(super) fn define_types(&mut self, module: &ast::Module) {
         for item in &module.items {
+            self.type_params_in_scope.clear();
             match item {
                 ast::Item::Struct(decl) => {
                     let Some(TypeName::Struct(id)) =
@@ -124,6 +150,8 @@ impl Checker {
                         continue;
                     };
                     let id = *id;
+                    self.type_params_in_scope =
+                        self.program.structs[id.index()].type_params.clone();
                     let mut fields = Vec::new();
                     for field in &decl.fields {
                         if fields.iter().any(|f: &FieldDef| f.name == field.name.name) {
@@ -148,6 +176,7 @@ impl Checker {
                         continue;
                     };
                     let id = *id;
+                    self.type_params_in_scope = self.program.enums[id.index()].type_params.clone();
                     let mut variants = Vec::new();
                     for variant in &decl.variants {
                         let (fields, positional) = match &variant.payload {
@@ -188,6 +217,7 @@ impl Checker {
                 ast::Item::Fn(_) | ast::Item::Reactor(_) => {}
             }
         }
+        self.type_params_in_scope.clear();
     }
 
     pub(super) fn declare_fns(&mut self, module: &ast::Module) {
@@ -247,12 +277,15 @@ impl Checker {
                 );
                 continue;
             }
+            let type_params = self.type_param_names(&decl.type_params);
+            self.type_params_in_scope = type_params.clone();
             let params: Vec<(String, Ty)> = decl
                 .params
                 .iter()
                 .map(|p| (p.name.name.clone(), self.resolve_param_ty(&p.ty)))
                 .collect();
             let ret = decl.ret.as_ref().map_or(Ty::Unit, |ty| self.resolve_ty(ty));
+            self.type_params_in_scope.clear();
             let uses = self.capabilities(&decl.uses);
             let id = FnId(self.program.fns.len() as u32);
             of_item[index] = Some(id);
@@ -264,6 +297,7 @@ impl Checker {
                 // the way lifted reactor members already display dotted. Resolution still goes by
                 // the bare name; only what traps and traces print changes.
                 name: self.qualified(&decl.name.name),
+                type_params,
                 is_task: decl.is_task,
                 uses,
                 params: params.len(),
@@ -337,10 +371,14 @@ impl Checker {
             self.uses = self.program.fns[id.index()].uses.clone();
             self.scope_depth = 0;
             self.loops = Vec::new();
+            // A template body is checked exactly once, its parameters opaque: this scope is what
+            // lets a `let` annotation inside it spell `List<T>`.
+            self.type_params_in_scope = self.program.fns[id.index()].type_params.clone();
             for ((name, ty), param) in params.iter().zip(&decl.params) {
                 self.declare_param(name.clone(), ty.clone(), param.name.span);
             }
             let body = self.check_block(&decl.body, Some(&ret), decl.body.span);
+            self.type_params_in_scope.clear();
             let locals = std::mem::take(&mut self.locals);
             self.program.fns[id.index()].locals = locals;
             self.program.fns[id.index()].body = body;
@@ -385,6 +423,7 @@ impl Checker {
         self.signatures.push((Vec::new(), Ty::Error));
         self.program.fns.push(FnDef {
             name,
+            type_params: Vec::new(),
             is_task: false,
             uses: Vec::new(),
             params: 0,

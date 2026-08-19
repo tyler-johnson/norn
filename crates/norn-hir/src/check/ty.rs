@@ -54,6 +54,32 @@ impl Checker {
                 Ty::Error
             }
             ast::TypeKind::Path { path, args } => {
+                // A declared type parameter answers first: inside `fn map<T>(…)`, `T` is the
+                // parameter whatever else the module calls `T`.
+                if path.segments.len() == 1
+                    && let Some(index) = self
+                        .type_params_in_scope
+                        .iter()
+                        .position(|param| *param == path.segments[0].name)
+                {
+                    if !args.is_empty() {
+                        self.push(
+                            Diagnostic::new(
+                                ty.span,
+                                format!(
+                                    "`{}` is a type parameter and takes no type arguments",
+                                    path.segments[0].name
+                                ),
+                            )
+                            .note("a parameter stands for a whole type; only a declared generic type takes arguments"),
+                        );
+                        return Ty::Error;
+                    }
+                    return Ty::Param {
+                        index: index as u32,
+                        name: path.segments[0].name.clone(),
+                    };
+                }
                 if path.segments.len() != 1 {
                     // `fmt.Config` in type position. The special single-segment names — Option,
                     // Task, Flow, and the rest — are seeded, never declared, so none of them can
@@ -67,28 +93,19 @@ impl Checker {
                             Some(Ok(item)) => item,
                             _ => return Ty::Error,
                         };
-                        if !args.is_empty() {
-                            self.push(
-                                Diagnostic::new(
-                                    ty.span,
-                                    format!("`{}` takes no type arguments", path.text()),
-                                )
-                                .note("user-defined generics arrive after M6; see BOOTSTRAP.md §8"),
-                            );
-                            return Ty::Error;
-                        }
-                        return match item {
-                            NsItem::Struct(id) => Ty::Struct(id),
-                            NsItem::Enum(id) => Ty::Enum(id),
-                            NsItem::Reactor(id) => Ty::Reactor(id),
+                        let resolved = match item {
+                            NsItem::Struct(id) => TypeName::Struct(id),
+                            NsItem::Enum(id) => TypeName::Enum(id),
+                            NsItem::Reactor(id) => TypeName::Reactor(id),
                             NsItem::Fn(_) => {
                                 self.push(Diagnostic::new(
                                     path.span,
                                     format!("`{}` is a function, not a type", path.text()),
                                 ));
-                                Ty::Error
+                                return Ty::Error;
                             }
                         };
+                        return self.named_ty(resolved, &path.text(), args, ty.span);
                     }
                     self.error(path.span, format!("unknown type `{}`", path.text()));
                     return Ty::Error;
@@ -158,18 +175,8 @@ impl Checker {
                     }
                     _ => {}
                 }
-                if !args.is_empty() {
-                    self.push(
-                        Diagnostic::new(ty.span, format!("`{name}` takes no type arguments"))
-                            .note("user-defined generics arrive after M6; see BOOTSTRAP.md §8"),
-                    );
-                    return Ty::Error;
-                }
-                match self.ns[self.current].types.get(name) {
-                    Some(TypeName::Builtin(ty)) => ty.clone(),
-                    Some(TypeName::Struct(id)) => Ty::Struct(*id),
-                    Some(TypeName::Enum(id)) => Ty::Enum(*id),
-                    Some(TypeName::Reactor(id)) => Ty::Reactor(*id),
+                match self.ns[self.current].types.get(name).cloned() {
+                    Some(resolved) => self.named_ty(resolved, name, args, ty.span),
                     None => {
                         self.error(path.span, format!("unknown type `{name}`"));
                         Ty::Error
@@ -177,6 +184,112 @@ impl Checker {
                 }
             }
         }
+    }
+
+    /// A named type met in type position, with whatever `<…>` arguments were written:
+    /// instantiate a template, refuse arguments on anything else.
+    fn named_ty(
+        &mut self,
+        resolved: TypeName,
+        display: &str,
+        args: &[ast::Type],
+        span: Span,
+    ) -> Ty {
+        match resolved {
+            TypeName::Struct(id) => {
+                let params = self.program.structs[id.index()].type_params.clone();
+                if params.is_empty() {
+                    if !args.is_empty() {
+                        self.no_type_args(display, span);
+                        return Ty::Error;
+                    }
+                    return Ty::Struct(id);
+                }
+                let Some(resolved_args) = self.template_args(display, &params, args, span) else {
+                    return Ty::Error;
+                };
+                match self.instantiate_struct(id, resolved_args, span, 0) {
+                    Some(instance) => Ty::Struct(instance),
+                    None => Ty::Error,
+                }
+            }
+            TypeName::Enum(id) => {
+                let params = self.program.enums[id.index()].type_params.clone();
+                if params.is_empty() {
+                    if !args.is_empty() {
+                        self.no_type_args(display, span);
+                        return Ty::Error;
+                    }
+                    return Ty::Enum(id);
+                }
+                let Some(resolved_args) = self.template_args(display, &params, args, span) else {
+                    return Ty::Error;
+                };
+                match self.instantiate_enum(id, resolved_args, span, 0) {
+                    Some(instance) => Ty::Enum(instance),
+                    None => Ty::Error,
+                }
+            }
+            TypeName::Reactor(id) => {
+                if !args.is_empty() {
+                    self.no_type_args(display, span);
+                    return Ty::Error;
+                }
+                Ty::Reactor(id)
+            }
+            TypeName::Builtin(ty) => {
+                if !args.is_empty() {
+                    self.no_type_args(display, span);
+                    return Ty::Error;
+                }
+                ty
+            }
+        }
+    }
+
+    fn no_type_args(&mut self, display: &str, span: Span) {
+        self.push(
+            Diagnostic::new(span, format!("`{display}` takes no type arguments"))
+                .note("its declaration has no type parameters"),
+        );
+    }
+
+    /// Check arity and resolve the written arguments of a template mention. An argument that is
+    /// already `Ty::Error` bails to `Ty::Error` rather than minting a poisoned instance.
+    fn template_args(
+        &mut self,
+        display: &str,
+        params: &[String],
+        args: &[ast::Type],
+        span: Span,
+    ) -> Option<Vec<Ty>> {
+        if args.len() != params.len() {
+            let plural = if params.len() == 1 {
+                "argument"
+            } else {
+                "arguments"
+            };
+            self.push(
+                Diagnostic::new(
+                    span,
+                    format!(
+                        "`{display}` takes {} type {plural}, found {}",
+                        params.len(),
+                        args.len()
+                    ),
+                )
+                .note(format!(
+                    "the declaration is `{display}<{}>`",
+                    params.join(", ")
+                )),
+            );
+            return None;
+        }
+        let resolved: Vec<Ty> = args.iter().map(|arg| self.resolve_ty(arg)).collect();
+        if resolved.iter().any(Ty::is_error) {
+            return None;
+        }
+        Some(resolved)
     }
 
     pub(super) fn type_args(

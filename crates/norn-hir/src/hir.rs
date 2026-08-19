@@ -129,8 +129,10 @@ impl Capability {
     }
 }
 
-/// A monomorphic type. `Option` and `Result` are the only generic constructors in v0, and neither
-/// is user-definable.
+/// A type. Everything an executable body carries is monomorphic — generic declarations are
+/// templates the checker instantiates, and only `Ty::Param` names a hole, opaque inside the one
+/// template body that declares it. `Option` and `Result` keep their own spellings: they are the
+/// seeded generic constructors, and instantiation composes through them structurally.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Ty {
     Unit,
@@ -181,6 +183,13 @@ pub enum Ty {
     /// still waits on subscriptions and `for await`. It exists so that writing `Event<T>` is
     /// answered with the milestone rather than "unknown type".
     Event(Box<Ty>),
+    /// A declared type parameter, meaningful only inside the template that declares it. Equal to
+    /// itself and to nothing else — the derived equality is what makes a bare `T` opaque: without
+    /// a bound it can only be moved, stored, matched by binding, or passed on.
+    Param {
+        index: u32,
+        name: String,
+    },
     /// The type of an expression that never produces a value: `return`, or a block that always
     /// leaves early. Compatible with every expected type.
     Never,
@@ -247,6 +256,7 @@ impl Program {
             Ty::Input(inner) => format!("an input taking {}", self.ty_name(inner)),
             Ty::Signal(inner) => format!("a signal of {}", self.ty_name(inner)),
             Ty::Event(inner) => format!("an event of {}", self.ty_name(inner)),
+            Ty::Param { name, .. } => name.clone(),
             Ty::Never => "!".into(),
             Ty::Error => "?".into(),
         }
@@ -446,6 +456,9 @@ impl NodeKind {
 
 pub struct StructDef {
     pub name: String,
+    /// Non-empty marks a template: a declaration the checker instantiates rather than a type a
+    /// value can have. Instances are appended to the same table as ordinary monomorphic defs.
+    pub type_params: Vec<String>,
     pub fields: Vec<FieldDef>,
     pub span: Span,
 }
@@ -456,6 +469,7 @@ impl StructDef {
     }
 }
 
+#[derive(Clone)]
 pub struct FieldDef {
     pub name: String,
     pub ty: Ty,
@@ -464,6 +478,8 @@ pub struct FieldDef {
 
 pub struct EnumDef {
     pub name: String,
+    /// Non-empty marks a template, exactly as on `StructDef`.
+    pub type_params: Vec<String>,
     pub variants: Vec<VariantDef>,
     pub span: Span,
 }
@@ -477,6 +493,7 @@ impl EnumDef {
     }
 }
 
+#[derive(Clone)]
 pub struct VariantDef {
     pub name: String,
     /// A tuple payload is stored as fields named `0`, `1`, … so one representation serves both.
@@ -487,6 +504,9 @@ pub struct VariantDef {
 
 pub struct FnDef {
     pub name: String,
+    /// Non-empty marks a template, exactly as on `StructDef`: the body is checked once with the
+    /// parameters opaque, and only instances of it are ever executed.
+    pub type_params: Vec<String>,
     /// Whether calling this function builds a `Task<ret>` instead of running it.
     pub is_task: bool,
     /// The declared capability set, sorted and deduplicated. Checked, not inferred.

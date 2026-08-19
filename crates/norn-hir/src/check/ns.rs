@@ -8,6 +8,7 @@ impl Checker {
         let span = Span::new(0, 0);
         let option = EnumDef {
             name: "Option".into(),
+            type_params: Vec::new(),
             variants: vec![
                 VariantDef {
                     name: "None".into(),
@@ -30,6 +31,7 @@ impl Checker {
         };
         let result = EnumDef {
             name: "Result".into(),
+            type_params: Vec::new(),
             variants: vec![
                 VariantDef {
                     name: "Ok".into(),
@@ -58,6 +60,7 @@ impl Checker {
         // failure type the language cannot name is not a failure type.
         let io_error = EnumDef {
             name: "IoError".into(),
+            type_params: Vec::new(),
             variants: io_error::VARIANTS
                 .iter()
                 .map(|(name, fields)| VariantDef {
@@ -109,6 +112,8 @@ impl Checker {
             assigning: false,
             scope_depth: 0,
             loops: Vec::new(),
+            generics: Generics::new(),
+            type_params_in_scope: Vec::new(),
         }
     }
 
@@ -146,7 +151,12 @@ impl Checker {
         // Type imports bind before types are defined, because a field may name an imported type;
         // function imports cannot bind until every module's `declare_fns` has run.
         self.each(inputs, Checker::bind_imports);
+        // Instances allocated while types are being defined queue their fills, because the
+        // template a field names may not have its own fields yet; the drain right after is what
+        // guarantees every instance any later pass observes has real fields.
+        self.generics.defining_types = true;
         self.each(inputs, Checker::define_types);
+        self.drain_type_fills();
         self.each(inputs, Checker::declare_fns);
         self.bind_fn_imports();
         // Reactors are declared, scanned, and checked between signatures and bodies, because a

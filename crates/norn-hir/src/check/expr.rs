@@ -506,7 +506,14 @@ impl Checker {
             );
             return self.error_expr(span);
         }
-        let mut expr = self.construct_variant(id, index, &[], Ty::Enum(id), variant_span);
+        // The expectation belongs to the whole path: with segments after the variant it is the
+        // projection's, not the construction's.
+        let expected = if path.segments.len() == first + 2 {
+            expected
+        } else {
+            None
+        };
+        let mut expr = self.construct_variant(id, index, &[], expected, variant_span);
         for segment in &path.segments[first + 2..] {
             expr = self.field_access(expr, segment, path.segments[0].span.to(segment.span));
         }

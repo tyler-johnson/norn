@@ -61,7 +61,7 @@ impl Checker {
             if id == EnumId::RESULT {
                 return self.check_result(path, args, expected, span);
             }
-            return self.construct_variant(id, index, args, Ty::Enum(id), span);
+            return self.construct_variant(id, index, args, expected, span);
         }
 
         if path.segments.len() != 1 {
@@ -71,7 +71,7 @@ impl Checker {
                 .namespaces
                 .contains_key(&path.segments[0].name)
             {
-                return self.check_ns_call(path, args, span);
+                return self.check_ns_call(path, args, expected, span);
             }
             self.error(path.span, format!("unknown function `{}`", path.text()));
             return Expr {
@@ -94,7 +94,7 @@ impl Checker {
                 match kind {
                     TypeName::Struct(id) => {
                         let id = *id;
-                        return self.construct_struct(id, args, span);
+                        return self.construct_struct(id, args, expected, span);
                     }
                     TypeName::Enum(id) => {
                         let example = self.enum_example(*id);
@@ -130,6 +130,17 @@ impl Checker {
         args: &[ast::Arg],
         span: Span,
     ) -> Expr {
+        // A temporary arm, deleted when call-site inference lands with generic functions.
+        if !self.program.fns[id.index()].type_params.is_empty() {
+            self.push(
+                Diagnostic::new(
+                    span,
+                    format!("`{display}` is generic, and generic functions cannot be called yet"),
+                )
+                .note("call-site inference arrives with the rest of item 7; see BOOTSTRAP.md §8"),
+            );
+            return self.error_expr(span);
+        }
         let (params, ret) = self.signatures[id.index()].clone();
         let param_names: Vec<String> = params.iter().map(|(n, _)| n.clone()).collect();
         let Some(order) = self.argument_order(&param_names, args, display, "parameter", span)
@@ -166,6 +177,7 @@ impl Checker {
         &mut self,
         path: &ast::Path,
         args: &[ast::Arg],
+        expected: Option<&Ty>,
         span: Span,
     ) -> Expr {
         let resolved = match self.resolve_ns(path) {
@@ -175,7 +187,7 @@ impl Checker {
         let written = path.text();
         match (resolved, path.segments.len()) {
             (NsItem::Fn(id), 2) => self.call_fn(id, &written, args, span),
-            (NsItem::Struct(id), 2) => self.construct_struct(id, args, span),
+            (NsItem::Struct(id), 2) => self.construct_struct(id, args, expected, span),
             (NsItem::Enum(id), 2) => {
                 let example = self.enum_example(id);
                 self.push(
@@ -202,7 +214,7 @@ impl Checker {
                     );
                     return self.error_expr(span);
                 };
-                self.construct_variant(id, index, args, Ty::Enum(id), span)
+                self.construct_variant(id, index, args, expected, span)
             }
             _ => {
                 self.error(path.span, format!("unknown function `{written}`"));
@@ -720,7 +732,18 @@ impl Checker {
         }
     }
 
-    pub(super) fn construct_struct(&mut self, id: StructId, args: &[ast::Arg], span: Span) -> Expr {
+    pub(super) fn construct_struct(
+        &mut self,
+        id: StructId,
+        args: &[ast::Arg],
+        expected: Option<&Ty>,
+        span: Span,
+    ) -> Expr {
+        // A template infers its arguments from the expectation or the fields, then lands here
+        // again — through the instance's id — with everything concrete.
+        if !self.program.structs[id.index()].type_params.is_empty() {
+            return self.construct_generic_struct(id, args, expected, span);
+        }
         let strukt = &self.program.structs[id.index()];
         let name = strukt.name.clone();
         let names: Vec<String> = strukt.fields.iter().map(|f| f.name.clone()).collect();
@@ -751,9 +774,12 @@ impl Checker {
         id: EnumId,
         index: usize,
         args: &[ast::Arg],
-        ty: Ty,
+        expected: Option<&Ty>,
         span: Span,
     ) -> Expr {
+        if !self.program.enums[id.index()].type_params.is_empty() {
+            return self.construct_generic_variant(id, index, args, expected, span);
+        }
         let variant = &self.program.enums[id.index()].variants[index];
         let subject = format!("{}.{}", self.program.enums[id.index()].name, variant.name);
         let names: Vec<String> = variant.fields.iter().map(|f| f.name.clone()).collect();
@@ -774,7 +800,7 @@ impl Checker {
                 ctor: Ctor::Variant(id, index),
                 args: checked,
             },
-            ty,
+            ty: Ty::Enum(id),
             span,
         }
     }
