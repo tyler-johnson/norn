@@ -584,6 +584,21 @@ impl Interpreter<'_> {
                     }
                 }
             }
+            Builtin::TextUnchecked => {
+                let data = blob("text_unchecked", &args[0])?;
+                match std::str::from_utf8(&data) {
+                    Ok(text) => Value::Str(text.into()),
+                    Err(err) => {
+                        return Err(self.trap(
+                            frame,
+                            format!(
+                                "`text_unchecked` given invalid UTF-8 at byte {}",
+                                err.valid_up_to()
+                            ),
+                        ));
+                    }
+                }
+            }
             task => {
                 return Err(self.trap(
                     frame,

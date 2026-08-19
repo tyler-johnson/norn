@@ -70,6 +70,13 @@ fn traps_match() {
             "byte-value-range",
             "fn main() -> () {\n    let data = byte(300)\n    print(data)\n}\n",
         ),
+        (
+            // The trusting half of bytes→text: a torn multibyte lead is exactly the input the
+            // checked `std/bytes` wrapper exists to refuse, and here it traps instead — with a
+            // byte offset both engines must compute identically.
+            "text-unchecked-invalid",
+            "fn main() -> () {\n    print(text_unchecked(bytes_slice(bytes(\"☃\"), 0, 1)))\n}\n",
+        ),
     ];
     for (name, source) in programs {
         let (nir, main) = common::build_source(name, source);

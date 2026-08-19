@@ -621,7 +621,7 @@
     },
     "builtin-fns": {
       "name": "support.function.builtin.norn",
-      "match": "\\b(?:print|listener_port|sleep|tcp_listen|tcp_accept|tcp_read|tcp_write|tcp_close|send|latest|bytes_len|bytes_slice|bytes_text|bytes_concat|bytes|byte|file_create|flow_of_file|pipe_to|http_read_request|request_method|request_path|request_header|request_body|http_respond_empty|http_respond_flow|http_respond)\\b(?=\\s*\\()"
+      "match": "\\b(?:print|listener_port|sleep|tcp_listen|tcp_accept|tcp_read|tcp_write|tcp_close|send|latest|bytes_len|bytes_slice|bytes_text|text_unchecked|bytes_concat|bytes|byte|file_create|flow_of_file|pipe_to|http_read_request|request_method|request_path|request_header|request_body|http_respond_empty|http_respond_flow|http_respond)\\b(?=\\s*\\()"
     },
     "call": {
       "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\s*(?=\\()",
