@@ -9,7 +9,10 @@
 /// Every standard-library module, as `(import specifier, contents)`. Keys are the specifiers
 /// verbatim — extensionless, which is what keeps them disjoint from file keys, whose relative
 /// resolution always appends `.norn`.
-pub const STD: &[(&str, &str)] = &[("std/fmt", include_str!("../../../std/fmt.norn"))];
+pub const STD: &[(&str, &str)] = &[
+    ("std/fmt", include_str!("../../../std/fmt.norn")),
+    ("std/time", include_str!("../../../std/time.norn")),
+];
 
 /// The text of the standard-library module `key` names, if there is one.
 pub fn source(key: &str) -> Option<&'static str> {

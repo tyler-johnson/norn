@@ -1,0 +1,30 @@
+=== ast ===
+(module
+  (fn wait export task
+    (params (param ms I64))
+    (ret unit)
+    (uses clock)
+    (block (await (call (path sleep) (arg (path ms))))))
+  (fn seconds export
+    (params (param n I64))
+    (ret I64)
+    (block (binary * (path n) (int 1000))))
+  (fn minutes export
+    (params (param n I64))
+    (ret I64)
+    (block (binary * (path n) (int 60000)))))
+
+=== canonical ===
+export task fn wait(ms: I64) -> ()
+    uses { clock }
+{
+    await sleep(ms)
+}
+
+export fn seconds(n: I64) -> I64 {
+    n * 1000
+}
+
+export fn minutes(n: I64) -> I64 {
+    n * 60000
+}

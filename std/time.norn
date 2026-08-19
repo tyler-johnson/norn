@@ -1,0 +1,23 @@
+// Time, in milliseconds — the unit `sleep` counts in, named rather than implied.
+//
+// `wait` is `sleep` wrapped in a task fn, and the wrapping is the point: `after` requires a named
+// task fn so that a reactor's effect vocabulary stays explicit — every effect it can cause is a
+// named, typed operation whose signature declares its `uses`. `sleep` itself is refused in a
+// reactor (a turn is pure), so `after wait(ms) -> tick` is how a reactor gives itself time.
+//
+// The name is `wait` because `delay` is reserved for the future signal operator
+// (`hold`/`scan`/`delay`); std does not squat on it.
+
+export task fn wait(ms: I64) -> ()
+    uses { clock }
+{
+    await sleep(ms)
+}
+
+export fn seconds(n: I64) -> I64 {
+    n * 1000
+}
+
+export fn minutes(n: I64) -> I64 {
+    n * 60000
+}
