@@ -1,67 +1,67 @@
 === nir ===
-enum Option #0 (None/0, Some/1)
-enum Result #1 (Ok/1, Err/1)
-enum IoError #2 (NotFound/0, Denied/0, InUse/0, Refused/0, Closed/0, Other/1)
+enum Option #0 (None, Some(?))
+enum Result #1 (Ok(?), Err(?))
+enum IoError #2 (NotFound, Denied, InUse, Refused, Closed, Other(String))
 
-task fn main #0()
-    local _0/n
-    local _1/k
-    local _2/total
-    local _3/i
-    local _4/odds
-    local _5/left
-    local _6/next
-    local _7/drained
-    local _8/sum
-    local _9/j
-    local _10/row
-    local _11/cells
-    local _12/col
-    local _13/passes
-    local _14
-    local _15
-    local _16
-    local _17
-    local _18
-    local _19
-    local _20
-    local _21
-    local _22
-    local _23
-    local _24
-    local _25
-    local _26
-    local _27
-    local _28
-    local _29
-    local _30
-    local _31
-    local _32
-    local _33
-    local _34
-    local _35
-    local _36
-    local _37
-    local _38
-    local _39
-    local _40
-    local _41
-    local _42
-    local _43
-    local _44
-    local _45
-    local _46
-    local _47
-    local _48
-    local _49
-    local _50
-    local _51
-    local _52
-    local _53
-    local _54
-    local _55
-    local _56
-    local _57
+task fn main #0() -> ()
+    local _0/n: I64
+    local _1/k: I64
+    local _2/total: I64
+    local _3/i: I64
+    local _4/odds: I64
+    local _5/left: I64
+    local _6/next: I64
+    local _7/drained: String
+    local _8/sum: I64
+    local _9/j: I64
+    local _10/row: I64
+    local _11/cells: I64
+    local _12/col: I64
+    local _13/passes: I64
+    local _14: Bool
+    local _15: ()
+    local _16: I64
+    local _17: I64
+    local _18: I64
+    local _19: ()
+    local _20: Bool
+    local _21: ()
+    local _22: Bool
+    local _23: I64
+    local _24: ()
+    local _25: I64
+    local _26: Bool
+    local _27: I64
+    local _28: ()
+    local _29: String
+    local _30: ()
+    local _31: Option<I64>
+    local _32: ()
+    local _33: Bool
+    local _34: Task<I64>
+    local _35: I64
+    local _36: I64
+    local _37: I64
+    local _38: ()
+    local _39: Bool
+    local _40: I64
+    local _41: ()
+    local _42: I64
+    local _43: ()
+    local _44: Bool
+    local _45: ()
+    local _46: Bool
+    local _47: I64
+    local _48: ()
+    local _49: ()
+    local _50: ()
+    local _51: Task<()>
+    local _52: Task<()>
+    local _53: ()
+    local _54: I64
+    local _55: ()
+    local _56: Bool
+    local _57: ()
   b0:
     _0/n = 3
     goto b1
@@ -139,7 +139,7 @@ task fn main #0()
     _30 = ()
     goto b17
   b22:
-    _6/next = _31.0
+    _6/next = _31.0@Some
     goto b21
   b23:
     _29 = "drained"
@@ -228,12 +228,12 @@ task fn main #0()
   b47:
     goto b40
 
-fn step #1(_0/n)
-    local _1
-    local _2
-    local _3
-    local _4
-    local _5
+fn step #1(_0/n: I64) -> Option<I64>
+    local _1: Option<I64>
+    local _2: Bool
+    local _3: I64
+    local _4: Option<I64>
+    local _5: Option<I64>
   b0:
     _2 = _0/n gt 0
     branch _2 ? b1 : b2
@@ -249,14 +249,14 @@ fn step #1(_0/n)
   b3:
     return _1
 
-task fn double #2(_0/n)
-    local _1
+task fn double #2(_0/n: I64) -> I64
+    local _1: I64
   b0:
     _1 = _0/n add.i _0/n
     return _1
 
-task fn shout #3(_0/n)
-    local _1
+task fn shout #3(_0/n: I64) -> ()
+    local _1: ()
   b0:
     _1 = builtin print(_0/n)
     return _1

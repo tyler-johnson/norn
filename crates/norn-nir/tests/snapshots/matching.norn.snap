@@ -1,32 +1,32 @@
 === nir ===
-struct Point #0 (x, y)
-enum Option #0 (None/0, Some/1)
-enum Result #1 (Ok/1, Err/1)
-enum IoError #2 (NotFound/0, Denied/0, InUse/0, Refused/0, Closed/0, Other/1)
-enum Shape #3 (Empty/0, Dot/1, Segment/2, Circle/2)
+struct Point #0 (x: I64, y: I64)
+enum Option #0 (None, Some(?))
+enum Result #1 (Ok(?), Err(?))
+enum IoError #2 (NotFound, Denied, InUse, Refused, Closed, Other(String))
+enum Shape #3 (Empty, Dot(Point), Segment(Point, Point), Circle(centre: Point, radius: I64))
 
-fn describe #0(_0/shape)
-    local _1/point
-    local _2/from
-    local _3/to
-    local _4/centre
-    local _5/radius
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
-    local _12
-    local _13
-    local _14
-    local _15
-    local _16
-    local _17
-    local _18
-    local _19
-    local _20
-    local _21
+fn describe #0(_0/shape: Shape) -> String
+    local _1/point: Point
+    local _2/from: Point
+    local _3/to: Point
+    local _4/centre: Point
+    local _5/radius: I64
+    local _6: String
+    local _7: Bool
+    local _8: Bool
+    local _9: String
+    local _10: String
+    local _11: String
+    local _12: String
+    local _13: String
+    local _14: String
+    local _15: String
+    local _16: Bool
+    local _17: String
+    local _18: String
+    local _19: String
+    local _20: String
+    local _21: String
   b0:
     goto b2
   b1:
@@ -54,10 +54,10 @@ fn describe #0(_0/shape)
     _6 = "dot at the origin"
     goto b1
   b12:
-    _7 = _0/shape.0.0 eq 0
+    _7 = _0/shape.0@Dot.0 eq 0
     branch _7 ? b13 : b4
   b13:
-    _8 = _0/shape.0.1 eq 0
+    _8 = _0/shape.0@Dot.1 eq 0
     branch _8 ? b11 : b4
   b14:
     _9 = call show#2(_1/point)
@@ -65,7 +65,7 @@ fn describe #0(_0/shape)
     _6 = _10
     goto b1
   b15:
-    _1/point = _0/shape.0
+    _1/point = _0/shape.0@Dot
     goto b14
   b16:
     _11 = call show#2(_2/from)
@@ -76,10 +76,10 @@ fn describe #0(_0/shape)
     _6 = _15
     goto b1
   b17:
-    _2/from = _0/shape.0
+    _2/from = _0/shape.0@Segment
     goto b18
   b18:
-    _3/to = _0/shape.1
+    _3/to = _0/shape.1@Segment
     goto b16
   b19:
     _6 = "degenerate circle"
@@ -87,7 +87,7 @@ fn describe #0(_0/shape)
   b20:
     goto b21
   b21:
-    _16 = _0/shape.1 eq 0
+    _16 = _0/shape.1@Circle eq 0
     branch _16 ? b19 : b7
   b22:
     _17 = call fmt.to_string#4(_5/radius)
@@ -98,18 +98,18 @@ fn describe #0(_0/shape)
     _6 = _21
     goto b1
   b23:
-    _4/centre = _0/shape.0
+    _4/centre = _0/shape.0@Circle
     goto b24
   b24:
-    _5/radius = _0/shape.1
+    _5/radius = _0/shape.1@Circle
     goto b22
 
-fn size #1(_0/shape)
-    local _1/r
-    local _2/r
-    local _3
-    local _4
-    local _5
+fn size #1(_0/shape: Shape) -> String
+    local _1/r: I64
+    local _2/r: I64
+    local _3: String
+    local _4: Bool
+    local _5: Bool
   b0:
     goto b2
   b1:
@@ -130,7 +130,7 @@ fn size #1(_0/shape)
   b8:
     goto b9
   b9:
-    _1/r = _0/shape.1
+    _1/r = _0/shape.1@Circle
     goto b7
   b10:
     _3 = "huge"
@@ -141,7 +141,7 @@ fn size #1(_0/shape)
   b12:
     goto b13
   b13:
-    _2/r = _0/shape.1
+    _2/r = _0/shape.1@Circle
     goto b11
   b14:
     _3 = "large"
@@ -166,13 +166,13 @@ fn size #1(_0/shape)
     _3 = "some"
     goto b1
 
-fn show #2(_0/point)
-    local _1
-    local _2
-    local _3
-    local _4
-    local _5
-    local _6
+fn show #2(_0/point: Point) -> String
+    local _1: String
+    local _2: String
+    local _3: String
+    local _4: String
+    local _5: String
+    local _6: String
   b0:
     _1 = call fmt.to_string#4(_0/point.0)
     _2 = "(" concat _1
@@ -182,46 +182,46 @@ fn show #2(_0/point)
     _6 = _5 concat ")"
     return _6
 
-fn main #3()
-    local _0/origin
-    local _1/corner
-    local _2
-    local _3
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
-    local _12
-    local _13
-    local _14
-    local _15
-    local _16
-    local _17
-    local _18
-    local _19
-    local _20
-    local _21
-    local _22
-    local _23
-    local _24
-    local _25
-    local _26
-    local _27
-    local _28
-    local _29
-    local _30
-    local _31
-    local _32
-    local _33
-    local _34
-    local _35
-    local _36
-    local _37
-    local _38
+fn main #3() -> ()
+    local _0/origin: Point
+    local _1/corner: Point
+    local _2: Point
+    local _3: Point
+    local _4: Shape
+    local _5: String
+    local _6: ()
+    local _7: Shape
+    local _8: String
+    local _9: ()
+    local _10: Shape
+    local _11: String
+    local _12: ()
+    local _13: Shape
+    local _14: String
+    local _15: ()
+    local _16: Shape
+    local _17: String
+    local _18: ()
+    local _19: Shape
+    local _20: String
+    local _21: ()
+    local _22: Shape
+    local _23: String
+    local _24: ()
+    local _25: Shape
+    local _26: String
+    local _27: ()
+    local _28: Shape
+    local _29: String
+    local _30: ()
+    local _31: Shape
+    local _32: String
+    local _33: ()
+    local _34: Shape
+    local _35: String
+    local _36: ()
+    local _37: Shape
+    local _38: ()
   b0:
     _2 = Point(0, 0)
     _0/origin = _2
@@ -264,22 +264,22 @@ fn main #3()
     _38 = builtin print(_37)
     return _38
 
-fn fmt.to_string #4(_0/n)
-    local _1/rest
-    local _2/out
-    local _3
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
-    local _12
-    local _13
-    local _14
-    local _15
+fn fmt.to_string #4(_0/n: I64) -> String
+    local _1/rest: I64
+    local _2/out: String
+    local _3: I64
+    local _4: Bool
+    local _5: I64
+    local _6: I64
+    local _7: String
+    local _8: Bool
+    local _9: I64
+    local _10: I64
+    local _11: String
+    local _12: String
+    local _13: String
+    local _14: Bool
+    local _15: String
   b0:
     _4 = _0/n lt 0
     branch _4 ? b1 : b2
@@ -320,39 +320,39 @@ fn fmt.to_string #4(_0/n)
   b9:
     return _13
 
-fn fmt.to_int #5(_0/s)
-    local _1/data
-    local _2/len
-    local _3/i
-    local _4/negative
-    local _5/value
-    local _6/b
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
-    local _12
-    local _13
-    local _14
-    local _15
-    local _16
-    local _17
-    local _18
-    local _19
-    local _20
-    local _21
-    local _22
-    local _23
-    local _24
-    local _25
-    local _26
-    local _27
-    local _28
-    local _29
-    local _30
-    local _31
-    local _32
+fn fmt.to_int #5(_0/s: String) -> Option<I64>
+    local _1/data: Bytes
+    local _2/len: I64
+    local _3/i: I64
+    local _4/negative: Bool
+    local _5/value: I64
+    local _6/b: I64
+    local _7: Bytes
+    local _8: I64
+    local _9: ()
+    local _10: Bool
+    local _11: Option<I64>
+    local _12: ()
+    local _13: I64
+    local _14: Bool
+    local _15: ()
+    local _16: Bool
+    local _17: Option<I64>
+    local _18: Bool
+    local _19: I64
+    local _20: ()
+    local _21: Bool
+    local _22: Bool
+    local _23: Bool
+    local _24: Option<I64>
+    local _25: I64
+    local _26: I64
+    local _27: I64
+    local _28: I64
+    local _29: Option<I64>
+    local _30: I64
+    local _31: Option<I64>
+    local _32: Option<I64>
   b0:
     _7 = builtin bytes(_0/s)
     _1/data = _7
@@ -435,18 +435,18 @@ fn fmt.to_int #5(_0/s)
   b20:
     return _29
 
-fn fmt.digit #6(_0/n)
-    local _1
-    local _2
-    local _3
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
+fn fmt.digit #6(_0/n: I64) -> String
+    local _1: String
+    local _2: Bool
+    local _3: Bool
+    local _4: Bool
+    local _5: Bool
+    local _6: Bool
+    local _7: Bool
+    local _8: Bool
+    local _9: Bool
+    local _10: Bool
+    local _11: Bool
   b0:
     goto b2
   b1:
@@ -517,8 +517,8 @@ fn fmt.digit #6(_0/n)
     _1 = "?"
     goto b1
 
-fn fmt.Display.to_string for I64 #7(_0/value)
-    local _1
+fn fmt.Display.to_string for I64 #7(_0/value: I64) -> String
+    local _1: String
   b0:
     _1 = call fmt.to_string#4(_0/value)
     return _1

@@ -1,24 +1,24 @@
 === nir ===
-struct Greeting #0 (salutation, subject)
-enum Option #0 (None/0, Some/1)
-enum Result #1 (Ok/1, Err/1)
-enum IoError #2 (NotFound/0, Denied/0, InUse/0, Refused/0, Closed/0, Other/1)
+struct Greeting #0 (salutation: String, subject: String)
+enum Option #0 (None, Some(?))
+enum Result #1 (Ok(?), Err(?))
+enum IoError #2 (NotFound, Denied, InUse, Refused, Closed, Other(String))
 
-fn render #0(_0/greeting)
-    local _1
-    local _2
-    local _3
+fn render #0(_0/greeting: Greeting) -> String
+    local _1: String
+    local _2: String
+    local _3: String
   b0:
     _1 = _0/greeting.0 concat ", "
     _2 = _1 concat _0/greeting.1
     _3 = _2 concat "!"
     return _3
 
-fn main #1()
-    local _0/greeting
-    local _1
-    local _2
-    local _3
+fn main #1() -> ()
+    local _0/greeting: Greeting
+    local _1: Greeting
+    local _2: String
+    local _3: ()
   b0:
     _1 = Greeting("Hello", "world")
     _0/greeting = _1

@@ -1,14 +1,14 @@
 === nir ===
-enum Option #0 (None/0, Some/1)
-enum Result #1 (Ok/1, Err/1)
-enum IoError #2 (NotFound/0, Denied/0, InUse/0, Refused/0, Closed/0, Other/1)
+enum Option #0 (None, Some(?))
+enum Result #1 (Ok(?), Err(?))
+enum IoError #2 (NotFound, Denied, InUse, Refused, Closed, Other(String))
 
-task fn wait_for_client #0(_0/listener)
-    local _1
-    local _2
-    local _3
-    local _4
-    local _5
+task fn wait_for_client #0(_0/listener: Listener) -> ()
+    local _1: ()
+    local _2: Task<Result<Connection, IoError>>
+    local _3: Result<Connection, IoError>
+    local _4: ()
+    local _5: ()
   b0:
     _2 = task builtin tcp_accept(_0/listener)
     await _2 -> _3, resume b1
@@ -35,25 +35,25 @@ task fn wait_for_client #0(_0/listener)
   b9:
     goto b8
 
-task fn main #1()
-    local _0/listener
-    local _1
-    local _2
-    local _3
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
+task fn main #1() -> Result<(), IoError>
+    local _0/listener: Listener
+    local _1: Task<Result<Listener, IoError>>
+    local _2: Result<Listener, IoError>
+    local _3: Listener
+    local _4: Result<(), IoError>
+    local _5: ()
+    local _6: Task<()>
+    local _7: Task<()>
+    local _8: ()
+    local _9: ()
+    local _10: Result<(), IoError>
   b0:
     _1 = task builtin tcp_listen(0)
     await _1 -> _2, resume b1
   b1:
     switch tag _2 [0 => b2] else b3
   b2:
-    _3 = _2.0
+    _3 = _2.0@Ok
     _0/listener = _3
     scope enter
     _6 = task wait_for_client#0(_0/listener)
@@ -61,7 +61,7 @@ task fn main #1()
     _7 = task builtin sleep(50)
     await _7 -> _8, resume b4
   b3:
-    _4 = Result.Err(_2.0)
+    _4 = Result.Err(_2.0@Err)
     return _4
   b4:
     _5 = _8

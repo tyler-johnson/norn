@@ -1,48 +1,48 @@
 === nir ===
-enum Option #0 (None/0, Some/1)
-enum Result #1 (Ok/1, Err/1)
-enum IoError #2 (NotFound/0, Denied/0, InUse/0, Refused/0, Closed/0, Other/1)
+enum Option #0 (None, Some(?))
+enum Result #1 (Ok(?), Err(?))
+enum IoError #2 (NotFound, Denied, InUse, Refused, Closed, Other(String))
 
-task fn main #0()
-    local _0/outer
-    local _1/inner
-    local _2
-    local _3
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
-    local _12
-    local _13
-    local _14
-    local _15
-    local _16
-    local _17
-    local _18
-    local _19
-    local _20
+task fn main #0() -> Result<(), IoError>
+    local _0/outer: Listener
+    local _1/inner: Listener
+    local _2: Task<Result<Listener, IoError>>
+    local _3: Result<Listener, IoError>
+    local _4: Listener
+    local _5: Result<(), IoError>
+    local _6: ()
+    local _7: Task<Result<Listener, IoError>>
+    local _8: Result<Listener, IoError>
+    local _9: Listener
+    local _10: Result<(), IoError>
+    local _11: I64
+    local _12: I64
+    local _13: String
+    local _14: ()
+    local _15: Task<()>
+    local _16: ()
+    local _17: ()
+    local _18: Task<()>
+    local _19: ()
+    local _20: Result<(), IoError>
   b0:
     _2 = task builtin tcp_listen(0)
     await _2 -> _3, resume b1
   b1:
     switch tag _3 [0 => b2] else b3
   b2:
-    _4 = _3.0
+    _4 = _3.0@Ok
     _0/outer = _4
     scope enter
     _7 = task builtin tcp_listen(0)
     await _7 -> _8, resume b4
   b3:
-    _5 = Result.Err(_3.0)
+    _5 = Result.Err(_3.0@Err)
     return _5
   b4:
     switch tag _8 [0 => b5] else b6
   b5:
-    _9 = _8.0
+    _9 = _8.0@Ok
     _1/inner = _9
     _11 = builtin listener_port(_0/outer)
     _12 = builtin listener_port(_1/inner)
@@ -51,7 +51,7 @@ task fn main #0()
     _15 = task builtin sleep(1)
     await _15 -> _16, resume b8
   b6:
-    _10 = Result.Err(_8.0)
+    _10 = Result.Err(_8.0@Err)
     scope exit, resume b7
   b7:
     return _10
@@ -66,9 +66,9 @@ task fn main #0()
     _20 = Result.Ok(())
     return _20
 
-fn compare #1(_0/a, _1/b)
-    local _2
-    local _3
+fn compare #1(_0/a: I64, _1/b: I64) -> String
+    local _2: String
+    local _3: Bool
   b0:
     _3 = _0/a eq _1/b
     branch _3 ? b1 : b2

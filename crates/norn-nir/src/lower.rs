@@ -14,12 +14,16 @@ use norn_hir::hir;
 use crate::nir::*;
 
 pub fn lower(program: &hir::Program) -> Program {
+    let field = |f: &hir::FieldDef| FieldLayout {
+        name: f.name.clone(),
+        ty: f.ty.clone(),
+    };
     let structs = program
         .structs
         .iter()
         .map(|strukt| StructLayout {
             name: strukt.name.clone(),
-            fields: strukt.fields.iter().map(|f| f.name.clone()).collect(),
+            fields: strukt.fields.iter().map(field).collect(),
         })
         .collect();
     let enums = program
@@ -32,7 +36,7 @@ pub fn lower(program: &hir::Program) -> Program {
                 .iter()
                 .map(|v| VariantLayout {
                     name: v.name.clone(),
-                    fields: v.fields.iter().map(|f| f.name.clone()).collect(),
+                    fields: v.fields.iter().map(field).collect(),
                     positional: v.positional,
                 })
                 .collect(),
@@ -59,11 +63,13 @@ pub fn lower(program: &hir::Program) -> Program {
 fn lower_reactor(def: &hir::ReactorDef) -> Reactor {
     Reactor {
         name: def.name.clone(),
+        params: def.params.iter().map(|(_, ty)| ty.clone()).collect(),
         nodes: def
             .nodes
             .iter()
             .map(|node| Node {
                 name: node.name.clone(),
+                ty: node.ty.clone(),
                 deps: node.deps.iter().map(|dep| dep.index()).collect(),
                 kind: match node.kind {
                     hir::NodeKind::Param { slot, index } => NodeKind::Param { slot, index },
@@ -81,6 +87,7 @@ fn lower_reactor(def: &hir::ReactorDef) -> Reactor {
             .iter()
             .map(|input| Input {
                 name: input.name.clone(),
+                ty: input.ty.clone(),
                 capacity: input.capacity,
                 overflow: input.overflow,
                 handler: input.handler.index(),
@@ -182,6 +189,10 @@ fn lower_fn(program: &hir::Program, def: &hir::FnDef) -> Function {
     let mut lowerer = Lowerer {
         program,
         locals: def.locals.iter().map(|l| l.name.clone()).collect(),
+        // An inert def's locals were cut to its parameters, and its `()` body allocates no
+        // temporaries, so copying whatever is there keeps the vectors in lockstep for every class.
+        tys: def.locals.iter().map(|l| l.ty.clone()).collect(),
+        ret: def.ret.clone(),
         roles: def.locals.iter().map(|l| l.role).collect(),
         blocks: vec![Block::default()],
         current: 0,
@@ -202,6 +213,9 @@ fn lower_fn(program: &hir::Program, def: &hir::FnDef) -> Function {
         },
         params: def.params,
         locals: lowerer.locals,
+        tys: lowerer.tys,
+        ret: lowerer.ret,
+        inert: def.inert,
         blocks,
     }
 }
@@ -243,6 +257,10 @@ fn prune(blocks: Vec<Block>) -> Vec<Block> {
 struct Lowerer<'p> {
     program: &'p hir::Program,
     locals: Vec<String>,
+    /// The type of each local, grown in lockstep with `locals`.
+    tys: Vec<hir::Ty>,
+    /// The function's return type: what `try_expr`'s rebuilt `Err`/`None` temporaries have.
+    ret: hir::Ty,
     /// What each local is. Only a handler has any that are not `Ordinary`, and the one that matters
     /// here is `State`: assigning to such a local is a commit, and is where `SetSlot` comes from.
     roles: Vec<hir::LocalRole>,
@@ -271,9 +289,10 @@ struct LoopFrame {
 }
 
 impl Lowerer<'_> {
-    fn temp(&mut self) -> LocalId {
+    fn temp(&mut self, ty: hir::Ty) -> LocalId {
         let id = self.locals.len();
         self.locals.push(String::new());
+        self.tys.push(ty);
         id
     }
 
@@ -338,7 +357,7 @@ impl Lowerer<'_> {
         match operand {
             Operand::Copy(place) => place,
             operand => {
-                let temp = Place::local(self.temp());
+                let temp = Place::local(self.temp(expr.ty.clone()));
                 self.emit(temp.clone(), Rvalue::Use(operand));
                 temp
             }
@@ -351,6 +370,9 @@ impl Lowerer<'_> {
     }
 
     fn expr(&mut self, expr: &hir::Expr) -> Operand {
+        // Bound before the match: several arms destructure a field also named `expr`, and the
+        // type a temporary gets is always the *outer* expression's.
+        let ty = &expr.ty;
         match &expr.kind {
             hir::ExprKind::Unit => Operand::Const(Const::Unit),
             hir::ExprKind::Int(v) => Operand::Const(Const::Int(*v)),
@@ -364,21 +386,21 @@ impl Lowerer<'_> {
             }
             hir::ExprKind::Unary { op, expr } => {
                 let operand = self.expr(expr);
-                let temp = Place::local(self.temp());
+                let temp = Place::local(self.temp(ty.clone()));
                 self.emit(temp.clone(), Rvalue::Unary(*op, operand));
                 Operand::Copy(temp)
             }
             hir::ExprKind::Binary { op, lhs, rhs } => {
                 let lhs = self.expr(lhs);
                 let rhs = self.expr(rhs);
-                let temp = Place::local(self.temp());
+                let temp = Place::local(self.temp(ty.clone()));
                 self.emit(temp.clone(), Rvalue::Binary(*op, lhs, rhs));
                 Operand::Copy(temp)
             }
             hir::ExprKind::ShortCircuit { and, lhs, rhs } => self.short_circuit(*and, lhs, rhs),
             hir::ExprKind::Call { callee, args } => {
                 let args = args.iter().map(|arg| self.expr(arg)).collect();
-                let temp = Place::local(self.temp());
+                let temp = Place::local(self.temp(ty.clone()));
                 // A call to a `task fn` builds a task rather than pushing a frame. Nothing runs
                 // until something awaits or spawns it.
                 let rvalue = if self.program.fns[callee.index()].is_task {
@@ -391,7 +413,7 @@ impl Lowerer<'_> {
             }
             hir::ExprKind::Builtin { builtin, args } => {
                 let args = args.iter().map(|arg| self.expr(arg)).collect();
-                let temp = Place::local(self.temp());
+                let temp = Place::local(self.temp(ty.clone()));
                 let rvalue = if builtin.is_task() {
                     Rvalue::BuiltinTask(*builtin, args)
                 } else {
@@ -406,7 +428,7 @@ impl Lowerer<'_> {
                     hir::Ctor::Struct(id) => Rvalue::Struct(id.index(), args),
                     hir::Ctor::Variant(id, variant) => Rvalue::Variant(id.index(), *variant, args),
                 };
-                let temp = Place::local(self.temp());
+                let temp = Place::local(self.temp(ty.clone()));
                 self.emit(temp.clone(), rvalue);
                 Operand::Copy(temp)
             }
@@ -419,7 +441,9 @@ impl Lowerer<'_> {
                     None => Operand::Const(Const::Unit),
                 }
             }
-            hir::ExprKind::If { cond, then, els } => self.if_expr(cond, then, els.as_deref()),
+            hir::ExprKind::If { cond, then, els } => {
+                self.if_expr(ty.clone(), cond, then, els.as_deref())
+            }
             hir::ExprKind::While { cond, body } => {
                 let header = self.new_block();
                 let exit = self.new_block();
@@ -449,7 +473,7 @@ impl Lowerer<'_> {
                 Operand::Const(Const::Unit)
             }
             hir::ExprKind::Loop { body } => {
-                let dest = Place::local(self.temp());
+                let dest = Place::local(self.temp(ty.clone()));
                 let header = self.new_block();
                 let exit = self.new_block();
                 self.terminate(Term::Goto(header));
@@ -494,11 +518,15 @@ impl Lowerer<'_> {
                 self.divert(frame.open_scopes_at_entry, frame.header);
                 Operand::Const(Const::Unit)
             }
-            hir::ExprKind::Match { scrutinee, arms } => self.match_expr(scrutinee, arms),
-            hir::ExprKind::Try { expr, enum_id } => self.try_expr(expr, enum_id.index()),
+            hir::ExprKind::Match { scrutinee, arms } => {
+                self.match_expr(ty.clone(), scrutinee, arms)
+            }
+            hir::ExprKind::Try { expr, enum_id } => {
+                self.try_expr(ty.clone(), expr, enum_id.index())
+            }
             hir::ExprKind::Await { expr } => {
                 let task = self.expr(expr);
-                let dest = Place::local(self.temp());
+                let dest = Place::local(self.temp(ty.clone()));
                 let resume = self.new_block();
                 self.terminate(Term::Await {
                     task,
@@ -509,7 +537,7 @@ impl Lowerer<'_> {
                 Operand::Copy(dest)
             }
             hir::ExprKind::Scope { body } => {
-                let dest = Place::local(self.temp());
+                let dest = Place::local(self.temp(ty.clone()));
                 self.push_instr(Instr::ScopeEnter);
                 self.open_scopes += 1;
                 self.assign_to(&dest, body);
@@ -537,7 +565,7 @@ impl Lowerer<'_> {
             }
             hir::ExprKind::SpawnReactor { reactor, args } => {
                 let args = args.iter().map(|arg| self.expr(arg)).collect();
-                let dest = Place::local(self.temp());
+                let dest = Place::local(self.temp(ty.clone()));
                 self.push_instr(Instr::SpawnReactor {
                     dest: dest.clone(),
                     reactor: reactor.index(),
@@ -547,13 +575,13 @@ impl Lowerer<'_> {
             }
             hir::ExprKind::ReactorInput { reactor, index } => {
                 let handle = self.expr(reactor);
-                let temp = Place::local(self.temp());
+                let temp = Place::local(self.temp(ty.clone()));
                 self.emit(temp.clone(), Rvalue::ReactorInput(handle, *index));
                 Operand::Copy(temp)
             }
             hir::ExprKind::ReactorExport { reactor, index } => {
                 let handle = self.expr(reactor);
-                let temp = Place::local(self.temp());
+                let temp = Place::local(self.temp(ty.clone()));
                 self.emit(temp.clone(), Rvalue::ReactorExport(handle, *index));
                 Operand::Copy(temp)
             }
@@ -603,12 +631,12 @@ impl Lowerer<'_> {
         match &expr.kind {
             hir::ExprKind::Local(id) => Place::local(id.index()),
             hir::ExprKind::Field { base, index } => self.place(base).field(*index),
-            _ => Place::local(self.temp()),
+            _ => Place::local(self.temp(expr.ty.clone())),
         }
     }
 
     fn short_circuit(&mut self, and: bool, lhs: &hir::Expr, rhs: &hir::Expr) -> Operand {
-        let dest = Place::local(self.temp());
+        let dest = Place::local(self.temp(hir::Ty::Bool));
         let lhs = self.expr(lhs);
         self.emit(dest.clone(), Rvalue::Use(lhs));
 
@@ -640,8 +668,14 @@ impl Lowerer<'_> {
         Operand::Copy(dest)
     }
 
-    fn if_expr(&mut self, cond: &hir::Expr, then: &hir::Expr, els: Option<&hir::Expr>) -> Operand {
-        let dest = Place::local(self.temp());
+    fn if_expr(
+        &mut self,
+        ty: hir::Ty,
+        cond: &hir::Expr,
+        then: &hir::Expr,
+        els: Option<&hir::Expr>,
+    ) -> Operand {
+        let dest = Place::local(self.temp(ty));
         let cond = self.expr(cond);
         let then_block = self.new_block();
         let else_block = self.new_block();
@@ -667,8 +701,8 @@ impl Lowerer<'_> {
         Operand::Copy(dest)
     }
 
-    fn match_expr(&mut self, scrutinee: &hir::Expr, arms: &[hir::Arm]) -> Operand {
-        let dest = Place::local(self.temp());
+    fn match_expr(&mut self, ty: hir::Ty, scrutinee: &hir::Expr, arms: &[hir::Arm]) -> Operand {
+        let dest = Place::local(self.temp(ty));
         let value = self.expr_place(scrutinee);
         let join = self.new_block();
 
@@ -758,7 +792,7 @@ impl Lowerer<'_> {
     }
 
     fn test_const(&mut self, value: &Place, expected: Const, success: BlockId, fail: BlockId) {
-        let temp = Place::local(self.temp());
+        let temp = Place::local(self.temp(hir::Ty::Bool));
         self.emit(
             temp.clone(),
             Rvalue::Binary(
@@ -806,9 +840,9 @@ impl Lowerer<'_> {
     }
 
     /// `e?` — take the payload when the value succeeded, and return the failure otherwise.
-    fn try_expr(&mut self, expr: &hir::Expr, enum_id: usize) -> Operand {
+    fn try_expr(&mut self, ty: hir::Ty, expr: &hir::Expr, enum_id: usize) -> Operand {
         let value = self.expr_place(expr);
-        let dest = Place::local(self.temp());
+        let dest = Place::local(self.temp(ty));
         let ok_block = self.new_block();
         let fail_block = self.new_block();
 
@@ -831,7 +865,7 @@ impl Lowerer<'_> {
             // Rebuild `Err(e)` at the function's own error type, which the checker has already
             // proved is the same type.
             let error = value.downcast(norn_hir::hir::EnumId::ERR, 0);
-            let rebuilt = Place::local(self.temp());
+            let rebuilt = Place::local(self.temp(self.ret.clone()));
             self.emit(
                 rebuilt.clone(),
                 Rvalue::Variant(
@@ -842,7 +876,7 @@ impl Lowerer<'_> {
             );
             self.return_from(Operand::Copy(rebuilt));
         } else {
-            let rebuilt = Place::local(self.temp());
+            let rebuilt = Place::local(self.temp(self.ret.clone()));
             self.emit(
                 rebuilt.clone(),
                 Rvalue::Variant(enum_id, norn_hir::hir::EnumId::NONE, Vec::new()),

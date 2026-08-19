@@ -1,42 +1,42 @@
 === nir ===
-struct Pair #0 (started, finished)
-enum Option #0 (None/0, Some/1)
-enum Result #1 (Ok/1, Err/1)
-enum IoError #2 (NotFound/0, Denied/0, InUse/0, Refused/0, Closed/0, Other/1)
+struct Pair #0 (started: I64, finished: I64)
+enum Option #0 (None, Some(?))
+enum Result #1 (Ok(?), Err(?))
+enum IoError #2 (NotFound, Denied, InUse, Refused, Closed, Other(String))
 
-reactor Slow #0
-    node 0 started state slot 0 init Slow.started.init#4 <- []
-    node 1 finished state slot 1 init Slow.finished.init#5 <- []
-    node 2 counts signal Slow.counts#6 export <- [started, finished]
+reactor Slow #0()
+    node 0 started: I64 state slot 0 init Slow.started.init#4 <- []
+    node 1 finished: I64 state slot 1 init Slow.finished.init#5 <- []
+    node 2 counts: Pair signal Slow.counts#6 export <- [started, finished]
     order [started, finished, counts]
-    input 0 start capacity 4 overflow reject handler Slow.on.start#2
+    input 0 start: I64 capacity 4 overflow reject handler Slow.on.start#2
         plan [started, counts]
-    input 1 settled capacity 4 overflow reject handler Slow.on.settled#3
+    input 1 settled: I64 capacity 4 overflow reject handler Slow.on.settled#3
         plan [finished, counts]
     exports [counts]
 
-task fn slow #0(_0/id)
-    local _1
-    local _2
+task fn slow #0(_0/id: I64) -> I64
+    local _1: Task<()>
+    local _2: ()
   b0:
     _1 = task builtin sleep(1000)
     await _1 -> _2, resume b1
   b1:
     return _0/id
 
-task fn main #1()
-    local _0/slow
-    local _1
-    local _2
-    local _3
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
+task fn main #1() -> ()
+    local _0/slow: Slow
+    local _1: ()
+    local _2: Slow
+    local _3: Input<I64>
+    local _4: Task<()>
+    local _5: ()
+    local _6: Task<()>
+    local _7: ()
+    local _8: Signal<Pair>
+    local _9: Pair
+    local _10: ()
+    local _11: ()
   b0:
     scope enter
     _2 = spawn reactor Slow#0()
@@ -57,9 +57,9 @@ task fn main #1()
     _11 = builtin print("scope closed")
     return _11
 
-fn Slow.on.start #2(_0/id, _1/started, _2/finished)
-    local _3
-    local _4
+fn Slow.on.start #2(_0/id: I64, _1/started: I64, _2/finished: I64) -> ()
+    local _3: I64
+    local _4: Task<I64>
   b0:
     _3 = _1/started add.i 1
     _1/started = _3
@@ -68,37 +68,37 @@ fn Slow.on.start #2(_0/id, _1/started, _2/finished)
     emit _4 -> input 1
     return ()
 
-fn Slow.on.settled #3(_0/id, _1/started, _2/finished)
-    local _3
+fn Slow.on.settled #3(_0/id: I64, _1/started: I64, _2/finished: I64) -> ()
+    local _3: I64
   b0:
     _3 = _2/finished add.i 1
     _2/finished = _3
     set slot 1 = _2/finished
     return ()
 
-fn Slow.started.init #4()
+fn Slow.started.init #4() -> I64
   b0:
     return 0
 
-fn Slow.finished.init #5()
+fn Slow.finished.init #5() -> I64
   b0:
     return 0
 
-fn Slow.counts #6(_0/started, _1/finished)
-    local _2
+fn Slow.counts #6(_0/started: I64, _1/finished: I64) -> Pair
+    local _2: Pair
   b0:
     _2 = Pair(_0/started, _1/finished)
     return _2
 
 === graph ===
-reactor Slow #0
-    node 0 started state slot 0 init Slow.started.init#4 <- []
-    node 1 finished state slot 1 init Slow.finished.init#5 <- []
-    node 2 counts signal Slow.counts#6 export <- [started, finished]
+reactor Slow #0()
+    node 0 started: I64 state slot 0 init Slow.started.init#4 <- []
+    node 1 finished: I64 state slot 1 init Slow.finished.init#5 <- []
+    node 2 counts: Pair signal Slow.counts#6 export <- [started, finished]
     order [started, finished, counts]
-    input 0 start capacity 4 overflow reject handler Slow.on.start#2
+    input 0 start: I64 capacity 4 overflow reject handler Slow.on.start#2
         plan [started, counts]
-    input 1 settled capacity 4 overflow reject handler Slow.on.settled#3
+    input 1 settled: I64 capacity 4 overflow reject handler Slow.on.settled#3
         plan [finished, counts]
     exports [counts]
 

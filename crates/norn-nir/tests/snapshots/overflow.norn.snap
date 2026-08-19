@@ -1,75 +1,75 @@
 === nir ===
-struct Counts #0 (rejected, oldest, newest, waited)
-enum Option #0 (None/0, Some/1)
-enum Result #1 (Ok/1, Err/1)
-enum IoError #2 (NotFound/0, Denied/0, InUse/0, Refused/0, Closed/0, Other/1)
+struct Counts #0 (rejected: I64, oldest: I64, newest: I64, waited: I64)
+enum Option #0 (None, Some(?))
+enum Result #1 (Ok(?), Err(?))
+enum IoError #2 (NotFound, Denied, InUse, Refused, Closed, Other(String))
 
-reactor Sink #0
-    node 0 a state slot 0 init Sink.a.init#6 <- []
-    node 1 b state slot 1 init Sink.b.init#7 <- []
-    node 2 c state slot 2 init Sink.c.init#8 <- []
-    node 3 d state slot 3 init Sink.d.init#9 <- []
-    node 4 counts signal Sink.counts#10 export <- [a, b, c, d]
+reactor Sink #0()
+    node 0 a: I64 state slot 0 init Sink.a.init#6 <- []
+    node 1 b: I64 state slot 1 init Sink.b.init#7 <- []
+    node 2 c: I64 state slot 2 init Sink.c.init#8 <- []
+    node 3 d: I64 state slot 3 init Sink.d.init#9 <- []
+    node 4 counts: Counts signal Sink.counts#10 export <- [a, b, c, d]
     order [a, b, c, d, counts]
-    input 0 rejects capacity 2 overflow reject handler Sink.on.rejects#2
+    input 0 rejects: I64 capacity 2 overflow reject handler Sink.on.rejects#2
         plan [a, counts]
-    input 1 oldest capacity 2 overflow drop_oldest handler Sink.on.oldest#3
+    input 1 oldest: I64 capacity 2 overflow drop_oldest handler Sink.on.oldest#3
         plan [b, counts]
-    input 2 newest capacity 2 overflow drop_newest handler Sink.on.newest#4
+    input 2 newest: I64 capacity 2 overflow drop_newest handler Sink.on.newest#4
         plan [c, counts]
-    input 3 waits capacity 2 overflow wait handler Sink.on.waits#5
+    input 3 waits: I64 capacity 2 overflow wait handler Sink.on.waits#5
         plan [d, counts]
     exports [counts]
 
-task fn flood #0(_0/sink)
-    local _1
-    local _2
-    local _3
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
-    local _12
-    local _13
-    local _14
-    local _15
-    local _16
-    local _17
-    local _18
-    local _19
-    local _20
-    local _21
-    local _22
-    local _23
-    local _24
-    local _25
-    local _26
-    local _27
-    local _28
-    local _29
-    local _30
-    local _31
-    local _32
-    local _33
-    local _34
-    local _35
-    local _36
-    local _37
-    local _38
-    local _39
-    local _40
-    local _41
-    local _42
-    local _43
-    local _44
-    local _45
-    local _46
-    local _47
-    local _48
+task fn flood #0(_0/sink: Sink) -> ()
+    local _1: Input<I64>
+    local _2: Task<()>
+    local _3: ()
+    local _4: Input<I64>
+    local _5: Task<()>
+    local _6: ()
+    local _7: Input<I64>
+    local _8: Task<()>
+    local _9: ()
+    local _10: Input<I64>
+    local _11: Task<()>
+    local _12: ()
+    local _13: Input<I64>
+    local _14: Task<()>
+    local _15: ()
+    local _16: Input<I64>
+    local _17: Task<()>
+    local _18: ()
+    local _19: Input<I64>
+    local _20: Task<()>
+    local _21: ()
+    local _22: Input<I64>
+    local _23: Task<()>
+    local _24: ()
+    local _25: Input<I64>
+    local _26: Task<()>
+    local _27: ()
+    local _28: Input<I64>
+    local _29: Task<()>
+    local _30: ()
+    local _31: Input<I64>
+    local _32: Task<()>
+    local _33: ()
+    local _34: Input<I64>
+    local _35: Task<()>
+    local _36: ()
+    local _37: Input<I64>
+    local _38: Task<()>
+    local _39: ()
+    local _40: Input<I64>
+    local _41: Task<()>
+    local _42: ()
+    local _43: Input<I64>
+    local _44: Task<()>
+    local _45: ()
+    local _46: Input<I64>
+    local _47: Task<()>
+    local _48: ()
   b0:
     _1 = input 0 of _0/sink
     _2 = task builtin send(_1, 1)
@@ -137,16 +137,16 @@ task fn flood #0(_0/sink)
   b16:
     return _48
 
-task fn main #1()
-    local _0/sink
-    local _1
-    local _2
-    local _3
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
+task fn main #1() -> ()
+    local _0/sink: Sink
+    local _1: Sink
+    local _2: Task<()>
+    local _3: ()
+    local _4: Task<()>
+    local _5: ()
+    local _6: Signal<Counts>
+    local _7: Counts
+    local _8: ()
   b0:
     _1 = spawn reactor Sink#0()
     _0/sink = _1
@@ -161,9 +161,9 @@ task fn main #1()
     _8 = builtin print(_7)
     return _8
 
-fn Sink.on.rejects #2(_0/value, _1/a, _2/b, _3/c, _4/d)
-    local _5
-    local _6
+fn Sink.on.rejects #2(_0/value: I64, _1/a: I64, _2/b: I64, _3/c: I64, _4/d: I64) -> ()
+    local _5: I64
+    local _6: I64
   b0:
     _5 = _1/a mul.i 10
     _6 = _5 add.i _0/value
@@ -171,9 +171,9 @@ fn Sink.on.rejects #2(_0/value, _1/a, _2/b, _3/c, _4/d)
     set slot 0 = _1/a
     return ()
 
-fn Sink.on.oldest #3(_0/value, _1/a, _2/b, _3/c, _4/d)
-    local _5
-    local _6
+fn Sink.on.oldest #3(_0/value: I64, _1/a: I64, _2/b: I64, _3/c: I64, _4/d: I64) -> ()
+    local _5: I64
+    local _6: I64
   b0:
     _5 = _2/b mul.i 10
     _6 = _5 add.i _0/value
@@ -181,9 +181,9 @@ fn Sink.on.oldest #3(_0/value, _1/a, _2/b, _3/c, _4/d)
     set slot 1 = _2/b
     return ()
 
-fn Sink.on.newest #4(_0/value, _1/a, _2/b, _3/c, _4/d)
-    local _5
-    local _6
+fn Sink.on.newest #4(_0/value: I64, _1/a: I64, _2/b: I64, _3/c: I64, _4/d: I64) -> ()
+    local _5: I64
+    local _6: I64
   b0:
     _5 = _3/c mul.i 10
     _6 = _5 add.i _0/value
@@ -191,9 +191,9 @@ fn Sink.on.newest #4(_0/value, _1/a, _2/b, _3/c, _4/d)
     set slot 2 = _3/c
     return ()
 
-fn Sink.on.waits #5(_0/value, _1/a, _2/b, _3/c, _4/d)
-    local _5
-    local _6
+fn Sink.on.waits #5(_0/value: I64, _1/a: I64, _2/b: I64, _3/c: I64, _4/d: I64) -> ()
+    local _5: I64
+    local _6: I64
   b0:
     _5 = _4/d mul.i 10
     _6 = _5 add.i _0/value
@@ -201,43 +201,43 @@ fn Sink.on.waits #5(_0/value, _1/a, _2/b, _3/c, _4/d)
     set slot 3 = _4/d
     return ()
 
-fn Sink.a.init #6()
+fn Sink.a.init #6() -> I64
   b0:
     return 0
 
-fn Sink.b.init #7()
+fn Sink.b.init #7() -> I64
   b0:
     return 0
 
-fn Sink.c.init #8()
+fn Sink.c.init #8() -> I64
   b0:
     return 0
 
-fn Sink.d.init #9()
+fn Sink.d.init #9() -> I64
   b0:
     return 0
 
-fn Sink.counts #10(_0/a, _1/b, _2/c, _3/d)
-    local _4
+fn Sink.counts #10(_0/a: I64, _1/b: I64, _2/c: I64, _3/d: I64) -> Counts
+    local _4: Counts
   b0:
     _4 = Counts(_0/a, _1/b, _2/c, _3/d)
     return _4
 
 === graph ===
-reactor Sink #0
-    node 0 a state slot 0 init Sink.a.init#6 <- []
-    node 1 b state slot 1 init Sink.b.init#7 <- []
-    node 2 c state slot 2 init Sink.c.init#8 <- []
-    node 3 d state slot 3 init Sink.d.init#9 <- []
-    node 4 counts signal Sink.counts#10 export <- [a, b, c, d]
+reactor Sink #0()
+    node 0 a: I64 state slot 0 init Sink.a.init#6 <- []
+    node 1 b: I64 state slot 1 init Sink.b.init#7 <- []
+    node 2 c: I64 state slot 2 init Sink.c.init#8 <- []
+    node 3 d: I64 state slot 3 init Sink.d.init#9 <- []
+    node 4 counts: Counts signal Sink.counts#10 export <- [a, b, c, d]
     order [a, b, c, d, counts]
-    input 0 rejects capacity 2 overflow reject handler Sink.on.rejects#2
+    input 0 rejects: I64 capacity 2 overflow reject handler Sink.on.rejects#2
         plan [a, counts]
-    input 1 oldest capacity 2 overflow drop_oldest handler Sink.on.oldest#3
+    input 1 oldest: I64 capacity 2 overflow drop_oldest handler Sink.on.oldest#3
         plan [b, counts]
-    input 2 newest capacity 2 overflow drop_newest handler Sink.on.newest#4
+    input 2 newest: I64 capacity 2 overflow drop_newest handler Sink.on.newest#4
         plan [c, counts]
-    input 3 waits capacity 2 overflow wait handler Sink.on.waits#5
+    input 3 waits: I64 capacity 2 overflow wait handler Sink.on.waits#5
         plan [d, counts]
     exports [counts]
 

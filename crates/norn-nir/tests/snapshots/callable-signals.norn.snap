@@ -1,42 +1,42 @@
 === nir ===
-struct Report #0 (count, rejected, full, warn)
-enum Option #0 (None/0, Some/1)
-enum Result #1 (Ok/1, Err/1)
-enum IoError #2 (NotFound/0, Denied/0, InUse/0, Refused/0, Closed/0, Other/1)
+struct Report #0 (count: I64, rejected: I64, full: Bool, warn: Bool)
+enum Option #0 (None, Some(?))
+enum Result #1 (Ok(?), Err(?))
+enum IoError #2 (NotFound, Denied, InUse, Refused, Closed, Other(String))
 
-reactor Gate #0
-    node 0 limit param slot 0 arg 0 <- []
-    node 1 count state slot 1 init Gate.count.init#2 <- []
-    node 2 rejected state slot 2 init Gate.rejected.init#3 <- []
-    node 3 is_full signal Gate.is_full#4 <- [count, limit]
-    node 4 headroom signal Gate.headroom#5 <- [limit, count]
-    node 5 warn signal Gate.warn#6 <- [count, limit, headroom, is_full]
-    node 6 report signal Gate.report#7 export <- [count, rejected, is_full, warn]
+reactor Gate #0(I64)
+    node 0 limit: I64 param slot 0 arg 0 <- []
+    node 1 count: I64 state slot 1 init Gate.count.init#2 <- []
+    node 2 rejected: I64 state slot 2 init Gate.rejected.init#3 <- []
+    node 3 is_full: Bool signal Gate.is_full#4 <- [count, limit]
+    node 4 headroom: I64 signal Gate.headroom#5 <- [limit, count]
+    node 5 warn: Bool signal Gate.warn#6 <- [count, limit, headroom, is_full]
+    node 6 report: Report signal Gate.report#7 export <- [count, rejected, is_full, warn]
     order [limit, count, rejected, is_full, headroom, warn, report]
-    input 0 added capacity 8 overflow reject handler Gate.on.added#1
+    input 0 added: I64 capacity 8 overflow reject handler Gate.on.added#1
         plan [count, rejected, is_full, headroom, warn, report]
     exports [report]
 
-task fn main #0()
-    local _0/gate
-    local _1
-    local _2
-    local _3
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
-    local _12
-    local _13
-    local _14
-    local _15
-    local _16
-    local _17
-    local _18
+task fn main #0() -> ()
+    local _0/gate: Gate
+    local _1: Gate
+    local _2: Input<I64>
+    local _3: Task<()>
+    local _4: ()
+    local _5: Input<I64>
+    local _6: Task<()>
+    local _7: ()
+    local _8: Input<I64>
+    local _9: Task<()>
+    local _10: ()
+    local _11: Input<I64>
+    local _12: Task<()>
+    local _13: ()
+    local _14: Task<()>
+    local _15: ()
+    local _16: Signal<Report>
+    local _17: Report
+    local _18: ()
   b0:
     _1 = spawn reactor Gate#0(4)
     _0/gate = _1
@@ -64,12 +64,12 @@ task fn main #0()
     _18 = builtin print(_17)
     return _18
 
-fn Gate.on.added #1(_0/n, _1/limit, _2/count, _3/rejected)
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
+fn Gate.on.added #1(_0/n: I64, _1/limit: I64, _2/count: I64, _3/rejected: I64) -> ()
+    local _4: ()
+    local _5: I64
+    local _6: Bool
+    local _7: I64
+    local _8: I64
   b0:
     _5 = _2/count add.i _0/n
     _6 = call Gate.is_full#4(_5, _1/limit)
@@ -89,30 +89,30 @@ fn Gate.on.added #1(_0/n, _1/limit, _2/count, _3/rejected)
   b3:
     return _4
 
-fn Gate.count.init #2()
+fn Gate.count.init #2() -> I64
   b0:
     return 0
 
-fn Gate.rejected.init #3()
+fn Gate.rejected.init #3() -> I64
   b0:
     return 0
 
-fn Gate.is_full #4(_0/count, _1/limit)
-    local _2
+fn Gate.is_full #4(_0/count: I64, _1/limit: I64) -> Bool
+    local _2: Bool
   b0:
     _2 = _0/count ge _1/limit
     return _2
 
-fn Gate.headroom #5(_0/limit, _1/count)
-    local _2
+fn Gate.headroom #5(_0/limit: I64, _1/count: I64) -> I64
+    local _2: I64
   b0:
     _2 = _0/limit sub.i _1/count
     return _2
 
-fn Gate.warn #6(_0/count, _1/limit, _2/headroom, _3/is_full)
-    local _4
-    local _5
-    local _6
+fn Gate.warn #6(_0/count: I64, _1/limit: I64, _2/headroom: I64, _3/is_full: Bool) -> Bool
+    local _4: Bool
+    local _5: Bool
+    local _6: Bool
   b0:
     _5 = call Gate.is_full#4(_0/count, _1/limit)
     _4 = _5
@@ -124,23 +124,23 @@ fn Gate.warn #6(_0/count, _1/limit, _2/headroom, _3/is_full)
   b2:
     return _4
 
-fn Gate.report #7(_0/count, _1/rejected, _2/is_full, _3/warn)
-    local _4
+fn Gate.report #7(_0/count: I64, _1/rejected: I64, _2/is_full: Bool, _3/warn: Bool) -> Report
+    local _4: Report
   b0:
     _4 = Report(_0/count, _1/rejected, _2/is_full, _3/warn)
     return _4
 
 === graph ===
-reactor Gate #0
-    node 0 limit param slot 0 arg 0 <- []
-    node 1 count state slot 1 init Gate.count.init#2 <- []
-    node 2 rejected state slot 2 init Gate.rejected.init#3 <- []
-    node 3 is_full signal Gate.is_full#4 <- [count, limit]
-    node 4 headroom signal Gate.headroom#5 <- [limit, count]
-    node 5 warn signal Gate.warn#6 <- [count, limit, headroom, is_full]
-    node 6 report signal Gate.report#7 export <- [count, rejected, is_full, warn]
+reactor Gate #0(I64)
+    node 0 limit: I64 param slot 0 arg 0 <- []
+    node 1 count: I64 state slot 1 init Gate.count.init#2 <- []
+    node 2 rejected: I64 state slot 2 init Gate.rejected.init#3 <- []
+    node 3 is_full: Bool signal Gate.is_full#4 <- [count, limit]
+    node 4 headroom: I64 signal Gate.headroom#5 <- [limit, count]
+    node 5 warn: Bool signal Gate.warn#6 <- [count, limit, headroom, is_full]
+    node 6 report: Report signal Gate.report#7 export <- [count, rejected, is_full, warn]
     order [limit, count, rejected, is_full, headroom, warn, report]
-    input 0 added capacity 8 overflow reject handler Gate.on.added#1
+    input 0 added: I64 capacity 8 overflow reject handler Gate.on.added#1
         plan [count, rejected, is_full, headroom, warn, report]
     exports [report]
 

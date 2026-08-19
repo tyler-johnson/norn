@@ -139,7 +139,11 @@ impl Emitter<'_> {
         push(out, 0, "");
         push(out, 0, "static STRUCTS: &[StructLayout] = &[");
         for strukt in &self.program.structs {
-            let fields: Vec<String> = strukt.fields.iter().map(|f| format!("{f:?}")).collect();
+            let fields: Vec<String> = strukt
+                .fields
+                .iter()
+                .map(|f| format!("{:?}", f.name))
+                .collect();
             push(
                 out,
                 1,
@@ -160,7 +164,11 @@ impl Emitter<'_> {
                 &format!("EnumLayout {{ name: {:?}, variants: &[", def.name),
             );
             for variant in &def.variants {
-                let fields: Vec<String> = variant.fields.iter().map(|f| format!("{f:?}")).collect();
+                let fields: Vec<String> = variant
+                    .fields
+                    .iter()
+                    .map(|f| format!("{:?}", f.name))
+                    .collect();
                 push(
                     out,
                     2,

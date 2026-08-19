@@ -1,14 +1,14 @@
 === nir ===
-enum Option #0 (None/0, Some/1)
-enum Result #1 (Ok/1, Err/1)
-enum IoError #2 (NotFound/0, Denied/0, InUse/0, Refused/0, Closed/0, Other/1)
+enum Option #0 (None, Some(?))
+enum Result #1 (Ok(?), Err(?))
+enum IoError #2 (NotFound, Denied, InUse, Refused, Closed, Other(String))
 
-fn factorial #0(_0/n)
-    local _1
-    local _2
-    local _3
-    local _4
-    local _5
+fn factorial #0(_0/n: I64) -> I64
+    local _1: ()
+    local _2: Bool
+    local _3: I64
+    local _4: I64
+    local _5: I64
   b0:
     _2 = _0/n le 1
     branch _2 ? b1 : b2
@@ -23,14 +23,14 @@ fn factorial #0(_0/n)
     _5 = _0/n mul.i _4
     return _5
 
-fn fib #1(_0/n)
-    local _1
-    local _2
-    local _3
-    local _4
-    local _5
-    local _6
-    local _7
+fn fib #1(_0/n: I64) -> I64
+    local _1: I64
+    local _2: Bool
+    local _3: I64
+    local _4: I64
+    local _5: I64
+    local _6: I64
+    local _7: I64
   b0:
     _2 = _0/n lt 2
     branch _2 ? b1 : b2
@@ -48,11 +48,11 @@ fn fib #1(_0/n)
   b3:
     return _1
 
-fn classify #2(_0/n)
-    local _1
-    local _2
-    local _3
-    local _4
+fn classify #2(_0/n: I64) -> String
+    local _1: String
+    local _2: Bool
+    local _3: String
+    local _4: Bool
   b0:
     _2 = _0/n lt 0
     branch _2 ? b1 : b2
@@ -74,74 +74,74 @@ fn classify #2(_0/n)
     _1 = _3
     goto b3
 
-fn trace #3(_0/label, _1/value)
-    local _2
-    local _3
+fn trace #3(_0/label: String, _1/value: Bool) -> Bool
+    local _2: String
+    local _3: ()
   b0:
     _2 = "  evaluated " concat _0/label
     _3 = builtin print(_2)
     return _1/value
 
-fn main #4()
-    local _0/precedence
-    local _1/grouped
-    local _2/and_result
-    local _3/or_result
-    local _4/half
-    local _5/total
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
-    local _12
-    local _13
-    local _14
-    local _15
-    local _16
-    local _17
-    local _18
-    local _19
-    local _20
-    local _21
-    local _22
-    local _23
-    local _24
-    local _25
-    local _26
-    local _27
-    local _28
-    local _29
-    local _30
-    local _31
-    local _32
-    local _33
-    local _34
-    local _35
-    local _36
-    local _37
-    local _38
-    local _39
-    local _40
-    local _41
-    local _42
-    local _43
-    local _44
-    local _45
-    local _46
-    local _47
-    local _48
-    local _49
-    local _50
-    local _51
-    local _52
-    local _53
-    local _54
-    local _55
-    local _56
-    local _57
-    local _58
+fn main #4() -> ()
+    local _0/precedence: I64
+    local _1/grouped: I64
+    local _2/and_result: Bool
+    local _3/or_result: Bool
+    local _4/half: F64
+    local _5/total: I64
+    local _6: I64
+    local _7: String
+    local _8: String
+    local _9: ()
+    local _10: I64
+    local _11: String
+    local _12: String
+    local _13: ()
+    local _14: I64
+    local _15: String
+    local _16: String
+    local _17: String
+    local _18: String
+    local _19: String
+    local _20: String
+    local _21: String
+    local _22: ()
+    local _23: I64
+    local _24: I64
+    local _25: I64
+    local _26: I64
+    local _27: String
+    local _28: String
+    local _29: ()
+    local _30: I64
+    local _31: I64
+    local _32: I64
+    local _33: I64
+    local _34: String
+    local _35: String
+    local _36: ()
+    local _37: ()
+    local _38: Bool
+    local _39: Bool
+    local _40: Bool
+    local _41: ()
+    local _42: Bool
+    local _43: Bool
+    local _44: Bool
+    local _45: String
+    local _46: String
+    local _47: String
+    local _48: String
+    local _49: ()
+    local _50: F64
+    local _51: ()
+    local _52: I64
+    local _53: I64
+    local _54: I64
+    local _55: I64
+    local _56: String
+    local _57: String
+    local _58: ()
   b0:
     _6 = call factorial#0(10)
     _7 = call fmt.to_string#6(_6)
@@ -216,8 +216,8 @@ fn main #4()
     _58 = builtin print(_57)
     return _58
 
-fn describe_bool #5(_0/value)
-    local _1
+fn describe_bool #5(_0/value: Bool) -> String
+    local _1: String
   b0:
     branch _0/value ? b1 : b2
   b1:
@@ -229,22 +229,22 @@ fn describe_bool #5(_0/value)
   b3:
     return _1
 
-fn fmt.to_string #6(_0/n)
-    local _1/rest
-    local _2/out
-    local _3
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
-    local _12
-    local _13
-    local _14
-    local _15
+fn fmt.to_string #6(_0/n: I64) -> String
+    local _1/rest: I64
+    local _2/out: String
+    local _3: I64
+    local _4: Bool
+    local _5: I64
+    local _6: I64
+    local _7: String
+    local _8: Bool
+    local _9: I64
+    local _10: I64
+    local _11: String
+    local _12: String
+    local _13: String
+    local _14: Bool
+    local _15: String
   b0:
     _4 = _0/n lt 0
     branch _4 ? b1 : b2
@@ -285,39 +285,39 @@ fn fmt.to_string #6(_0/n)
   b9:
     return _13
 
-fn fmt.to_int #7(_0/s)
-    local _1/data
-    local _2/len
-    local _3/i
-    local _4/negative
-    local _5/value
-    local _6/b
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
-    local _12
-    local _13
-    local _14
-    local _15
-    local _16
-    local _17
-    local _18
-    local _19
-    local _20
-    local _21
-    local _22
-    local _23
-    local _24
-    local _25
-    local _26
-    local _27
-    local _28
-    local _29
-    local _30
-    local _31
-    local _32
+fn fmt.to_int #7(_0/s: String) -> Option<I64>
+    local _1/data: Bytes
+    local _2/len: I64
+    local _3/i: I64
+    local _4/negative: Bool
+    local _5/value: I64
+    local _6/b: I64
+    local _7: Bytes
+    local _8: I64
+    local _9: ()
+    local _10: Bool
+    local _11: Option<I64>
+    local _12: ()
+    local _13: I64
+    local _14: Bool
+    local _15: ()
+    local _16: Bool
+    local _17: Option<I64>
+    local _18: Bool
+    local _19: I64
+    local _20: ()
+    local _21: Bool
+    local _22: Bool
+    local _23: Bool
+    local _24: Option<I64>
+    local _25: I64
+    local _26: I64
+    local _27: I64
+    local _28: I64
+    local _29: Option<I64>
+    local _30: I64
+    local _31: Option<I64>
+    local _32: Option<I64>
   b0:
     _7 = builtin bytes(_0/s)
     _1/data = _7
@@ -400,18 +400,18 @@ fn fmt.to_int #7(_0/s)
   b20:
     return _29
 
-fn fmt.digit #8(_0/n)
-    local _1
-    local _2
-    local _3
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
+fn fmt.digit #8(_0/n: I64) -> String
+    local _1: String
+    local _2: Bool
+    local _3: Bool
+    local _4: Bool
+    local _5: Bool
+    local _6: Bool
+    local _7: Bool
+    local _8: Bool
+    local _9: Bool
+    local _10: Bool
+    local _11: Bool
   b0:
     goto b2
   b1:
@@ -482,8 +482,8 @@ fn fmt.digit #8(_0/n)
     _1 = "?"
     goto b1
 
-fn fmt.Display.to_string for I64 #9(_0/value)
-    local _1
+fn fmt.Display.to_string for I64 #9(_0/value: I64) -> String
+    local _1: String
   b0:
     _1 = call fmt.to_string#6(_0/value)
     return _1

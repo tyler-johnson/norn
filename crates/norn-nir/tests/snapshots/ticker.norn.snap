@@ -1,28 +1,28 @@
 === nir ===
-enum Option #0 (None/0, Some/1)
-enum Result #1 (Ok/1, Err/1)
-enum IoError #2 (NotFound/0, Denied/0, InUse/0, Refused/0, Closed/0, Other/1)
+enum Option #0 (None, Some(?))
+enum Result #1 (Ok(?), Err(?))
+enum IoError #2 (NotFound, Denied, InUse, Refused, Closed, Other(String))
 
-reactor Ticker #0
-    node 0 ms param slot 0 arg 0 <- []
-    node 1 n state slot 1 init Ticker.n.init#5 <- []
-    node 2 count signal Ticker.count#6 export <- [n]
+reactor Ticker #0(I64)
+    node 0 ms: I64 param slot 0 arg 0 <- []
+    node 1 n: I64 state slot 1 init Ticker.n.init#5 <- []
+    node 2 count: I64 signal Ticker.count#6 export <- [n]
     order [ms, n, count]
-    input 0 tick capacity 1 overflow reject handler Ticker.on.tick#4
+    input 0 tick: () capacity 1 overflow reject handler Ticker.on.tick#4
         plan [n, count]
     exports [count]
 
-task fn main #0()
-    local _0/ticker
-    local _1
-    local _2
-    local _3
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
+task fn main #0() -> ()
+    local _0/ticker: Ticker
+    local _1: Ticker
+    local _2: Input<()>
+    local _3: Task<()>
+    local _4: ()
+    local _5: Task<()>
+    local _6: ()
+    local _7: Signal<I64>
+    local _8: I64
+    local _9: ()
   b0:
     _1 = spawn reactor Ticker#0(10)
     _0/ticker = _1
@@ -38,30 +38,30 @@ task fn main #0()
     _9 = builtin print(_8)
     return _9
 
-task fn time.wait #1(_0/ms)
-    local _1
-    local _2
+task fn time.wait #1(_0/ms: I64) -> ()
+    local _1: Task<()>
+    local _2: ()
   b0:
     _1 = task builtin sleep(_0/ms)
     await _1 -> _2, resume b1
   b1:
     return _2
 
-fn time.seconds #2(_0/n)
-    local _1
+fn time.seconds #2(_0/n: I64) -> I64
+    local _1: I64
   b0:
     _1 = _0/n mul.i 1000
     return _1
 
-fn time.minutes #3(_0/n)
-    local _1
+fn time.minutes #3(_0/n: I64) -> I64
+    local _1: I64
   b0:
     _1 = _0/n mul.i 60000
     return _1
 
-fn Ticker.on.tick #4(_0/ms, _1/n)
-    local _2
-    local _3
+fn Ticker.on.tick #4(_0/ms: I64, _1/n: I64) -> ()
+    local _2: I64
+    local _3: Task<()>
   b0:
     _2 = _1/n add.i 1
     _1/n = _2
@@ -70,21 +70,21 @@ fn Ticker.on.tick #4(_0/ms, _1/n)
     emit _3 -> input 0
     return ()
 
-fn Ticker.n.init #5()
+fn Ticker.n.init #5() -> I64
   b0:
     return 0
 
-fn Ticker.count #6(_0/n)
+fn Ticker.count #6(_0/n: I64) -> I64
   b0:
     return _0/n
 
 === graph ===
-reactor Ticker #0
-    node 0 ms param slot 0 arg 0 <- []
-    node 1 n state slot 1 init Ticker.n.init#5 <- []
-    node 2 count signal Ticker.count#6 export <- [n]
+reactor Ticker #0(I64)
+    node 0 ms: I64 param slot 0 arg 0 <- []
+    node 1 n: I64 state slot 1 init Ticker.n.init#5 <- []
+    node 2 count: I64 signal Ticker.count#6 export <- [n]
     order [ms, n, count]
-    input 0 tick capacity 1 overflow reject handler Ticker.on.tick#4
+    input 0 tick: () capacity 1 overflow reject handler Ticker.on.tick#4
         plan [n, count]
     exports [count]
 

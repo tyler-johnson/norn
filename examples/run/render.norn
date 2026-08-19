@@ -1,0 +1,71 @@
+// Render stress: every clause of the value renderer in one program, printed from the top level
+// and from inside aggregates. The blessed output is the render contract — the typed backend's
+// generated per-type renderers must reproduce these bytes exactly.
+
+import { List } from "std/list"
+
+struct Sensor {
+    label: String
+    reading: Result<F64, String>
+    calibration: Option<Option<String>>
+}
+
+enum Signal {
+    Quiet
+    Pulse { width: F64, mark: () }
+    Pair(I64, I64)
+}
+
+struct Job {
+    name: String
+    work: Task<I64>
+    payload: Bytes
+}
+
+task fn answer() -> I64 {
+    42
+}
+
+task fn main() {
+    // Floats: the `.0` suffix rule, the exponent forms, and the non-finite spellings.
+    print(0.5)
+    print(-0.0)
+    print(1e300)
+    print(1e21)
+    print(0.0 / 0.0)
+    print(1.0 / 0.0)
+
+    // A top-level string is raw text; a nested one is quoted and escaped.
+    print("he said \"hi\"")
+    print(Some("he said \"hi\""))
+
+    // Option and Result print unqualified, composed to any depth.
+    print(Some(Some("deep")))
+    let flat: Option<Option<String>> = Some(None)
+    print(flat)
+    let empty: Option<I64> = None
+    print(empty)
+    let failed: Result<I64, String> = Err("boom")
+    print(failed)
+
+    // User enums print qualified; zero-field variants are bare, named payloads are labeled,
+    // positional payloads are not. IoError is qualified like any user enum.
+    print(Signal.Quiet)
+    print(Some(Signal.Quiet))
+    print(Signal.Pulse(width: -0.0, mark: ()))
+    print(Signal.Pair(1, -2))
+    print(IoError.NotFound)
+
+    // Struct fields are always labeled, and a Result sits inside one like anything else.
+    print(Sensor(label: "s1", reading: Ok(0.5), calibration: Some(None)))
+    print(Sensor(label: "s2", reading: Err("cold"), calibration: None))
+
+    // A recursive type prints by recursion.
+    let numbers = List.Cons(1, List.Cons(2, List.Cons(3, List.Nil)))
+    print(numbers)
+
+    // Bytes show their length only; a task shows its function's name — both at the top level
+    // and buried in an aggregate.
+    print(bytes("norn"))
+    print(Job(name: "meaning", work: answer(), payload: bytes("x")))
+}

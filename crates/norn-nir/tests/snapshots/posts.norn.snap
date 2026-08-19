@@ -1,63 +1,63 @@
 === nir ===
-struct Post #0 (id, author, created, body)
-struct Indexed #1 (entries, count)
-enum Option #0 (None/0, Some/1)
-enum Result #1 (Ok/1, Err/1)
-enum IoError #2 (NotFound/0, Denied/0, InUse/0, Refused/0, Closed/0, Other/1)
-enum Delta #3 (Put/1, Erase/1)
-enum List #4 (Nil/0, Cons/2)
-enum List<Post> #5 (Nil/0, Cons/2)
-enum List<Delta> #6 (Nil/0, Cons/2)
+struct Post #0 (id: I64, author: String, created: I64, body: String)
+struct Indexed #1 (entries: List<Post>, count: I64)
+enum Option #0 (None, Some(?))
+enum Result #1 (Ok(?), Err(?))
+enum IoError #2 (NotFound, Denied, InUse, Refused, Closed, Other(String))
+enum Delta #3 (Put(Post), Erase(I64))
+enum List #4 (Nil, Cons(T, List))
+enum List<Post> #5 (Nil, Cons(Post, List<Post>))
+enum List<Delta> #6 (Nil, Cons(Delta, List<Delta>))
 
-reactor PostPartition #0
-    node 0 index param slot 0 arg 0 <- []
-    node 1 journal state slot 1 init PostPartition.journal.init#25 <- []
-    node 2 seq state slot 2 init PostPartition.seq.init#26 <- []
-    node 3 acked state slot 3 init PostPartition.acked.init#27 <- []
-    node 4 backlog signal PostPartition.backlog#31 export <- [seq, acked]
-    node 5 history signal PostPartition.history#32 export <- [journal]
+reactor PostPartition #0(ByAuthor)
+    node 0 index: ByAuthor param slot 0 arg 0 <- []
+    node 1 journal: List<Delta> state slot 1 init PostPartition.journal.init#25 <- []
+    node 2 seq: I64 state slot 2 init PostPartition.seq.init#26 <- []
+    node 3 acked: I64 state slot 3 init PostPartition.acked.init#27 <- []
+    node 4 backlog: I64 signal PostPartition.backlog#31 export <- [seq, acked]
+    node 5 history: List<Delta> signal PostPartition.history#32 export <- [journal]
     order [index, journal, seq, acked, backlog, history]
-    input 0 put capacity 64 overflow wait handler PostPartition.on.put#28
+    input 0 put: Post capacity 64 overflow wait handler PostPartition.on.put#28
         plan [journal, seq, backlog, history]
-    input 1 erase capacity 64 overflow wait handler PostPartition.on.erase#29
+    input 1 erase: I64 capacity 64 overflow wait handler PostPartition.on.erase#29
         plan [journal, seq, backlog, history]
-    input 2 delivered capacity 64 overflow wait handler PostPartition.on.delivered#30
+    input 2 delivered: () capacity 64 overflow wait handler PostPartition.on.delivered#30
         plan [acked, backlog]
     exports [backlog, history]
 
-reactor ByAuthor #1
-    node 0 subscriber param slot 0 arg 0 <- []
-    node 1 rows state slot 1 init ByAuthor.rows.init#33 <- []
-    node 2 total state slot 2 init ByAuthor.total.init#34 <- []
-    node 3 revision state slot 3 init ByAuthor.revision.init#35 <- []
-    node 4 queued state slot 4 init ByAuthor.queued.init#36 <- []
-    node 5 busy state slot 5 init ByAuthor.busy.init#37 <- []
-    node 6 entries signal ByAuthor.entries#41 export <- [rows]
-    node 7 count signal ByAuthor.count#42 export <- [total]
-    node 8 version signal ByAuthor.version#43 export <- [revision]
+reactor ByAuthor #1(Subscriber)
+    node 0 subscriber: Subscriber param slot 0 arg 0 <- []
+    node 1 rows: List<Post> state slot 1 init ByAuthor.rows.init#33 <- []
+    node 2 total: I64 state slot 2 init ByAuthor.total.init#34 <- []
+    node 3 revision: I64 state slot 3 init ByAuthor.revision.init#35 <- []
+    node 4 queued: List<Delta> state slot 4 init ByAuthor.queued.init#36 <- []
+    node 5 busy: Bool state slot 5 init ByAuthor.busy.init#37 <- []
+    node 6 entries: List<Post> signal ByAuthor.entries#41 export <- [rows]
+    node 7 count: I64 signal ByAuthor.count#42 export <- [total]
+    node 8 version: I64 signal ByAuthor.version#43 export <- [revision]
     order [subscriber, rows, total, revision, queued, busy, entries, count, version]
-    input 0 arrived capacity 64 overflow wait handler ByAuthor.on.arrived#38
+    input 0 arrived: Delta capacity 64 overflow wait handler ByAuthor.on.arrived#38
         plan [queued, busy]
-    input 1 applied capacity 8 overflow wait handler ByAuthor.on.applied#39
+    input 1 applied: Indexed capacity 8 overflow wait handler ByAuthor.on.applied#39
         plan [rows, total, revision, queued, busy, entries, count, version]
-    input 2 notified capacity 8 overflow wait handler ByAuthor.on.notified#40
+    input 2 notified: () capacity 8 overflow wait handler ByAuthor.on.notified#40
         plan []
     exports [entries, count, version]
 
-reactor Subscriber #2
-    node 0 seen_count state slot 0 init Subscriber.seen_count.init#44 <- []
-    node 1 last_version state slot 1 init Subscriber.last_version.init#45 <- []
-    node 2 seen signal Subscriber.seen#47 export <- [seen_count]
-    node 3 last signal Subscriber.last#48 export <- [last_version]
+reactor Subscriber #2()
+    node 0 seen_count: I64 state slot 0 init Subscriber.seen_count.init#44 <- []
+    node 1 last_version: I64 state slot 1 init Subscriber.last_version.init#45 <- []
+    node 2 seen: I64 signal Subscriber.seen#47 export <- [seen_count]
+    node 3 last: I64 signal Subscriber.last#48 export <- [last_version]
     order [seen_count, last_version, seen, last]
-    input 0 changed capacity 64 overflow drop_oldest handler Subscriber.on.changed#46
+    input 0 changed: I64 capacity 64 overflow drop_oldest handler Subscriber.on.changed#46
         plan [seen_count, last_version, seen, last]
     exports [seen, last]
 
-task fn deliver #0(_0/delta, _1/index)
-    local _2
-    local _3
-    local _4
+task fn deliver #0(_0/delta: Delta, _1/index: ByAuthor) -> ()
+    local _2: Input<Delta>
+    local _3: Task<()>
+    local _4: ()
   b0:
     _2 = input 0 of _1/index
     _3 = task builtin send(_2, _0/delta)
@@ -65,11 +65,11 @@ task fn deliver #0(_0/delta, _1/index)
   b1:
     return _4
 
-task fn apply #1(_0/entries, _1/batch)
-    local _2/merged
-    local _3
-    local _4
-    local _5
+task fn apply #1(_0/entries: List<Post>, _1/batch: List<Delta>) -> Indexed
+    local _2/merged: List<Post>
+    local _3: List<Post>
+    local _4: I64
+    local _5: Indexed
   b0:
     _3 = call apply_all#2(_0/entries, _1/batch)
     _2/merged = _3
@@ -77,12 +77,12 @@ task fn apply #1(_0/entries, _1/batch)
     _5 = Indexed(_2/merged, _4)
     return _5
 
-fn apply_all #2(_0/entries, _1/batch)
-    local _2/delta
-    local _3/rest
-    local _4
-    local _5
-    local _6
+fn apply_all #2(_0/entries: List<Post>, _1/batch: List<Delta>) -> List<Post>
+    local _2/delta: Delta
+    local _3/rest: List<Delta>
+    local _4: List<Post>
+    local _5: List<Post>
+    local _6: List<Post>
   b0:
     goto b2
   b1:
@@ -104,19 +104,19 @@ fn apply_all #2(_0/entries, _1/batch)
     _4 = _6
     goto b1
   b8:
-    _2/delta = _1/batch.0
+    _2/delta = _1/batch.0@Cons
     goto b9
   b9:
-    _3/rest = _1/batch.1
+    _3/rest = _1/batch.1@Cons
     goto b7
 
-fn apply_one #3(_0/entries, _1/delta)
-    local _2/post
-    local _3/id
-    local _4
-    local _5
-    local _6
-    local _7
+fn apply_one #3(_0/entries: List<Post>, _1/delta: Delta) -> List<Post>
+    local _2/post: Post
+    local _3/id: I64
+    local _4: List<Post>
+    local _5: List<Post>
+    local _6: List<Post>
+    local _7: List<Post>
   b0:
     goto b2
   b1:
@@ -133,32 +133,32 @@ fn apply_one #3(_0/entries, _1/delta)
     _4 = _6
     goto b1
   b6:
-    _2/post = _1/delta.0
+    _2/post = _1/delta.0@Put
     goto b5
   b7:
     _7 = call remove#5(_3/id, _0/entries)
     _4 = _7
     goto b1
   b8:
-    _3/id = _1/delta.0
+    _3/id = _1/delta.0@Erase
     goto b7
 
-fn insert #4(_0/post, _1/entries)
-    local _2/head
-    local _3/rest
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
-    local _12
-    local _13
-    local _14
-    local _15
-    local _16
+fn insert #4(_0/post: Post, _1/entries: List<Post>) -> List<Post>
+    local _2/head: Post
+    local _3/rest: List<Post>
+    local _4: List<Post>
+    local _5: List<Post>
+    local _6: List<Post>
+    local _7: List<Post>
+    local _8: Bool
+    local _9: Bool
+    local _10: Bool
+    local _11: Bool
+    local _12: Bool
+    local _13: List<Post>
+    local _14: List<Post>
+    local _15: List<Post>
+    local _16: List<Post>
   b0:
     goto b2
   b1:
@@ -181,10 +181,10 @@ fn insert #4(_0/post, _1/entries)
     _8 = _9
     branch _8 ? b11 : b10
   b8:
-    _2/head = _1/entries.0
+    _2/head = _1/entries.0@Cons
     goto b9
   b9:
-    _3/rest = _1/entries.1
+    _3/rest = _1/entries.1@Cons
     goto b7
   b10:
     _11 = _0/post.1 eq _2/head.1
@@ -213,16 +213,16 @@ fn insert #4(_0/post, _1/entries)
     _4 = _7
     goto b1
 
-fn remove #5(_0/id, _1/entries)
-    local _2/head
-    local _3/rest
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
+fn remove #5(_0/id: I64, _1/entries: List<Post>) -> List<Post>
+    local _2/head: Post
+    local _3/rest: List<Post>
+    local _4: List<Post>
+    local _5: List<Post>
+    local _6: List<Post>
+    local _7: Bool
+    local _8: List<Post>
+    local _9: List<Post>
+    local _10: List<Post>
   b0:
     goto b2
   b1:
@@ -243,10 +243,10 @@ fn remove #5(_0/id, _1/entries)
     _7 = _2/head.0 eq _0/id
     branch _7 ? b10 : b11
   b8:
-    _2/head = _1/entries.0
+    _2/head = _1/entries.0@Cons
     goto b9
   b9:
-    _3/rest = _1/entries.1
+    _3/rest = _1/entries.1@Cons
     goto b7
   b10:
     _8 = call remove#5(_0/id, _3/rest)
@@ -261,10 +261,10 @@ fn remove #5(_0/id, _1/entries)
     _4 = _6
     goto b1
 
-task fn notify #6(_0/version, _1/subscriber)
-    local _2
-    local _3
-    local _4
+task fn notify #6(_0/version: I64, _1/subscriber: Subscriber) -> ()
+    local _2: Input<I64>
+    local _3: Task<()>
+    local _4: ()
   b0:
     _2 = input 0 of _1/subscriber
     _3 = task builtin send(_2, _0/version)
@@ -272,16 +272,16 @@ task fn notify #6(_0/version, _1/subscriber)
   b1:
     return _4
 
-fn by_author #7(_0/author, _1/entries)
-    local _2/post
-    local _3/rest
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
+fn by_author #7(_0/author: String, _1/entries: List<Post>) -> List<Post>
+    local _2/post: Post
+    local _3/rest: List<Post>
+    local _4: List<Post>
+    local _5: List<Post>
+    local _6: List<Post>
+    local _7: Bool
+    local _8: List<Post>
+    local _9: List<Post>
+    local _10: List<Post>
   b0:
     goto b2
   b1:
@@ -302,10 +302,10 @@ fn by_author #7(_0/author, _1/entries)
     _7 = _2/post.1 eq _0/author
     branch _7 ? b10 : b11
   b8:
-    _2/post = _1/entries.0
+    _2/post = _1/entries.0@Cons
     goto b9
   b9:
-    _3/rest = _1/entries.1
+    _3/rest = _1/entries.1@Cons
     goto b7
   b10:
     _8 = call by_author#7(_0/author, _3/rest)
@@ -320,22 +320,22 @@ fn by_author #7(_0/author, _1/entries)
     _4 = _6
     goto b1
 
-fn find #8(_0/id, _1/journal)
-    local _2/delta
-    local _3/rest
-    local _4/post
-    local _5/gone
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
-    local _12
-    local _13
-    local _14
-    local _15
-    local _16
+fn find #8(_0/id: I64, _1/journal: List<Delta>) -> Option<Post>
+    local _2/delta: Delta
+    local _3/rest: List<Delta>
+    local _4/post: Post
+    local _5/gone: I64
+    local _6: Option<Post>
+    local _7: Option<Post>
+    local _8: Option<Post>
+    local _9: Option<Post>
+    local _10: Bool
+    local _11: Option<Post>
+    local _12: Option<Post>
+    local _13: Option<Post>
+    local _14: Bool
+    local _15: Option<Post>
+    local _16: Option<Post>
   b0:
     goto b2
   b1:
@@ -355,10 +355,10 @@ fn find #8(_0/id, _1/journal)
   b7:
     goto b11
   b8:
-    _2/delta = _1/journal.0
+    _2/delta = _1/journal.0@Cons
     goto b9
   b9:
-    _3/rest = _1/journal.1
+    _3/rest = _1/journal.1@Cons
     goto b7
   b10:
     _6 = _8
@@ -373,7 +373,7 @@ fn find #8(_0/id, _1/journal)
     _10 = _4/post.0 eq _0/id
     branch _10 ? b16 : b17
   b15:
-    _4/post = _2/delta.0
+    _4/post = _2/delta.0@Put
     goto b14
   b16:
     _11 = Option.Some(_4/post)
@@ -390,7 +390,7 @@ fn find #8(_0/id, _1/journal)
     _14 = _5/gone eq _0/id
     branch _14 ? b21 : b22
   b20:
-    _5/gone = _2/delta.0
+    _5/gone = _2/delta.0@Erase
     goto b19
   b21:
     _15 = Option.None()
@@ -404,18 +404,18 @@ fn find #8(_0/id, _1/journal)
     _8 = _13
     goto b10
 
-fn render #9(_0/entries)
-    local _1/post
-    local _2/rest
-    local _3
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
+fn render #9(_0/entries: List<Post>) -> String
+    local _1/post: Post
+    local _2/rest: List<Post>
+    local _3: String
+    local _4: String
+    local _5: String
+    local _6: String
+    local _7: String
+    local _8: String
+    local _9: String
+    local _10: String
+    local _11: String
   b0:
     goto b2
   b1:
@@ -443,83 +443,83 @@ fn render #9(_0/entries)
     _3 = _11
     goto b1
   b8:
-    _1/post = _0/entries.0
+    _1/post = _0/entries.0@Cons
     goto b9
   b9:
-    _2/rest = _0/entries.1
+    _2/rest = _0/entries.1@Cons
     goto b7
 
-task fn main #10()
-    local _0/subscriber
-    local _1/index
-    local _2/posts
-    local _3/post
-    local _4/post
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
-    local _12
-    local _13
-    local _14
-    local _15
-    local _16
-    local _17
-    local _18
-    local _19
-    local _20
-    local _21
-    local _22
-    local _23
-    local _24
-    local _25
-    local _26
-    local _27
-    local _28
-    local _29
-    local _30
-    local _31
-    local _32
-    local _33
-    local _34
-    local _35
-    local _36
-    local _37
-    local _38
-    local _39
-    local _40
-    local _41
-    local _42
-    local _43
-    local _44
-    local _45
-    local _46
-    local _47
-    local _48
-    local _49
-    local _50
-    local _51
-    local _52
-    local _53
-    local _54
-    local _55
-    local _56
-    local _57
-    local _58
-    local _59
-    local _60
-    local _61
-    local _62
-    local _63
-    local _64
-    local _65
-    local _66
-    local _67
-    local _68
-    local _69
+task fn main #10() -> ()
+    local _0/subscriber: Subscriber
+    local _1/index: ByAuthor
+    local _2/posts: PostPartition
+    local _3/post: Post
+    local _4/post: Post
+    local _5: Subscriber
+    local _6: ByAuthor
+    local _7: PostPartition
+    local _8: Input<Post>
+    local _9: Post
+    local _10: Task<()>
+    local _11: ()
+    local _12: Input<Post>
+    local _13: Post
+    local _14: Task<()>
+    local _15: ()
+    local _16: Input<Post>
+    local _17: Post
+    local _18: Task<()>
+    local _19: ()
+    local _20: Input<Post>
+    local _21: Post
+    local _22: Task<()>
+    local _23: ()
+    local _24: Input<I64>
+    local _25: Task<()>
+    local _26: ()
+    local _27: Task<()>
+    local _28: ()
+    local _29: ()
+    local _30: Signal<List<Post>>
+    local _31: List<Post>
+    local _32: List<Post>
+    local _33: List<Post>
+    local _34: String
+    local _35: ()
+    local _36: Signal<I64>
+    local _37: I64
+    local _38: String
+    local _39: String
+    local _40: ()
+    local _41: Signal<I64>
+    local _42: I64
+    local _43: String
+    local _44: String
+    local _45: String
+    local _46: Signal<I64>
+    local _47: I64
+    local _48: String
+    local _49: String
+    local _50: ()
+    local _51: ()
+    local _52: Signal<List<Delta>>
+    local _53: List<Delta>
+    local _54: Option<Post>
+    local _55: String
+    local _56: ()
+    local _57: ()
+    local _58: ()
+    local _59: Signal<List<Delta>>
+    local _60: List<Delta>
+    local _61: Option<Post>
+    local _62: String
+    local _63: ()
+    local _64: ()
+    local _65: Signal<I64>
+    local _66: I64
+    local _67: String
+    local _68: String
+    local _69: ()
   b0:
     _5 = spawn reactor Subscriber#2()
     _0/subscriber = _5
@@ -597,7 +597,7 @@ task fn main #10()
     _51 = _56
     goto b7
   b12:
-    _3/post = _54.0
+    _3/post = _54.0@Some
     goto b11
   b13:
     _57 = builtin print("get(1): gone")
@@ -624,7 +624,7 @@ task fn main #10()
     _58 = _63
     goto b15
   b20:
-    _4/post = _61.0
+    _4/post = _61.0@Some
     goto b19
   b21:
     _64 = builtin print("get(2): gone")
@@ -633,22 +633,22 @@ task fn main #10()
   b22:
     goto b21
 
-fn fmt.to_string #11(_0/n)
-    local _1/rest
-    local _2/out
-    local _3
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
-    local _12
-    local _13
-    local _14
-    local _15
+fn fmt.to_string #11(_0/n: I64) -> String
+    local _1/rest: I64
+    local _2/out: String
+    local _3: I64
+    local _4: Bool
+    local _5: I64
+    local _6: I64
+    local _7: String
+    local _8: Bool
+    local _9: I64
+    local _10: I64
+    local _11: String
+    local _12: String
+    local _13: String
+    local _14: Bool
+    local _15: String
   b0:
     _4 = _0/n lt 0
     branch _4 ? b1 : b2
@@ -689,39 +689,39 @@ fn fmt.to_string #11(_0/n)
   b9:
     return _13
 
-fn fmt.to_int #12(_0/s)
-    local _1/data
-    local _2/len
-    local _3/i
-    local _4/negative
-    local _5/value
-    local _6/b
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
-    local _12
-    local _13
-    local _14
-    local _15
-    local _16
-    local _17
-    local _18
-    local _19
-    local _20
-    local _21
-    local _22
-    local _23
-    local _24
-    local _25
-    local _26
-    local _27
-    local _28
-    local _29
-    local _30
-    local _31
-    local _32
+fn fmt.to_int #12(_0/s: String) -> Option<I64>
+    local _1/data: Bytes
+    local _2/len: I64
+    local _3/i: I64
+    local _4/negative: Bool
+    local _5/value: I64
+    local _6/b: I64
+    local _7: Bytes
+    local _8: I64
+    local _9: ()
+    local _10: Bool
+    local _11: Option<I64>
+    local _12: ()
+    local _13: I64
+    local _14: Bool
+    local _15: ()
+    local _16: Bool
+    local _17: Option<I64>
+    local _18: Bool
+    local _19: I64
+    local _20: ()
+    local _21: Bool
+    local _22: Bool
+    local _23: Bool
+    local _24: Option<I64>
+    local _25: I64
+    local _26: I64
+    local _27: I64
+    local _28: I64
+    local _29: Option<I64>
+    local _30: I64
+    local _31: Option<I64>
+    local _32: Option<I64>
   b0:
     _7 = builtin bytes(_0/s)
     _1/data = _7
@@ -804,18 +804,18 @@ fn fmt.to_int #12(_0/s)
   b20:
     return _29
 
-fn fmt.digit #13(_0/n)
-    local _1
-    local _2
-    local _3
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
+fn fmt.digit #13(_0/n: I64) -> String
+    local _1: String
+    local _2: Bool
+    local _3: Bool
+    local _4: Bool
+    local _5: Bool
+    local _6: Bool
+    local _7: Bool
+    local _8: Bool
+    local _9: Bool
+    local _10: Bool
+    local _11: Bool
   b0:
     goto b2
   b1:
@@ -886,72 +886,72 @@ fn fmt.digit #13(_0/n)
     _1 = "?"
     goto b1
 
-fn list.length #14(_0/items)
+inert fn list.length #14(_0/items: List) -> I64
   b0:
     return ()
 
-fn list.empty #15()
+inert fn list.empty #15() -> List
   b0:
     return ()
 
-fn list.append #16(_0/items, _1/tail)
+inert fn list.append #16(_0/items: List, _1/tail: List) -> List
   b0:
     return ()
 
-fn list.reverse #17(_0/items)
+inert fn list.reverse #17(_0/items: List) -> List
   b0:
     return ()
 
-fn list.walk #18(_0/items, _1/out)
+inert fn list.walk #18(_0/items: List, _1/out: List) -> List
   b0:
     return ()
 
-fn list.take #19(_0/items, _1/count)
+inert fn list.take #19(_0/items: List, _1/count: I64) -> List
   b0:
     return ()
 
-fn list.drop #20(_0/items, _1/count)
+inert fn list.drop #20(_0/items: List, _1/count: I64) -> List
   b0:
     return ()
 
-fn list.nth #21(_0/items, _1/index)
+inert fn list.nth #21(_0/items: List, _1/index: I64) -> Option<T>
   b0:
     return ()
 
-fn list.contains #22(_0/items, _1/wanted)
+inert fn list.contains #22(_0/items: List, _1/wanted: T) -> Bool
   b0:
     return ()
 
-fn list.join #23(_0/items, _1/separator)
+inert fn list.join #23(_0/items: List, _1/separator: String) -> String
   b0:
     return ()
 
-fn fmt.Display.to_string for I64 #24(_0/value)
-    local _1
+fn fmt.Display.to_string for I64 #24(_0/value: I64) -> String
+    local _1: String
   b0:
     _1 = call fmt.to_string#11(_0/value)
     return _1
 
-fn PostPartition.journal.init #25()
-    local _0
+fn PostPartition.journal.init #25() -> List<Delta>
+    local _0: List<Delta>
   b0:
     _0 = List<Delta>.Nil()
     return _0
 
-fn PostPartition.seq.init #26()
+fn PostPartition.seq.init #26() -> I64
   b0:
     return 0
 
-fn PostPartition.acked.init #27()
+fn PostPartition.acked.init #27() -> I64
   b0:
     return 0
 
-fn PostPartition.on.put #28(_0/post, _1/index, _2/journal, _3/seq, _4/acked)
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
+fn PostPartition.on.put #28(_0/post: Post, _1/index: ByAuthor, _2/journal: List<Delta>, _3/seq: I64, _4/acked: I64) -> ()
+    local _5: Delta
+    local _6: List<Delta>
+    local _7: I64
+    local _8: Delta
+    local _9: Task<()>
   b0:
     _5 = Delta.Put(_0/post)
     _6 = List<Delta>.Cons(_5, _2/journal)
@@ -965,12 +965,12 @@ fn PostPartition.on.put #28(_0/post, _1/index, _2/journal, _3/seq, _4/acked)
     emit _9 -> input 2
     return ()
 
-fn PostPartition.on.erase #29(_0/id, _1/index, _2/journal, _3/seq, _4/acked)
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
+fn PostPartition.on.erase #29(_0/id: I64, _1/index: ByAuthor, _2/journal: List<Delta>, _3/seq: I64, _4/acked: I64) -> ()
+    local _5: Delta
+    local _6: List<Delta>
+    local _7: I64
+    local _8: Delta
+    local _9: Task<()>
   b0:
     _5 = Delta.Erase(_0/id)
     _6 = List<Delta>.Cons(_5, _2/journal)
@@ -984,54 +984,54 @@ fn PostPartition.on.erase #29(_0/id, _1/index, _2/journal, _3/seq, _4/acked)
     emit _9 -> input 2
     return ()
 
-fn PostPartition.on.delivered #30(_0/index, _1/journal, _2/seq, _3/acked)
-    local _4
+fn PostPartition.on.delivered #30(_0/index: ByAuthor, _1/journal: List<Delta>, _2/seq: I64, _3/acked: I64) -> ()
+    local _4: I64
   b0:
     _4 = _3/acked add.i 1
     _3/acked = _4
     set slot 3 = _3/acked
     return ()
 
-fn PostPartition.backlog #31(_0/seq, _1/acked)
-    local _2
+fn PostPartition.backlog #31(_0/seq: I64, _1/acked: I64) -> I64
+    local _2: I64
   b0:
     _2 = _0/seq sub.i _1/acked
     return _2
 
-fn PostPartition.history #32(_0/journal)
+fn PostPartition.history #32(_0/journal: List<Delta>) -> List<Delta>
   b0:
     return _0/journal
 
-fn ByAuthor.rows.init #33()
-    local _0
+fn ByAuthor.rows.init #33() -> List<Post>
+    local _0: List<Post>
   b0:
     _0 = List<Post>.Nil()
     return _0
 
-fn ByAuthor.total.init #34()
+fn ByAuthor.total.init #34() -> I64
   b0:
     return 0
 
-fn ByAuthor.revision.init #35()
+fn ByAuthor.revision.init #35() -> I64
   b0:
     return 0
 
-fn ByAuthor.queued.init #36()
-    local _0
+fn ByAuthor.queued.init #36() -> List<Delta>
+    local _0: List<Delta>
   b0:
     _0 = List<Delta>.Nil()
     return _0
 
-fn ByAuthor.busy.init #37()
+fn ByAuthor.busy.init #37() -> Bool
   b0:
     return false
 
-fn ByAuthor.on.arrived #38(_0/delta, _1/subscriber, _2/rows, _3/total, _4/revision, _5/queued, _6/busy)
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
+fn ByAuthor.on.arrived #38(_0/delta: Delta, _1/subscriber: Subscriber, _2/rows: List<Post>, _3/total: I64, _4/revision: I64, _5/queued: List<Delta>, _6/busy: Bool) -> ()
+    local _7: ()
+    local _8: List<Delta>
+    local _9: List<Delta>
+    local _10: List<Delta>
+    local _11: Task<Indexed>
   b0:
     branch _6/busy ? b1 : b2
   b1:
@@ -1052,12 +1052,12 @@ fn ByAuthor.on.arrived #38(_0/delta, _1/subscriber, _2/rows, _3/total, _4/revisi
   b3:
     return _7
 
-fn ByAuthor.on.applied #39(_0/result, _1/subscriber, _2/rows, _3/total, _4/revision, _5/queued, _6/busy)
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
+fn ByAuthor.on.applied #39(_0/result: Indexed, _1/subscriber: Subscriber, _2/rows: List<Post>, _3/total: I64, _4/revision: I64, _5/queued: List<Delta>, _6/busy: Bool) -> ()
+    local _7: I64
+    local _8: Task<()>
+    local _9: ()
+    local _10: Task<Indexed>
+    local _11: List<Delta>
   b0:
     _2/rows = _0/result.0
     set slot 1 = _2/rows
@@ -1097,32 +1097,32 @@ fn ByAuthor.on.applied #39(_0/result, _1/subscriber, _2/rows, _3/total, _4/revis
   b9:
     goto b8
 
-fn ByAuthor.on.notified #40(_0/subscriber, _1/rows, _2/total, _3/revision, _4/queued, _5/busy)
+fn ByAuthor.on.notified #40(_0/subscriber: Subscriber, _1/rows: List<Post>, _2/total: I64, _3/revision: I64, _4/queued: List<Delta>, _5/busy: Bool) -> ()
   b0:
     return ()
 
-fn ByAuthor.entries #41(_0/rows)
+fn ByAuthor.entries #41(_0/rows: List<Post>) -> List<Post>
   b0:
     return _0/rows
 
-fn ByAuthor.count #42(_0/total)
+fn ByAuthor.count #42(_0/total: I64) -> I64
   b0:
     return _0/total
 
-fn ByAuthor.version #43(_0/revision)
+fn ByAuthor.version #43(_0/revision: I64) -> I64
   b0:
     return _0/revision
 
-fn Subscriber.seen_count.init #44()
+fn Subscriber.seen_count.init #44() -> I64
   b0:
     return 0
 
-fn Subscriber.last_version.init #45()
+fn Subscriber.last_version.init #45() -> I64
   b0:
     return 0
 
-fn Subscriber.on.changed #46(_0/version, _1/seen_count, _2/last_version)
-    local _3
+fn Subscriber.on.changed #46(_0/version: I64, _1/seen_count: I64, _2/last_version: I64) -> ()
+    local _3: I64
   b0:
     _3 = _1/seen_count add.i 1
     _1/seen_count = _3
@@ -1131,19 +1131,19 @@ fn Subscriber.on.changed #46(_0/version, _1/seen_count, _2/last_version)
     set slot 1 = _2/last_version
     return ()
 
-fn Subscriber.seen #47(_0/seen_count)
+fn Subscriber.seen #47(_0/seen_count: I64) -> I64
   b0:
     return _0/seen_count
 
-fn Subscriber.last #48(_0/last_version)
+fn Subscriber.last #48(_0/last_version: I64) -> I64
   b0:
     return _0/last_version
 
-fn list.length<Post> #49(_0/items)
-    local _1/rest
-    local _2
-    local _3
-    local _4
+fn list.length<Post> #49(_0/items: List<Post>) -> I64
+    local _1/rest: List<Post>
+    local _2: I64
+    local _3: I64
+    local _4: I64
   b0:
     goto b2
   b1:
@@ -1167,20 +1167,20 @@ fn list.length<Post> #49(_0/items)
   b8:
     goto b9
   b9:
-    _1/rest = _0/items.1
+    _1/rest = _0/items.1@Cons
     goto b7
 
-fn list.take<Post> #50(_0/items, _1/count)
-    local _2/head
-    local _3/rest
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
+fn list.take<Post> #50(_0/items: List<Post>, _1/count: I64) -> List<Post>
+    local _2/head: Post
+    local _3/rest: List<Post>
+    local _4: List<Post>
+    local _5: Bool
+    local _6: List<Post>
+    local _7: List<Post>
+    local _8: List<Post>
+    local _9: I64
+    local _10: List<Post>
+    local _11: List<Post>
   b0:
     _5 = _1/count le 0
     branch _5 ? b1 : b2
@@ -1214,59 +1214,59 @@ fn list.take<Post> #50(_0/items, _1/count)
     _7 = _11
     goto b4
   b11:
-    _2/head = _0/items.0
+    _2/head = _0/items.0@Cons
     goto b12
   b12:
-    _3/rest = _0/items.1
+    _3/rest = _0/items.1@Cons
     goto b10
 
-fn fmt.Display.to_string for T #51(_0)
+inert fn fmt.Display.to_string for T #51(_0: ?) -> String
   b0:
     return ()
 
 === graph ===
-reactor PostPartition #0
-    node 0 index param slot 0 arg 0 <- []
-    node 1 journal state slot 1 init PostPartition.journal.init#25 <- []
-    node 2 seq state slot 2 init PostPartition.seq.init#26 <- []
-    node 3 acked state slot 3 init PostPartition.acked.init#27 <- []
-    node 4 backlog signal PostPartition.backlog#31 export <- [seq, acked]
-    node 5 history signal PostPartition.history#32 export <- [journal]
+reactor PostPartition #0(ByAuthor)
+    node 0 index: ByAuthor param slot 0 arg 0 <- []
+    node 1 journal: List<Delta> state slot 1 init PostPartition.journal.init#25 <- []
+    node 2 seq: I64 state slot 2 init PostPartition.seq.init#26 <- []
+    node 3 acked: I64 state slot 3 init PostPartition.acked.init#27 <- []
+    node 4 backlog: I64 signal PostPartition.backlog#31 export <- [seq, acked]
+    node 5 history: List<Delta> signal PostPartition.history#32 export <- [journal]
     order [index, journal, seq, acked, backlog, history]
-    input 0 put capacity 64 overflow wait handler PostPartition.on.put#28
+    input 0 put: Post capacity 64 overflow wait handler PostPartition.on.put#28
         plan [journal, seq, backlog, history]
-    input 1 erase capacity 64 overflow wait handler PostPartition.on.erase#29
+    input 1 erase: I64 capacity 64 overflow wait handler PostPartition.on.erase#29
         plan [journal, seq, backlog, history]
-    input 2 delivered capacity 64 overflow wait handler PostPartition.on.delivered#30
+    input 2 delivered: () capacity 64 overflow wait handler PostPartition.on.delivered#30
         plan [acked, backlog]
     exports [backlog, history]
 
-reactor ByAuthor #1
-    node 0 subscriber param slot 0 arg 0 <- []
-    node 1 rows state slot 1 init ByAuthor.rows.init#33 <- []
-    node 2 total state slot 2 init ByAuthor.total.init#34 <- []
-    node 3 revision state slot 3 init ByAuthor.revision.init#35 <- []
-    node 4 queued state slot 4 init ByAuthor.queued.init#36 <- []
-    node 5 busy state slot 5 init ByAuthor.busy.init#37 <- []
-    node 6 entries signal ByAuthor.entries#41 export <- [rows]
-    node 7 count signal ByAuthor.count#42 export <- [total]
-    node 8 version signal ByAuthor.version#43 export <- [revision]
+reactor ByAuthor #1(Subscriber)
+    node 0 subscriber: Subscriber param slot 0 arg 0 <- []
+    node 1 rows: List<Post> state slot 1 init ByAuthor.rows.init#33 <- []
+    node 2 total: I64 state slot 2 init ByAuthor.total.init#34 <- []
+    node 3 revision: I64 state slot 3 init ByAuthor.revision.init#35 <- []
+    node 4 queued: List<Delta> state slot 4 init ByAuthor.queued.init#36 <- []
+    node 5 busy: Bool state slot 5 init ByAuthor.busy.init#37 <- []
+    node 6 entries: List<Post> signal ByAuthor.entries#41 export <- [rows]
+    node 7 count: I64 signal ByAuthor.count#42 export <- [total]
+    node 8 version: I64 signal ByAuthor.version#43 export <- [revision]
     order [subscriber, rows, total, revision, queued, busy, entries, count, version]
-    input 0 arrived capacity 64 overflow wait handler ByAuthor.on.arrived#38
+    input 0 arrived: Delta capacity 64 overflow wait handler ByAuthor.on.arrived#38
         plan [queued, busy]
-    input 1 applied capacity 8 overflow wait handler ByAuthor.on.applied#39
+    input 1 applied: Indexed capacity 8 overflow wait handler ByAuthor.on.applied#39
         plan [rows, total, revision, queued, busy, entries, count, version]
-    input 2 notified capacity 8 overflow wait handler ByAuthor.on.notified#40
+    input 2 notified: () capacity 8 overflow wait handler ByAuthor.on.notified#40
         plan []
     exports [entries, count, version]
 
-reactor Subscriber #2
-    node 0 seen_count state slot 0 init Subscriber.seen_count.init#44 <- []
-    node 1 last_version state slot 1 init Subscriber.last_version.init#45 <- []
-    node 2 seen signal Subscriber.seen#47 export <- [seen_count]
-    node 3 last signal Subscriber.last#48 export <- [last_version]
+reactor Subscriber #2()
+    node 0 seen_count: I64 state slot 0 init Subscriber.seen_count.init#44 <- []
+    node 1 last_version: I64 state slot 1 init Subscriber.last_version.init#45 <- []
+    node 2 seen: I64 signal Subscriber.seen#47 export <- [seen_count]
+    node 3 last: I64 signal Subscriber.last#48 export <- [last_version]
     order [seen_count, last_version, seen, last]
-    input 0 changed capacity 64 overflow drop_oldest handler Subscriber.on.changed#46
+    input 0 changed: I64 capacity 64 overflow drop_oldest handler Subscriber.on.changed#46
         plan [seen_count, last_version, seen, last]
     exports [seen, last]
 

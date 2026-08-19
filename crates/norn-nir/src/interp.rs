@@ -740,7 +740,7 @@ impl Interpreter<'_> {
                     let _ = write!(
                         out,
                         "{}: {}",
-                        layout.fields[index],
+                        layout.fields[index].name,
                         self.render_nested(field)
                     );
                 }
@@ -767,7 +767,7 @@ impl Interpreter<'_> {
                         out.push_str(", ");
                     }
                     if !variant.positional {
-                        let _ = write!(out, "{}: ", variant.fields[index]);
+                        let _ = write!(out, "{}: ", variant.fields[index].name);
                     }
                     out.push_str(&self.render_nested(field));
                 }

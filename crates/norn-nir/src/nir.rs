@@ -10,7 +10,7 @@
 
 use std::rc::Rc;
 
-use norn_hir::hir::{BinOp, Builtin, Overflow, UnOp};
+use norn_hir::hir::{BinOp, Builtin, EnumId, Overflow, Ty, UnOp};
 
 pub type BlockId = usize;
 pub type LocalId = usize;
@@ -24,6 +24,59 @@ pub struct Program {
     pub main: Option<FnId>,
 }
 
+impl Program {
+    /// The type of a projected place in `function`, walking the path one step at a time.
+    pub fn ty_of_place(&self, function: &Function, place: &Place) -> Ty {
+        let mut ty = function.tys[place.local].clone();
+        for proj in &place.proj {
+            ty = self.ty_of_proj(&ty, proj);
+        }
+        ty
+    }
+
+    /// One projection step. `Field` walks a struct's layout; `Downcast` walks into a variant's
+    /// payload — a table lookup for a user enum, structural for `Option` and `Result`, whose
+    /// instantiations never appear in the enum table.
+    pub fn ty_of_proj(&self, ty: &Ty, proj: &Proj) -> Ty {
+        match (ty.owned(), proj) {
+            (Ty::Struct(id), Proj::Field(field)) => {
+                self.structs[id.index()].fields[*field].ty.clone()
+            }
+            (Ty::Enum(id), Proj::Downcast { variant, field }) => {
+                self.enums[id.index()].variants[*variant].fields[*field]
+                    .ty
+                    .clone()
+            }
+            (Ty::Option(inner), Proj::Downcast { variant, field: 0 })
+                if *variant == EnumId::SOME =>
+            {
+                (**inner).clone()
+            }
+            (Ty::Result(ok, _), Proj::Downcast { variant, field: 0 }) if *variant == EnumId::OK => {
+                (**ok).clone()
+            }
+            (Ty::Result(_, err), Proj::Downcast { variant, field: 0 })
+                if *variant == EnumId::ERR =>
+            {
+                (**err).clone()
+            }
+            (ty, proj) => panic!("cannot project {proj:?} out of {ty:?}"),
+        }
+    }
+
+    /// How the variant a `Downcast` names is spelled, given the type it downcasts.
+    pub fn variant_name(&self, ty: &Ty, variant: usize) -> String {
+        match ty.owned() {
+            Ty::Enum(id) => self.enums[id.index()].variants[variant].name.clone(),
+            Ty::Option(_) if variant == EnumId::SOME => "Some".into(),
+            Ty::Option(_) => "None".into(),
+            Ty::Result(..) if variant == EnumId::OK => "Ok".into(),
+            Ty::Result(..) => "Err".into(),
+            other => panic!("no variant {variant} on {other:?}"),
+        }
+    }
+}
+
 /// A reactor as the runtime consumes it: a table, not an evaluator.
 ///
 /// Every body has been lifted to an ordinary function in `fns`, so what remains is indices — which
@@ -31,6 +84,8 @@ pub struct Program {
 /// the milestone exists to produce, and `norn graph` prints exactly this.
 pub struct Reactor {
     pub name: String,
+    /// Constructor parameter types, in declaration order.
+    pub params: Vec<Ty>,
     pub nodes: Vec<Node>,
     /// The node holding each slot, in slot (source) order.
     pub slots: Vec<usize>,
@@ -41,6 +96,8 @@ pub struct Reactor {
 
 pub struct Node {
     pub name: String,
+    /// The type of the value the node holds.
+    pub ty: Ty,
     pub deps: Vec<usize>,
     pub kind: NodeKind,
 }
@@ -65,6 +122,8 @@ impl NodeKind {
 
 pub struct Input {
     pub name: String,
+    /// The message type. `()` means the occurrence itself is the message.
+    pub ty: Ty,
     pub capacity: usize,
     pub overflow: Overflow,
     /// `(message, every slot in slot order) -> ()`, writing slots and requesting effects as it goes.
@@ -75,7 +134,7 @@ pub struct Input {
 /// Names are kept so that a value can be rendered in the surface syntax that built it.
 pub struct StructLayout {
     pub name: String,
-    pub fields: Vec<String>,
+    pub fields: Vec<FieldLayout>,
 }
 
 pub struct EnumLayout {
@@ -85,9 +144,14 @@ pub struct EnumLayout {
 
 pub struct VariantLayout {
     pub name: String,
-    pub fields: Vec<String>,
+    pub fields: Vec<FieldLayout>,
     /// Whether the payload was declared positionally, which decides how it is printed.
     pub positional: bool,
+}
+
+pub struct FieldLayout {
+    pub name: String,
+    pub ty: Ty,
 }
 
 /// Whether calling this function runs it or builds a task. The distinction is all that separates
@@ -104,6 +168,13 @@ pub struct Function {
     pub kind: FnKind,
     pub params: usize,
     pub locals: Vec<String>,
+    /// The type of each local, in lockstep with `locals` — temporaries append to both.
+    pub tys: Vec<Ty>,
+    pub ret: Ty,
+    /// A neutered generic template, symbolic instance, or trait-call stub. Its signature may
+    /// still carry `Ty::Param` against a `()` body; nothing executable references it, and it
+    /// survives only because ids are positional. Typed consumers must skip it, not type it.
+    pub inert: bool,
     pub blocks: Vec<Block>,
 }
 
@@ -309,17 +380,38 @@ impl Term {
 pub fn print(program: &Program) -> String {
     let mut out = String::new();
     for (id, strukt) in program.structs.iter().enumerate() {
+        let fields: Vec<String> = strukt
+            .fields
+            .iter()
+            .map(|f| format!("{}: {}", f.name, print_ty(program, &f.ty)))
+            .collect();
         out.push_str(&format!(
             "struct {} #{id} ({})\n",
             strukt.name,
-            strukt.fields.join(", ")
+            fields.join(", ")
         ));
     }
     for (id, def) in program.enums.iter().enumerate() {
         let variants: Vec<String> = def
             .variants
             .iter()
-            .map(|v| format!("{}/{}", v.name, v.fields.len()))
+            .map(|v| {
+                if v.fields.is_empty() {
+                    return v.name.clone();
+                }
+                let fields: Vec<String> = v
+                    .fields
+                    .iter()
+                    .map(|f| {
+                        if v.positional {
+                            print_ty(program, &f.ty)
+                        } else {
+                            format!("{}: {}", f.name, print_ty(program, &f.ty))
+                        }
+                    })
+                    .collect();
+                format!("{}({})", v.name, fields.join(", "))
+            })
             .collect();
         out.push_str(&format!(
             "enum {} #{id} ({})\n",
@@ -334,19 +426,31 @@ pub fn print(program: &Program) -> String {
 
     for (id, function) in program.fns.iter().enumerate() {
         let params: Vec<String> = (0..function.params)
-            .map(|i| local_name(function, i))
+            .map(|i| {
+                format!(
+                    "{}: {}",
+                    local_name(function, i),
+                    local_ty(program, function, i)
+                )
+            })
             .collect();
+        let inert = if function.inert { "inert " } else { "" };
         let task = match function.kind {
             FnKind::Plain => "",
             FnKind::Task => "task ",
         };
         out.push_str(&format!(
-            "{task}fn {} #{id}({})\n",
+            "{inert}{task}fn {} #{id}({}) -> {}\n",
             function.name,
-            params.join(", ")
+            params.join(", "),
+            print_ty(program, &function.ret)
         ));
         for index in function.params..function.locals.len() {
-            out.push_str(&format!("    local {}\n", local_name(function, index)));
+            out.push_str(&format!(
+                "    local {}: {}\n",
+                local_name(function, index),
+                local_ty(program, function, index)
+            ));
         }
         for (index, block) in function.blocks.iter().enumerate() {
             out.push_str(&format!("  b{index}:\n"));
@@ -354,40 +458,51 @@ pub fn print(program: &Program) -> String {
                 let text = match instr {
                     Instr::Assign(place, rvalue) => format!(
                         "{} = {}",
-                        print_place(function, place),
+                        print_place(program, function, place),
                         print_rvalue(program, function, rvalue)
                     ),
                     Instr::ScopeEnter => "scope enter".into(),
                     Instr::Spawn(operand) => {
-                        format!("spawn {}", print_operand(function, operand))
+                        format!("spawn {}", print_operand(program, function, operand))
                     }
                     Instr::SpawnReactor {
                         dest,
                         reactor,
                         args,
                     } => {
-                        let args: Vec<String> =
-                            args.iter().map(|a| print_operand(function, a)).collect();
+                        let args: Vec<String> = args
+                            .iter()
+                            .map(|a| print_operand(program, function, a))
+                            .collect();
                         format!(
                             "{} = spawn reactor {}#{reactor}({})",
-                            print_place(function, dest),
+                            print_place(program, function, dest),
                             program.reactors[*reactor].name,
                             args.join(", ")
                         )
                     }
                     Instr::SetSlot(slot, operand) => {
-                        format!("set slot {slot} = {}", print_operand(function, operand))
+                        format!(
+                            "set slot {slot} = {}",
+                            print_operand(program, function, operand)
+                        )
                     }
                     Instr::Emit { task, returns } => match returns {
                         Some(input) => {
-                            format!("emit {} -> input {input}", print_operand(function, task))
+                            format!(
+                                "emit {} -> input {input}",
+                                print_operand(program, function, task)
+                            )
                         }
-                        None => format!("emit {}", print_operand(function, task)),
+                        None => format!("emit {}", print_operand(program, function, task)),
                     },
                 };
                 out.push_str(&format!("    {text}\n"));
             }
-            out.push_str(&format!("    {}\n", print_term(function, &block.term)));
+            out.push_str(&format!(
+                "    {}\n",
+                print_term(program, function, &block.term)
+            ));
         }
         out.push('\n');
     }
@@ -401,18 +516,67 @@ fn local_name(function: &Function, index: usize) -> String {
     }
 }
 
-fn print_place(function: &Function, place: &Place) -> String {
+fn local_ty(program: &Program, function: &Function, index: usize) -> String {
+    // A trait-call stub declares `params > 0` over an empty locals vec, so a parameter can have
+    // no entry to name — the header still prints, with the type unknown.
+    match function.tys.get(index) {
+        Some(ty) => print_ty(program, ty),
+        None => "?".into(),
+    }
+}
+
+/// How a type is spelled in printed NIR. Aggregates spell by their table name — an instance's
+/// name carries its arguments, `List<I64>` — and the unspellable reactor types get the bracketed
+/// spellings `Input<T>`/`Signal<T>` rather than HIR's diagnostic prose.
+pub fn print_ty(program: &Program, ty: &Ty) -> String {
+    match ty {
+        Ty::Unit => "()".into(),
+        Ty::I64 => "I64".into(),
+        Ty::F64 => "F64".into(),
+        Ty::Bool => "Bool".into(),
+        Ty::Str => "String".into(),
+        Ty::Bytes => "Bytes".into(),
+        Ty::Struct(id) => program.structs[id.index()].name.clone(),
+        Ty::Enum(id) => program.enums[id.index()].name.clone(),
+        Ty::Option(inner) => format!("Option<{}>", print_ty(program, inner)),
+        Ty::Result(ok, err) => format!(
+            "Result<{}, {}>",
+            print_ty(program, ok),
+            print_ty(program, err)
+        ),
+        Ty::Task(inner) => format!("Task<{}>", print_ty(program, inner)),
+        Ty::Resource(resource) => resource.name().into(),
+        Ty::Ref(inner) => format!("&{}", print_ty(program, inner)),
+        Ty::Reactor(id) => program.reactors[id.index()].name.clone(),
+        Ty::Input(inner) => format!("Input<{}>", print_ty(program, inner)),
+        Ty::Signal(inner) => format!("Signal<{}>", print_ty(program, inner)),
+        Ty::Event(inner) => format!("Event<{}>", print_ty(program, inner)),
+        Ty::Param { name, .. } => name.clone(),
+        Ty::Never => "!".into(),
+        Ty::Error => "?".into(),
+    }
+}
+
+fn print_place(program: &Program, function: &Function, place: &Place) -> String {
     let mut out = local_name(function, place.local);
+    let mut ty = function.tys[place.local].clone();
     for proj in &place.proj {
-        out.push_str(&format!(".{}", proj.index()));
+        match proj {
+            Proj::Field(index) => out.push_str(&format!(".{index}")),
+            // A downcast spells the variant it committed to: `_3.0@Some`.
+            Proj::Downcast { variant, field } => {
+                out.push_str(&format!(".{field}@{}", program.variant_name(&ty, *variant)))
+            }
+        }
+        ty = program.ty_of_proj(&ty, proj);
     }
     out
 }
 
-fn print_operand(function: &Function, operand: &Operand) -> String {
+fn print_operand(program: &Program, function: &Function, operand: &Operand) -> String {
     match operand {
         Operand::Const(c) => print_const(c),
-        Operand::Copy(place) => print_place(function, place),
+        Operand::Copy(place) => print_place(program, function, place),
     }
 }
 
@@ -430,20 +594,24 @@ fn print_rvalue(program: &Program, function: &Function, rvalue: &Rvalue) -> Stri
     let args = |operands: &[Operand]| {
         operands
             .iter()
-            .map(|o| print_operand(function, o))
+            .map(|o| print_operand(program, function, o))
             .collect::<Vec<_>>()
             .join(", ")
     };
     match rvalue {
-        Rvalue::Use(operand) => print_operand(function, operand),
+        Rvalue::Use(operand) => print_operand(program, function, operand),
         Rvalue::Unary(op, operand) => {
-            format!("{} {}", unary_name(*op), print_operand(function, operand))
+            format!(
+                "{} {}",
+                unary_name(*op),
+                print_operand(program, function, operand)
+            )
         }
         Rvalue::Binary(op, lhs, rhs) => format!(
             "{} {} {}",
-            print_operand(function, lhs),
+            print_operand(program, function, lhs),
             binary_name(*op),
-            print_operand(function, rhs)
+            print_operand(program, function, rhs)
         ),
         Rvalue::Call(id, operands) => {
             format!("call {}#{id}({})", program.fns[*id].name, args(operands))
@@ -470,10 +638,16 @@ fn print_rvalue(program: &Program, function: &Function, rvalue: &Rvalue) -> Stri
             )
         }
         Rvalue::ReactorInput(operand, index) => {
-            format!("input {index} of {}", print_operand(function, operand))
+            format!(
+                "input {index} of {}",
+                print_operand(program, function, operand)
+            )
         }
         Rvalue::ReactorExport(operand, index) => {
-            format!("export {index} of {}", print_operand(function, operand))
+            format!(
+                "export {index} of {}",
+                print_operand(program, function, operand)
+            )
         }
     }
 }
@@ -494,7 +668,16 @@ pub fn print_graph(program: &Program, wanted: Option<&str>) -> String {
         if wanted.is_some_and(|wanted| wanted != reactor.name) {
             continue;
         }
-        out.push_str(&format!("reactor {} #{id}\n", reactor.name));
+        let params: Vec<String> = reactor
+            .params
+            .iter()
+            .map(|ty| print_ty(program, ty))
+            .collect();
+        out.push_str(&format!(
+            "reactor {} #{id}({})\n",
+            reactor.name,
+            params.join(", ")
+        ));
         for (index, node) in reactor.nodes.iter().enumerate() {
             let kind = match &node.kind {
                 NodeKind::Param { slot, index } => format!("param slot {slot} arg {index}"),
@@ -516,16 +699,18 @@ pub fn print_graph(program: &Program, wanted: Option<&str>) -> String {
                 ""
             };
             out.push_str(&format!(
-                "    node {index} {} {kind}{exported} <- [{}]\n",
+                "    node {index} {}: {} {kind}{exported} <- [{}]\n",
                 node.name,
+                print_ty(program, &node.ty),
                 deps.join(", ")
             ));
         }
         out.push_str(&format!("    order [{}]\n", names(reactor, &reactor.order)));
         for (index, input) in reactor.inputs.iter().enumerate() {
             out.push_str(&format!(
-                "    input {index} {} capacity {} overflow {} handler {}#{}\n",
+                "    input {index} {}: {} capacity {} overflow {} handler {}#{}\n",
                 input.name,
+                print_ty(program, &input.ty),
                 input.capacity,
                 input.overflow.name(),
                 program.fns[input.handler].name,
@@ -550,13 +735,13 @@ fn names(reactor: &Reactor, nodes: &[usize]) -> String {
         .join(", ")
 }
 
-fn print_term(function: &Function, term: &Term) -> String {
+fn print_term(program: &Program, function: &Function, term: &Term) -> String {
     match term {
         Term::Goto(target) => format!("goto b{target}"),
         Term::Branch { cond, then, els } => {
             format!(
                 "branch {} ? b{then} : b{els}",
-                print_operand(function, cond)
+                print_operand(program, function, cond)
             )
         }
         Term::SwitchTag {
@@ -570,15 +755,15 @@ fn print_term(function: &Function, term: &Term) -> String {
                 .collect();
             format!(
                 "switch tag {} [{}] else b{default}",
-                print_place(function, scrutinee),
+                print_place(program, function, scrutinee),
                 cases.join(", ")
             )
         }
-        Term::Return(operand) => format!("return {}", print_operand(function, operand)),
+        Term::Return(operand) => format!("return {}", print_operand(program, function, operand)),
         Term::Await { task, dest, resume } => format!(
             "await {} -> {}, resume b{resume}",
-            print_operand(function, task),
-            print_place(function, dest)
+            print_operand(program, function, task),
+            print_place(program, function, dest)
         ),
         Term::ScopeExit { resume } => format!("scope exit, resume b{resume}"),
         Term::Trap(message) => format!("trap {message:?}"),

@@ -1,61 +1,61 @@
 === nir ===
-struct Pair #0 (first, second)
-struct Pair<B, A> #1 (first, second)
-struct Pair<I64, String> #2 (first, second)
-struct Pair<String, I64> #3 (first, second)
-enum Option #0 (None/0, Some/1)
-enum Result #1 (Ok/1, Err/1)
-enum IoError #2 (NotFound/0, Denied/0, InUse/0, Refused/0, Closed/0, Other/1)
-enum Color #3 (Red/0, Blue/0)
-enum List #4 (Nil/0, Cons/2)
-enum List<I64> #5 (Nil/0, Cons/2)
-enum List<Color> #6 (Nil/0, Cons/2)
+struct Pair #0 (first: A, second: B)
+struct Pair<B, A> #1 (first: B, second: A)
+struct Pair<I64, String> #2 (first: I64, second: String)
+struct Pair<String, I64> #3 (first: String, second: I64)
+enum Option #0 (None, Some(?))
+enum Result #1 (Ok(?), Err(?))
+enum IoError #2 (NotFound, Denied, InUse, Refused, Closed, Other(String))
+enum Color #3 (Red, Blue)
+enum List #4 (Nil, Cons(T, List))
+enum List<I64> #5 (Nil, Cons(I64, List<I64>))
+enum List<Color> #6 (Nil, Cons(Color, List<Color>))
 
-fn swap #0(_0/pair)
+inert fn swap #0(_0/pair: Pair) -> Pair<B, A>
   b0:
     return ()
 
-fn describe #1(_0/value, _1/fallback)
+inert fn describe #1(_0/value: T, _1/fallback: T) -> String
   b0:
     return ()
 
-fn main #2()
-    local _0/numbers
-    local _1/value
-    local _2/colors
-    local _3/pair
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
-    local _12
-    local _13
-    local _14
-    local _15
-    local _16
-    local _17
-    local _18
-    local _19
-    local _20
-    local _21
-    local _22
-    local _23
-    local _24
-    local _25
-    local _26
-    local _27
-    local _28
-    local _29
-    local _30
-    local _31
-    local _32
-    local _33
-    local _34
-    local _35
+fn main #2() -> ()
+    local _0/numbers: List<I64>
+    local _1/value: I64
+    local _2/colors: List<Color>
+    local _3/pair: Pair<I64, String>
+    local _4: List<I64>
+    local _5: List<I64>
+    local _6: List<I64>
+    local _7: List<I64>
+    local _8: I64
+    local _9: ()
+    local _10: List<I64>
+    local _11: String
+    local _12: ()
+    local _13: List<I64>
+    local _14: String
+    local _15: ()
+    local _16: Bool
+    local _17: ()
+    local _18: ()
+    local _19: Option<I64>
+    local _20: ()
+    local _21: ()
+    local _22: Color
+    local _23: Color
+    local _24: List<Color>
+    local _25: List<Color>
+    local _26: List<Color>
+    local _27: String
+    local _28: ()
+    local _29: Pair<I64, String>
+    local _30: Pair<String, I64>
+    local _31: ()
+    local _32: String
+    local _33: ()
+    local _34: String
+    local _35: ()
   b0:
     _4 = List<I64>.Nil()
     _5 = List<I64>.Cons(3, _4)
@@ -103,7 +103,7 @@ fn main #2()
     _18 = _20
     goto b1
   b6:
-    _1/value = _19.0
+    _1/value = _19.0@Some
     goto b5
   b7:
     _21 = builtin print("missing")
@@ -112,62 +112,62 @@ fn main #2()
   b8:
     goto b7
 
-fn list.length #3(_0/items)
+inert fn list.length #3(_0/items: List) -> I64
   b0:
     return ()
 
-fn list.empty #4()
+inert fn list.empty #4() -> List
   b0:
     return ()
 
-fn list.append #5(_0/items, _1/tail)
+inert fn list.append #5(_0/items: List, _1/tail: List) -> List
   b0:
     return ()
 
-fn list.reverse #6(_0/items)
+inert fn list.reverse #6(_0/items: List) -> List
   b0:
     return ()
 
-fn list.walk #7(_0/items, _1/out)
+inert fn list.walk #7(_0/items: List, _1/out: List) -> List
   b0:
     return ()
 
-fn list.take #8(_0/items, _1/count)
+inert fn list.take #8(_0/items: List, _1/count: I64) -> List
   b0:
     return ()
 
-fn list.drop #9(_0/items, _1/count)
+inert fn list.drop #9(_0/items: List, _1/count: I64) -> List
   b0:
     return ()
 
-fn list.nth #10(_0/items, _1/index)
+inert fn list.nth #10(_0/items: List, _1/index: I64) -> Option<T>
   b0:
     return ()
 
-fn list.contains #11(_0/items, _1/wanted)
+inert fn list.contains #11(_0/items: List, _1/wanted: T) -> Bool
   b0:
     return ()
 
-fn list.join #12(_0/items, _1/separator)
+inert fn list.join #12(_0/items: List, _1/separator: String) -> String
   b0:
     return ()
 
-fn fmt.to_string #13(_0/n)
-    local _1/rest
-    local _2/out
-    local _3
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
-    local _12
-    local _13
-    local _14
-    local _15
+fn fmt.to_string #13(_0/n: I64) -> String
+    local _1/rest: I64
+    local _2/out: String
+    local _3: I64
+    local _4: Bool
+    local _5: I64
+    local _6: I64
+    local _7: String
+    local _8: Bool
+    local _9: I64
+    local _10: I64
+    local _11: String
+    local _12: String
+    local _13: String
+    local _14: Bool
+    local _15: String
   b0:
     _4 = _0/n lt 0
     branch _4 ? b1 : b2
@@ -208,39 +208,39 @@ fn fmt.to_string #13(_0/n)
   b9:
     return _13
 
-fn fmt.to_int #14(_0/s)
-    local _1/data
-    local _2/len
-    local _3/i
-    local _4/negative
-    local _5/value
-    local _6/b
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
-    local _12
-    local _13
-    local _14
-    local _15
-    local _16
-    local _17
-    local _18
-    local _19
-    local _20
-    local _21
-    local _22
-    local _23
-    local _24
-    local _25
-    local _26
-    local _27
-    local _28
-    local _29
-    local _30
-    local _31
-    local _32
+fn fmt.to_int #14(_0/s: String) -> Option<I64>
+    local _1/data: Bytes
+    local _2/len: I64
+    local _3/i: I64
+    local _4/negative: Bool
+    local _5/value: I64
+    local _6/b: I64
+    local _7: Bytes
+    local _8: I64
+    local _9: ()
+    local _10: Bool
+    local _11: Option<I64>
+    local _12: ()
+    local _13: I64
+    local _14: Bool
+    local _15: ()
+    local _16: Bool
+    local _17: Option<I64>
+    local _18: Bool
+    local _19: I64
+    local _20: ()
+    local _21: Bool
+    local _22: Bool
+    local _23: Bool
+    local _24: Option<I64>
+    local _25: I64
+    local _26: I64
+    local _27: I64
+    local _28: I64
+    local _29: Option<I64>
+    local _30: I64
+    local _31: Option<I64>
+    local _32: Option<I64>
   b0:
     _7 = builtin bytes(_0/s)
     _1/data = _7
@@ -323,18 +323,18 @@ fn fmt.to_int #14(_0/s)
   b20:
     return _29
 
-fn fmt.digit #15(_0/n)
-    local _1
-    local _2
-    local _3
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
+fn fmt.digit #15(_0/n: I64) -> String
+    local _1: String
+    local _2: Bool
+    local _3: Bool
+    local _4: Bool
+    local _5: Bool
+    local _6: Bool
+    local _7: Bool
+    local _8: Bool
+    local _9: Bool
+    local _10: Bool
+    local _11: Bool
   b0:
     goto b2
   b1:
@@ -405,8 +405,8 @@ fn fmt.digit #15(_0/n)
     _1 = "?"
     goto b1
 
-fn fmt.Display.to_string for Color #16(_0/value)
-    local _1
+fn fmt.Display.to_string for Color #16(_0/value: Color) -> String
+    local _1: String
   b0:
     goto b2
   b1:
@@ -428,21 +428,21 @@ fn fmt.Display.to_string for Color #16(_0/value)
   b8:
     goto b7
 
-fn fmt.Display.to_string for I64 #17(_0/value)
-    local _1
+fn fmt.Display.to_string for I64 #17(_0/value: I64) -> String
+    local _1: String
   b0:
     _1 = call fmt.to_string#13(_0/value)
     return _1
 
-fn fmt.Display.to_string for T #18(_0)
+inert fn fmt.Display.to_string for T #18(_0: ?) -> String
   b0:
     return ()
 
-fn list.length<I64> #19(_0/items)
-    local _1/rest
-    local _2
-    local _3
-    local _4
+fn list.length<I64> #19(_0/items: List<I64>) -> I64
+    local _1/rest: List<I64>
+    local _2: I64
+    local _3: I64
+    local _4: I64
   b0:
     goto b2
   b1:
@@ -466,27 +466,27 @@ fn list.length<I64> #19(_0/items)
   b8:
     goto b9
   b9:
-    _1/rest = _0/items.1
+    _1/rest = _0/items.1@Cons
     goto b7
 
-fn list.reverse<I64> #20(_0/items)
-    local _1
-    local _2
+fn list.reverse<I64> #20(_0/items: List<I64>) -> List<I64>
+    local _1: List<I64>
+    local _2: List<I64>
   b0:
     _1 = List<I64>.Nil()
     _2 = call list.walk<I64>#28(_0/items, _1)
     return _2
 
-fn list.join<I64> #21(_0/items, _1/separator)
-    local _2/head
-    local _3/rest
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
+fn list.join<I64> #21(_0/items: List<I64>, _1/separator: String) -> String
+    local _2/head: I64
+    local _3/rest: List<I64>
+    local _4: String
+    local _5: String
+    local _6: String
+    local _7: String
+    local _8: String
+    local _9: String
+    local _10: String
   b0:
     goto b2
   b1:
@@ -505,10 +505,10 @@ fn list.join<I64> #21(_0/items, _1/separator)
   b7:
     goto b11
   b8:
-    _2/head = _0/items.0
+    _2/head = _0/items.0@Cons
     goto b9
   b9:
-    _3/rest = _0/items.1
+    _3/rest = _0/items.1@Cons
     goto b7
   b10:
     _4 = _5
@@ -537,17 +537,17 @@ fn list.join<I64> #21(_0/items, _1/separator)
   b18:
     goto b16
 
-fn list.take<I64> #22(_0/items, _1/count)
-    local _2/head
-    local _3/rest
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
+fn list.take<I64> #22(_0/items: List<I64>, _1/count: I64) -> List<I64>
+    local _2/head: I64
+    local _3/rest: List<I64>
+    local _4: List<I64>
+    local _5: Bool
+    local _6: List<I64>
+    local _7: List<I64>
+    local _8: List<I64>
+    local _9: I64
+    local _10: List<I64>
+    local _11: List<I64>
   b0:
     _5 = _1/count le 0
     branch _5 ? b1 : b2
@@ -581,19 +581,19 @@ fn list.take<I64> #22(_0/items, _1/count)
     _7 = _11
     goto b4
   b11:
-    _2/head = _0/items.0
+    _2/head = _0/items.0@Cons
     goto b12
   b12:
-    _3/rest = _0/items.1
+    _3/rest = _0/items.1@Cons
     goto b10
 
-fn list.contains<I64> #23(_0/items, _1/wanted)
-    local _2/head
-    local _3/rest
-    local _4
-    local _5
-    local _6
-    local _7
+fn list.contains<I64> #23(_0/items: List<I64>, _1/wanted: I64) -> Bool
+    local _2/head: I64
+    local _3/rest: List<I64>
+    local _4: Bool
+    local _5: Bool
+    local _6: Bool
+    local _7: Bool
   b0:
     goto b2
   b1:
@@ -614,10 +614,10 @@ fn list.contains<I64> #23(_0/items, _1/wanted)
     _5 = _6
     branch _5 ? b11 : b10
   b8:
-    _2/head = _0/items.0
+    _2/head = _0/items.0@Cons
     goto b9
   b9:
-    _3/rest = _0/items.1
+    _3/rest = _0/items.1@Cons
     goto b7
   b10:
     _7 = call list.contains<I64>#23(_3/rest, _1/wanted)
@@ -627,16 +627,16 @@ fn list.contains<I64> #23(_0/items, _1/wanted)
     _4 = _5
     goto b1
 
-fn list.nth<I64> #24(_0/items, _1/index)
-    local _2/head
-    local _3/rest
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
+fn list.nth<I64> #24(_0/items: List<I64>, _1/index: I64) -> Option<I64>
+    local _2/head: I64
+    local _3/rest: List<I64>
+    local _4: Option<I64>
+    local _5: Option<I64>
+    local _6: Option<I64>
+    local _7: Bool
+    local _8: Option<I64>
+    local _9: I64
+    local _10: Option<I64>
   b0:
     goto b2
   b1:
@@ -657,10 +657,10 @@ fn list.nth<I64> #24(_0/items, _1/index)
     _7 = _1/index eq 0
     branch _7 ? b10 : b11
   b8:
-    _2/head = _0/items.0
+    _2/head = _0/items.0@Cons
     goto b9
   b9:
-    _3/rest = _0/items.1
+    _3/rest = _0/items.1@Cons
     goto b7
   b10:
     _8 = Option.Some(_2/head)
@@ -675,16 +675,16 @@ fn list.nth<I64> #24(_0/items, _1/index)
     _4 = _6
     goto b1
 
-fn list.join<Color> #25(_0/items, _1/separator)
-    local _2/head
-    local _3/rest
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
+fn list.join<Color> #25(_0/items: List<Color>, _1/separator: String) -> String
+    local _2/head: Color
+    local _3/rest: List<Color>
+    local _4: String
+    local _5: String
+    local _6: String
+    local _7: String
+    local _8: String
+    local _9: String
+    local _10: String
   b0:
     goto b2
   b1:
@@ -703,10 +703,10 @@ fn list.join<Color> #25(_0/items, _1/separator)
   b7:
     goto b11
   b8:
-    _2/head = _0/items.0
+    _2/head = _0/items.0@Cons
     goto b9
   b9:
-    _3/rest = _0/items.1
+    _3/rest = _0/items.1@Cons
     goto b7
   b10:
     _4 = _5
@@ -735,16 +735,16 @@ fn list.join<Color> #25(_0/items, _1/separator)
   b18:
     goto b16
 
-fn swap<I64, String> #26(_0/pair)
-    local _1
+fn swap<I64, String> #26(_0/pair: Pair<I64, String>) -> Pair<String, I64>
+    local _1: Pair<String, I64>
   b0:
     _1 = Pair<String, I64>(_0/pair.1, _0/pair.0)
     return _1
 
-fn describe<I64> #27(_0/value, _1/fallback)
-    local _2
-    local _3
-    local _4
+fn describe<I64> #27(_0/value: I64, _1/fallback: I64) -> String
+    local _2: String
+    local _3: Bool
+    local _4: String
   b0:
     _3 = _0/value eq _1/fallback
     branch _3 ? b1 : b2
@@ -758,12 +758,12 @@ fn describe<I64> #27(_0/value, _1/fallback)
   b3:
     return _2
 
-fn list.walk<I64> #28(_0/items, _1/out)
-    local _2/head
-    local _3/rest
-    local _4
-    local _5
-    local _6
+fn list.walk<I64> #28(_0/items: List<I64>, _1/out: List<I64>) -> List<I64>
+    local _2/head: I64
+    local _3/rest: List<I64>
+    local _4: List<I64>
+    local _5: List<I64>
+    local _6: List<I64>
   b0:
     goto b2
   b1:
@@ -785,10 +785,10 @@ fn list.walk<I64> #28(_0/items, _1/out)
     _4 = _6
     goto b1
   b8:
-    _2/head = _0/items.0
+    _2/head = _0/items.0@Cons
     goto b9
   b9:
-    _3/rest = _0/items.1
+    _3/rest = _0/items.1@Cons
     goto b7
 
 === output ===

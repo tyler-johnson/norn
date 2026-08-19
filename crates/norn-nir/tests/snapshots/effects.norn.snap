@@ -1,29 +1,29 @@
 === nir ===
-struct Report #0 (pending, delivered, failed)
-enum Option #0 (None/0, Some/1)
-enum Result #1 (Ok/1, Err/1)
-enum IoError #2 (NotFound/0, Denied/0, InUse/0, Refused/0, Closed/0, Other/1)
-enum Outcome #3 (Delivered/1, Failed/0)
+struct Report #0 (pending: I64, delivered: I64, failed: I64)
+enum Option #0 (None, Some(?))
+enum Result #1 (Ok(?), Err(?))
+enum IoError #2 (NotFound, Denied, InUse, Refused, Closed, Other(String))
+enum Outcome #3 (Delivered(I64), Failed)
 
-reactor Mailbox #0
-    node 0 pending state slot 0 init Mailbox.pending.init#4 <- []
-    node 1 delivered state slot 1 init Mailbox.delivered.init#5 <- []
-    node 2 failed state slot 2 init Mailbox.failed.init#6 <- []
-    node 3 report signal Mailbox.report#7 export <- [pending, delivered, failed]
+reactor Mailbox #0()
+    node 0 pending: I64 state slot 0 init Mailbox.pending.init#4 <- []
+    node 1 delivered: I64 state slot 1 init Mailbox.delivered.init#5 <- []
+    node 2 failed: I64 state slot 2 init Mailbox.failed.init#6 <- []
+    node 3 report: Report signal Mailbox.report#7 export <- [pending, delivered, failed]
     order [pending, delivered, failed, report]
-    input 0 queued capacity 8 overflow reject handler Mailbox.on.queued#2
+    input 0 queued: I64 capacity 8 overflow reject handler Mailbox.on.queued#2
         plan [pending, report]
-    input 1 settled capacity 8 overflow reject handler Mailbox.on.settled#3
+    input 1 settled: Outcome capacity 8 overflow reject handler Mailbox.on.settled#3
         plan [pending, delivered, failed, report]
     exports [report]
 
-task fn deliver #0(_0/id)
-    local _1
-    local _2
-    local _3
-    local _4
-    local _5
-    local _6
+task fn deliver #0(_0/id: I64) -> Outcome
+    local _1: Task<()>
+    local _2: ()
+    local _3: Outcome
+    local _4: Bool
+    local _5: Outcome
+    local _6: Outcome
   b0:
     _1 = task builtin sleep(_0/id)
     await _1 -> _2, resume b1
@@ -41,23 +41,23 @@ task fn deliver #0(_0/id)
   b4:
     return _3
 
-task fn main #1()
-    local _0/mailbox
-    local _1
-    local _2
-    local _3
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
-    local _12
-    local _13
-    local _14
-    local _15
+task fn main #1() -> ()
+    local _0/mailbox: Mailbox
+    local _1: Mailbox
+    local _2: Input<I64>
+    local _3: Task<()>
+    local _4: ()
+    local _5: Input<I64>
+    local _6: Task<()>
+    local _7: ()
+    local _8: Input<I64>
+    local _9: Task<()>
+    local _10: ()
+    local _11: Task<()>
+    local _12: ()
+    local _13: Signal<Report>
+    local _14: Report
+    local _15: ()
   b0:
     _1 = spawn reactor Mailbox#0()
     _0/mailbox = _1
@@ -81,9 +81,9 @@ task fn main #1()
     _15 = builtin print(_14)
     return _15
 
-fn Mailbox.on.queued #2(_0/id, _1/pending, _2/delivered, _3/failed)
-    local _4
-    local _5
+fn Mailbox.on.queued #2(_0/id: I64, _1/pending: I64, _2/delivered: I64, _3/failed: I64) -> ()
+    local _4: I64
+    local _5: Task<Outcome>
   b0:
     _4 = _1/pending add.i 1
     _1/pending = _4
@@ -92,11 +92,11 @@ fn Mailbox.on.queued #2(_0/id, _1/pending, _2/delivered, _3/failed)
     emit _5 -> input 1
     return ()
 
-fn Mailbox.on.settled #3(_0/outcome, _1/pending, _2/delivered, _3/failed)
-    local _4
-    local _5
-    local _6
-    local _7
+fn Mailbox.on.settled #3(_0/outcome: Outcome, _1/pending: I64, _2/delivered: I64, _3/failed: I64) -> ()
+    local _4: I64
+    local _5: ()
+    local _6: I64
+    local _7: I64
   b0:
     _4 = _1/pending sub.i 1
     _1/pending = _4
@@ -127,34 +127,34 @@ fn Mailbox.on.settled #3(_0/outcome, _1/pending, _2/delivered, _3/failed)
   b8:
     goto b7
 
-fn Mailbox.pending.init #4()
+fn Mailbox.pending.init #4() -> I64
   b0:
     return 0
 
-fn Mailbox.delivered.init #5()
+fn Mailbox.delivered.init #5() -> I64
   b0:
     return 0
 
-fn Mailbox.failed.init #6()
+fn Mailbox.failed.init #6() -> I64
   b0:
     return 0
 
-fn Mailbox.report #7(_0/pending, _1/delivered, _2/failed)
-    local _3
+fn Mailbox.report #7(_0/pending: I64, _1/delivered: I64, _2/failed: I64) -> Report
+    local _3: Report
   b0:
     _3 = Report(_0/pending, _1/delivered, _2/failed)
     return _3
 
 === graph ===
-reactor Mailbox #0
-    node 0 pending state slot 0 init Mailbox.pending.init#4 <- []
-    node 1 delivered state slot 1 init Mailbox.delivered.init#5 <- []
-    node 2 failed state slot 2 init Mailbox.failed.init#6 <- []
-    node 3 report signal Mailbox.report#7 export <- [pending, delivered, failed]
+reactor Mailbox #0()
+    node 0 pending: I64 state slot 0 init Mailbox.pending.init#4 <- []
+    node 1 delivered: I64 state slot 1 init Mailbox.delivered.init#5 <- []
+    node 2 failed: I64 state slot 2 init Mailbox.failed.init#6 <- []
+    node 3 report: Report signal Mailbox.report#7 export <- [pending, delivered, failed]
     order [pending, delivered, failed, report]
-    input 0 queued capacity 8 overflow reject handler Mailbox.on.queued#2
+    input 0 queued: I64 capacity 8 overflow reject handler Mailbox.on.queued#2
         plan [pending, report]
-    input 1 settled capacity 8 overflow reject handler Mailbox.on.settled#3
+    input 1 settled: Outcome capacity 8 overflow reject handler Mailbox.on.settled#3
         plan [pending, delivered, failed, report]
     exports [report]
 

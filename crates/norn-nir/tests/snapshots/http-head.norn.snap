@@ -1,26 +1,26 @@
 === nir ===
-struct Header #0 (name, value)
-struct Request #1 (method, path, headers, content_length, leftover)
-enum Option #0 (None/0, Some/1)
-enum Result #1 (Ok/1, Err/1)
-enum IoError #2 (NotFound/0, Denied/0, InUse/0, Refused/0, Closed/0, Other/1)
-enum HeadParse #3 (Incomplete/0, Complete/2, Invalid/1)
-enum List #4 (Nil/0, Cons/2)
-enum List<Header> #5 (Nil/0, Cons/2)
+struct Header #0 (name: String, value: String)
+struct Request #1 (method: String, path: String, headers: List<Header>, content_length: I64, leftover: Bytes)
+enum Option #0 (None, Some(?))
+enum Result #1 (Ok(?), Err(?))
+enum IoError #2 (NotFound, Denied, InUse, Refused, Closed, Other(String))
+enum HeadParse #3 (Incomplete, Complete(Request, I64), Invalid(String))
+enum List #4 (Nil, Cons(T, List))
+enum List<Header> #5 (Nil, Cons(Header, List<Header>))
 
-fn verdict #0(_0/data)
-    local _1/req
-    local _2/consumed
-    local _3/rule
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
-    local _12
+fn verdict #0(_0/data: Bytes) -> String
+    local _1/req: Request
+    local _2/consumed: I64
+    local _3/rule: String
+    local _4: String
+    local _5: HeadParse
+    local _6: String
+    local _7: String
+    local _8: String
+    local _9: String
+    local _10: String
+    local _11: String
+    local _12: String
   b0:
     _5 = call http.head#5(_0/data)
     goto b2
@@ -49,121 +49,121 @@ fn verdict #0(_0/data)
     _4 = _11
     goto b1
   b9:
-    _1/req = _5.0
+    _1/req = _5.0@Complete
     goto b10
   b10:
-    _2/consumed = _5.1
+    _2/consumed = _5.1@Complete
     goto b8
   b11:
     _12 = "invalid: " concat _3/rule
     _4 = _12
     goto b1
   b12:
-    _3/rule = _5.0
+    _3/rule = _5.0@Invalid
     goto b11
 
-fn main #1()
-    local _0/whole
-    local _1/early
-    local _2/cut
-    local _3/endless
-    local _4/padding
-    local _5/put
-    local _6/req
-    local _7/consumed
-    local _8/get
-    local _9/req
-    local _10/value
-    local _11/value
-    local _12
-    local _13
-    local _14
-    local _15
-    local _16
-    local _17
-    local _18
-    local _19
-    local _20
-    local _21
-    local _22
-    local _23
-    local _24
-    local _25
-    local _26
-    local _27
-    local _28
-    local _29
-    local _30
-    local _31
-    local _32
-    local _33
-    local _34
-    local _35
-    local _36
-    local _37
-    local _38
-    local _39
-    local _40
-    local _41
-    local _42
-    local _43
-    local _44
-    local _45
-    local _46
-    local _47
-    local _48
-    local _49
-    local _50
-    local _51
-    local _52
-    local _53
-    local _54
-    local _55
-    local _56
-    local _57
-    local _58
-    local _59
-    local _60
-    local _61
-    local _62
-    local _63
-    local _64
-    local _65
-    local _66
-    local _67
-    local _68
-    local _69
-    local _70
-    local _71
-    local _72
-    local _73
-    local _74
-    local _75
-    local _76
-    local _77
-    local _78
-    local _79
-    local _80
-    local _81
-    local _82
-    local _83
-    local _84
-    local _85
-    local _86
-    local _87
-    local _88
-    local _89
-    local _90
-    local _91
-    local _92
-    local _93
-    local _94
-    local _95
-    local _96
-    local _97
-    local _98
-    local _99
-    local _100
+fn main #1() -> ()
+    local _0/whole: Bytes
+    local _1/early: I64
+    local _2/cut: I64
+    local _3/endless: Bytes
+    local _4/padding: Bytes
+    local _5/put: Bytes
+    local _6/req: Request
+    local _7/consumed: I64
+    local _8/get: Bytes
+    local _9/req: Request
+    local _10/value: String
+    local _11/value: String
+    local _12: Bytes
+    local _13: I64
+    local _14: Bool
+    local _15: ()
+    local _16: Bytes
+    local _17: HeadParse
+    local _18: I64
+    local _19: I64
+    local _20: String
+    local _21: String
+    local _22: ()
+    local _23: String
+    local _24: ()
+    local _25: Bytes
+    local _26: String
+    local _27: ()
+    local _28: Bytes
+    local _29: String
+    local _30: ()
+    local _31: Bytes
+    local _32: String
+    local _33: ()
+    local _34: Bytes
+    local _35: String
+    local _36: ()
+    local _37: Bytes
+    local _38: String
+    local _39: ()
+    local _40: Bytes
+    local _41: String
+    local _42: ()
+    local _43: Bytes
+    local _44: String
+    local _45: ()
+    local _46: Bytes
+    local _47: String
+    local _48: ()
+    local _49: Bytes
+    local _50: String
+    local _51: ()
+    local _52: Bytes
+    local _53: Bytes
+    local _54: I64
+    local _55: Bool
+    local _56: Bytes
+    local _57: String
+    local _58: ()
+    local _59: Bytes
+    local _60: Bytes
+    local _61: String
+    local _62: ()
+    local _63: Bytes
+    local _64: ()
+    local _65: HeadParse
+    local _66: ()
+    local _67: I64
+    local _68: Bytes
+    local _69: Bytes
+    local _70: Bool
+    local _71: String
+    local _72: String
+    local _73: String
+    local _74: ()
+    local _75: ()
+    local _76: ()
+    local _77: Bytes
+    local _78: ()
+    local _79: HeadParse
+    local _80: ()
+    local _81: Option<String>
+    local _82: String
+    local _83: ()
+    local _84: ()
+    local _85: ()
+    local _86: Option<String>
+    local _87: String
+    local _88: ()
+    local _89: ()
+    local _90: ()
+    local _91: ()
+    local _92: String
+    local _93: Bool
+    local _94: ()
+    local _95: ()
+    local _96: ()
+    local _97: String
+    local _98: Bool
+    local _99: ()
+    local _100: ()
   b0:
     _12 = builtin bytes("GET / HTTP/1.1\r\nHost: a\r\n\r\n")
     _0/whole = _12
@@ -269,10 +269,10 @@ fn main #1()
     _70 = _68 eq _69
     branch _70 ? b19 : b20
   b17:
-    _6/req = _65.0
+    _6/req = _65.0@Complete
     goto b18
   b18:
-    _7/consumed = _65.1
+    _7/consumed = _65.1@Complete
     goto b16
   b19:
     _71 = call fmt.to_string#2(_6/req.3)
@@ -304,7 +304,7 @@ fn main #1()
     _81 = call http.header#6(_9/req, "HOST")
     goto b30
   b27:
-    _9/req = _79.0
+    _9/req = _79.0@Complete
     goto b28
   b28:
     goto b26
@@ -323,7 +323,7 @@ fn main #1()
     _80 = _83
     goto b29
   b34:
-    _10/value = _81.0
+    _10/value = _81.0@Some
     goto b33
   b35:
     _84 = builtin print("no host")
@@ -346,7 +346,7 @@ fn main #1()
     _85 = _88
     goto b37
   b42:
-    _11/value = _86.0
+    _11/value = _86.0@Some
     goto b41
   b43:
     _89 = builtin print("no x-tag")
@@ -381,22 +381,22 @@ fn main #1()
   b51:
     return _96
 
-fn fmt.to_string #2(_0/n)
-    local _1/rest
-    local _2/out
-    local _3
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
-    local _12
-    local _13
-    local _14
-    local _15
+fn fmt.to_string #2(_0/n: I64) -> String
+    local _1/rest: I64
+    local _2/out: String
+    local _3: I64
+    local _4: Bool
+    local _5: I64
+    local _6: I64
+    local _7: String
+    local _8: Bool
+    local _9: I64
+    local _10: I64
+    local _11: String
+    local _12: String
+    local _13: String
+    local _14: Bool
+    local _15: String
   b0:
     _4 = _0/n lt 0
     branch _4 ? b1 : b2
@@ -437,39 +437,39 @@ fn fmt.to_string #2(_0/n)
   b9:
     return _13
 
-fn fmt.to_int #3(_0/s)
-    local _1/data
-    local _2/len
-    local _3/i
-    local _4/negative
-    local _5/value
-    local _6/b
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
-    local _12
-    local _13
-    local _14
-    local _15
-    local _16
-    local _17
-    local _18
-    local _19
-    local _20
-    local _21
-    local _22
-    local _23
-    local _24
-    local _25
-    local _26
-    local _27
-    local _28
-    local _29
-    local _30
-    local _31
-    local _32
+fn fmt.to_int #3(_0/s: String) -> Option<I64>
+    local _1/data: Bytes
+    local _2/len: I64
+    local _3/i: I64
+    local _4/negative: Bool
+    local _5/value: I64
+    local _6/b: I64
+    local _7: Bytes
+    local _8: I64
+    local _9: ()
+    local _10: Bool
+    local _11: Option<I64>
+    local _12: ()
+    local _13: I64
+    local _14: Bool
+    local _15: ()
+    local _16: Bool
+    local _17: Option<I64>
+    local _18: Bool
+    local _19: I64
+    local _20: ()
+    local _21: Bool
+    local _22: Bool
+    local _23: Bool
+    local _24: Option<I64>
+    local _25: I64
+    local _26: I64
+    local _27: I64
+    local _28: I64
+    local _29: Option<I64>
+    local _30: I64
+    local _31: Option<I64>
+    local _32: Option<I64>
   b0:
     _7 = builtin bytes(_0/s)
     _1/data = _7
@@ -552,18 +552,18 @@ fn fmt.to_int #3(_0/s)
   b20:
     return _29
 
-fn fmt.digit #4(_0/n)
-    local _1
-    local _2
-    local _3
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
+fn fmt.digit #4(_0/n: I64) -> String
+    local _1: String
+    local _2: Bool
+    local _3: Bool
+    local _4: Bool
+    local _5: Bool
+    local _6: Bool
+    local _7: Bool
+    local _8: Bool
+    local _9: Bool
+    local _10: Bool
+    local _11: Bool
   b0:
     goto b2
   b1:
@@ -634,20 +634,20 @@ fn fmt.digit #4(_0/n)
     _1 = "?"
     goto b1
 
-fn http.head #5(_0/data)
-    local _1/len
-    local _2/end
-    local _3
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
-    local _12
-    local _13
+fn http.head #5(_0/data: Bytes) -> HeadParse
+    local _1/len: I64
+    local _2/end: I64
+    local _3: I64
+    local _4: HeadParse
+    local _5: Option<I64>
+    local _6: ()
+    local _7: Bool
+    local _8: HeadParse
+    local _9: HeadParse
+    local _10: ()
+    local _11: Bool
+    local _12: HeadParse
+    local _13: HeadParse
   b0:
     _3 = builtin bytes_len(_0/data)
     _1/len = _3
@@ -680,7 +680,7 @@ fn http.head #5(_0/data)
     _11 = _2/end gt 8192
     branch _11 ? b12 : b13
   b11:
-    _2/end = _5.0
+    _2/end = _5.0@Some
     goto b10
   b12:
     _12 = HeadParse.Invalid("the request head exceeds 8192 bytes")
@@ -693,12 +693,12 @@ fn http.head #5(_0/data)
     _4 = _13
     goto b1
 
-fn http.header #6(_0/req, _1/name)
-    local _2/wanted
-    local _3
-    local _4
-    local _5
-    local _6
+fn http.header #6(_0/req: Request, _1/name: String) -> Option<String>
+    local _2/wanted: Bytes
+    local _3: Bytes
+    local _4: I64
+    local _5: String
+    local _6: Option<String>
   b0:
     _3 = builtin bytes(_1/name)
     _2/wanted = _3
@@ -707,16 +707,16 @@ fn http.header #6(_0/req, _1/name)
     _6 = call http.lookup#25(_0/req.2, _5)
     return _6
 
-fn http.response_head #7(_0/status, _1/content_length)
-    local _2
-    local _3
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
+fn http.response_head #7(_0/status: I64, _1/content_length: I64) -> String
+    local _2: String
+    local _3: String
+    local _4: String
+    local _5: String
+    local _6: String
+    local _7: String
+    local _8: String
+    local _9: String
+    local _10: String
   b0:
     _2 = call fmt.to_string#2(_0/status)
     _3 = "HTTP/1.1 " concat _2
@@ -729,31 +729,31 @@ fn http.response_head #7(_0/status, _1/content_length)
     _10 = _9 concat "\r\nConnection: close\r\n\r\n"
     return _10
 
-task fn http.read_request #8(_0/conn)
-    local _1/gathered
-    local _2/req
-    local _3/consumed
-    local _4/len
-    local _5/stop
-    local _6/rule
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
-    local _12
-    local _13
-    local _14
-    local _15
-    local _16
-    local _17
-    local _18
-    local _19
-    local _20
-    local _21
-    local _22
-    local _23
-    local _24
+task fn http.read_request #8(_0/conn: &Connection) -> Result<Request, IoError>
+    local _1/gathered: Bytes
+    local _2/req: Request
+    local _3/consumed: I64
+    local _4/len: I64
+    local _5/stop: I64
+    local _6/rule: String
+    local _7: Bytes
+    local _8: !
+    local _9: ()
+    local _10: HeadParse
+    local _11: I64
+    local _12: I64
+    local _13: ()
+    local _14: Bool
+    local _15: Bytes
+    local _16: Request
+    local _17: Result<Request, IoError>
+    local _18: IoError
+    local _19: Result<Request, IoError>
+    local _20: Task<Result<Bytes, IoError>>
+    local _21: Result<Bytes, IoError>
+    local _22: Bytes
+    local _23: Result<Request, IoError>
+    local _24: Bytes
   b0:
     _7 = builtin bytes("")
     _1/gathered = _7
@@ -779,10 +779,10 @@ task fn http.read_request #8(_0/conn)
     _14 = _5/stop gt _4/len
     branch _14 ? b10 : b11
   b8:
-    _2/req = _10.0
+    _2/req = _10.0@Complete
     goto b9
   b9:
-    _3/consumed = _10.1
+    _3/consumed = _10.1@Complete
     goto b7
   b10:
     _5/stop = _4/len
@@ -801,7 +801,7 @@ task fn http.read_request #8(_0/conn)
     _19 = Result.Err(_18)
     return _19
   b14:
-    _6/rule = _10.0
+    _6/rule = _10.0@Invalid
     goto b13
   b15:
     _20 = task builtin tcp_read(_0/conn)
@@ -811,27 +811,27 @@ task fn http.read_request #8(_0/conn)
   b17:
     switch tag _21 [0 => b18] else b19
   b18:
-    _22 = _21.0
+    _22 = _21.0@Ok
     _24 = builtin bytes_concat(_1/gathered, _22)
     _1/gathered = _24
     _9 = ()
     goto b2
   b19:
-    _23 = Result.Err(_21.0)
+    _23 = Result.Err(_21.0@Err)
     return _23
 
-task fn http.respond #9(_0/conn, _1/status, _2/body)
-    local _3/payload
-    local _4/outcome
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
-    local _12
-    local _13
+task fn http.respond #9(_0/conn: Connection, _1/status: I64, _2/body: String) -> Result<(), IoError>
+    local _3/payload: Bytes
+    local _4/outcome: Result<(), IoError>
+    local _5: Bytes
+    local _6: I64
+    local _7: String
+    local _8: Bytes
+    local _9: Bytes
+    local _10: Task<Result<(), IoError>>
+    local _11: Result<(), IoError>
+    local _12: Task<()>
+    local _13: ()
   b0:
     _5 = builtin bytes(_2/body)
     _3/payload = _5
@@ -848,23 +848,23 @@ task fn http.respond #9(_0/conn, _1/status, _2/body)
   b2:
     return _4/outcome
 
-task fn http.respond_empty #10(_0/conn, _1/status)
-    local _2
-    local _3
+task fn http.respond_empty #10(_0/conn: Connection, _1/status: I64) -> Result<(), IoError>
+    local _2: Task<Result<(), IoError>>
+    local _3: Result<(), IoError>
   b0:
     _2 = task http.respond#9(_0/conn, _1/status, "")
     await _2 -> _3, resume b1
   b1:
     return _3
 
-task fn http.respond_flow #11(_0/conn, _1/status, _2/body)
-    local _3/outcome
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
+task fn http.respond_flow #11(_0/conn: Connection, _1/status: I64, _2/body: Flow<Bytes>) -> Result<(), IoError>
+    local _3/outcome: Result<(), IoError>
+    local _4: Task<Result<(), IoError>>
+    local _5: Result<(), IoError>
+    local _6: Task<()>
+    local _7: ()
+    local _8: Task<()>
+    local _9: ()
   b0:
     _4 = task http.stream#12(_0/conn, _2/body, _1/status)
     await _4 -> _5, resume b1
@@ -878,28 +878,28 @@ task fn http.respond_flow #11(_0/conn, _1/status, _2/body)
   b3:
     return _3/outcome
 
-task fn http.stream #12(_0/conn, _1/body, _2/status)
-    local _3/chunk
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
-    local _12
-    local _13
-    local _14
-    local _15
-    local _16
-    local _17
-    local _18
-    local _19
-    local _20
-    local _21
-    local _22
-    local _23
+task fn http.stream #12(_0/conn: &Connection, _1/body: &Flow<Bytes>, _2/status: I64) -> Result<(), IoError>
+    local _3/chunk: Bytes
+    local _4: I64
+    local _5: String
+    local _6: Bytes
+    local _7: Task<Result<(), IoError>>
+    local _8: Result<(), IoError>
+    local _9: ()
+    local _10: Result<(), IoError>
+    local _11: !
+    local _12: Task<Result<Bytes, IoError>>
+    local _13: Result<Bytes, IoError>
+    local _14: Bytes
+    local _15: Result<(), IoError>
+    local _16: ()
+    local _17: I64
+    local _18: Bool
+    local _19: Result<(), IoError>
+    local _20: Task<Result<(), IoError>>
+    local _21: Result<(), IoError>
+    local _22: ()
+    local _23: Result<(), IoError>
   b0:
     _4 = builtin flow_len(_1/body)
     _5 = call http.response_head#7(_2/status, _4)
@@ -909,10 +909,10 @@ task fn http.stream #12(_0/conn, _1/body, _2/status)
   b1:
     switch tag _8 [0 => b2] else b3
   b2:
-    _9 = _8.0
+    _9 = _8.0@Ok
     goto b4
   b3:
-    _10 = Result.Err(_8.0)
+    _10 = Result.Err(_8.0@Err)
     return _10
   b4:
     _12 = task builtin flow_next(_1/body)
@@ -920,13 +920,13 @@ task fn http.stream #12(_0/conn, _1/body, _2/status)
   b5:
     switch tag _13 [0 => b6] else b7
   b6:
-    _14 = _13.0
+    _14 = _13.0@Ok
     _3/chunk = _14
     _17 = builtin bytes_len(_3/chunk)
     _18 = _17 eq 0
     branch _18 ? b8 : b9
   b7:
-    _15 = Result.Err(_13.0)
+    _15 = Result.Err(_13.0@Err)
     return _15
   b8:
     _19 = Result.Ok(())
@@ -940,18 +940,18 @@ task fn http.stream #12(_0/conn, _1/body, _2/status)
   b11:
     switch tag _21 [0 => b12] else b13
   b12:
-    _22 = _21.0
+    _22 = _21.0@Ok
     goto b4
   b13:
-    _23 = Result.Err(_21.0)
+    _23 = Result.Err(_21.0@Err)
     return _23
 
-task fn http.save_body #13(_0/conn, _1/req, _2/sink)
-    local _3/outcome
-    local _4
-    local _5
-    local _6
-    local _7
+task fn http.save_body #13(_0/conn: &Connection, _1/req: Request, _2/sink: File) -> Result<I64, IoError>
+    local _3/outcome: Result<I64, IoError>
+    local _4: Task<Result<I64, IoError>>
+    local _5: Result<I64, IoError>
+    local _6: Task<()>
+    local _7: ()
   b0:
     _4 = task http.receive#14(_0/conn, _2/sink, _1/req)
     await _4 -> _5, resume b1
@@ -962,44 +962,44 @@ task fn http.save_body #13(_0/conn, _1/req, _2/sink)
   b2:
     return _3/outcome
 
-task fn http.receive #14(_0/conn, _1/sink, _2/req)
-    local _3/written
-    local _4/chunk
-    local _5/due
-    local _6/take
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
-    local _12
-    local _13
-    local _14
-    local _15
-    local _16
-    local _17
-    local _18
-    local _19
-    local _20
-    local _21
-    local _22
-    local _23
-    local _24
-    local _25
-    local _26
-    local _27
+task fn http.receive #14(_0/conn: &Connection, _1/sink: &File, _2/req: Request) -> Result<I64, IoError>
+    local _3/written: I64
+    local _4/chunk: Bytes
+    local _5/due: I64
+    local _6/take: I64
+    local _7: Task<Result<(), IoError>>
+    local _8: Result<(), IoError>
+    local _9: ()
+    local _10: Result<I64, IoError>
+    local _11: I64
+    local _12: Bool
+    local _13: Task<Result<Bytes, IoError>>
+    local _14: Result<Bytes, IoError>
+    local _15: Bytes
+    local _16: Result<I64, IoError>
+    local _17: I64
+    local _18: I64
+    local _19: ()
+    local _20: Bool
+    local _21: Bytes
+    local _22: Task<Result<(), IoError>>
+    local _23: Result<(), IoError>
+    local _24: ()
+    local _25: Result<I64, IoError>
+    local _26: I64
+    local _27: Result<I64, IoError>
   b0:
     _7 = task builtin file_write(_1/sink, _2/req.4)
     await _7 -> _8, resume b1
   b1:
     switch tag _8 [0 => b2] else b3
   b2:
-    _9 = _8.0
+    _9 = _8.0@Ok
     _11 = builtin bytes_len(_2/req.4)
     _3/written = _11
     goto b4
   b3:
-    _10 = Result.Err(_8.0)
+    _10 = Result.Err(_8.0@Err)
     return _10
   b4:
     _12 = _3/written lt _2/req.3
@@ -1013,7 +1013,7 @@ task fn http.receive #14(_0/conn, _1/sink, _2/req)
   b7:
     switch tag _14 [0 => b8] else b9
   b8:
-    _15 = _14.0
+    _15 = _14.0@Ok
     _4/chunk = _15
     _17 = _2/req.3 sub.i _3/written
     _5/due = _17
@@ -1022,7 +1022,7 @@ task fn http.receive #14(_0/conn, _1/sink, _2/req)
     _20 = _6/take gt _5/due
     branch _20 ? b10 : b11
   b9:
-    _16 = Result.Err(_14.0)
+    _16 = Result.Err(_14.0@Err)
     return _16
   b10:
     _6/take = _5/due
@@ -1038,95 +1038,95 @@ task fn http.receive #14(_0/conn, _1/sink, _2/req)
   b13:
     switch tag _23 [0 => b14] else b15
   b14:
-    _24 = _23.0
+    _24 = _23.0@Ok
     _26 = _3/written add.i _6/take
     _3/written = _26
     goto b4
   b15:
-    _25 = Result.Err(_23.0)
+    _25 = Result.Err(_23.0@Err)
     return _25
 
-fn http.parse #15(_0/data, _1/end)
-    local _2/stop
-    local _3/i
-    local _4/line_end
-    local _5/sp1
-    local _6/sp2
-    local _7/headers
-    local _8/cursor
-    local _9/brk
-    local _10/h
-    local _11/rule
-    local _12/lengths
-    local _13/content_length
-    local _14/value
-    local _15/n
-    local _16/req
-    local _17
-    local _18
-    local _19
-    local _20
-    local _21
-    local _22
-    local _23
-    local _24
-    local _25
-    local _26
-    local _27
-    local _28
-    local _29
-    local _30
-    local _31
-    local _32
-    local _33
-    local _34
-    local _35
-    local _36
-    local _37
-    local _38
-    local _39
-    local _40
-    local _41
-    local _42
-    local _43
-    local _44
-    local _45
-    local _46
-    local _47
-    local _48
-    local _49
-    local _50
-    local _51
-    local _52
-    local _53
-    local _54
-    local _55
-    local _56
-    local _57
-    local _58
-    local _59
-    local _60
-    local _61
-    local _62
-    local _63
-    local _64
-    local _65
-    local _66
-    local _67
-    local _68
-    local _69
-    local _70
-    local _71
-    local _72
-    local _73
-    local _74
-    local _75
-    local _76
-    local _77
-    local _78
-    local _79
-    local _80
-    local _81
+fn http.parse #15(_0/data: Bytes, _1/end: I64) -> HeadParse
+    local _2/stop: I64
+    local _3/i: I64
+    local _4/line_end: I64
+    local _5/sp1: I64
+    local _6/sp2: I64
+    local _7/headers: List<Header>
+    local _8/cursor: I64
+    local _9/brk: I64
+    local _10/h: Header
+    local _11/rule: String
+    local _12/lengths: I64
+    local _13/content_length: I64
+    local _14/value: String
+    local _15/n: I64
+    local _16/req: Request
+    local _17: I64
+    local _18: Bool
+    local _19: ()
+    local _20: I64
+    local _21: Bool
+    local _22: HeadParse
+    local _23: I64
+    local _24: I64
+    local _25: ()
+    local _26: I64
+    local _27: Bool
+    local _28: HeadParse
+    local _29: I64
+    local _30: I64
+    local _31: I64
+    local _32: ()
+    local _33: Bool
+    local _34: Bool
+    local _35: Bool
+    local _36: Bool
+    local _37: HeadParse
+    local _38: ()
+    local _39: I64
+    local _40: Bool
+    local _41: HeadParse
+    local _42: ()
+    local _43: I64
+    local _44: Bytes
+    local _45: Bytes
+    local _46: Bool
+    local _47: HeadParse
+    local _48: List<Header>
+    local _49: Bool
+    local _50: I64
+    local _51: I64
+    local _52: ()
+    local _53: Result<Header, String>
+    local _54: List<Header>
+    local _55: HeadParse
+    local _56: ()
+    local _57: I64
+    local _58: Bool
+    local _59: HeadParse
+    local _60: I64
+    local _61: ()
+    local _62: Bool
+    local _63: HeadParse
+    local _64: ()
+    local _65: Bool
+    local _66: ()
+    local _67: Option<String>
+    local _68: ()
+    local _69: Option<I64>
+    local _70: ()
+    local _71: Bool
+    local _72: HeadParse
+    local _73: HeadParse
+    local _74: Bytes
+    local _75: String
+    local _76: I64
+    local _77: Bytes
+    local _78: String
+    local _79: Bytes
+    local _80: Request
+    local _81: HeadParse
   b0:
     _17 = _1/end sub.i 4
     _2/stop = _17
@@ -1239,13 +1239,13 @@ fn http.parse #15(_0/data, _1/end)
     _52 = ()
     goto b24
   b29:
-    _10/h = _53.0
+    _10/h = _53.0@Ok
     goto b28
   b30:
     _55 = HeadParse.Invalid(_11/rule)
     return _55
   b31:
-    _11/rule = _53.0
+    _11/rule = _53.0@Err
     goto b30
   b32:
     _59 = HeadParse.Invalid("Transfer-Encoding is not supported; bodies are Content-Length")
@@ -1298,7 +1298,7 @@ fn http.parse #15(_0/data, _1/end)
     _69 = call fmt.to_int#3(_14/value)
     goto b48
   b46:
-    _14/value = _67.0
+    _14/value = _67.0@Some
     goto b45
   b47:
     _66 = _68
@@ -1313,7 +1313,7 @@ fn http.parse #15(_0/data, _1/end)
     _71 = _15/n lt 0
     branch _71 ? b53 : b54
   b52:
-    _15/n = _69.0
+    _15/n = _69.0@Some
     goto b51
   b53:
     _72 = HeadParse.Invalid("Content-Length is not a number")
@@ -1336,40 +1336,40 @@ fn http.parse #15(_0/data, _1/end)
   b59:
     goto b58
 
-fn http.header_line #16(_0/data, _1/from, _2/stop)
-    local _3/colon
-    local _4/lo
-    local _5/hi
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
-    local _12
-    local _13
-    local _14
-    local _15
-    local _16
-    local _17
-    local _18
-    local _19
-    local _20
-    local _21
-    local _22
-    local _23
-    local _24
-    local _25
-    local _26
-    local _27
-    local _28
-    local _29
-    local _30
-    local _31
-    local _32
-    local _33
-    local _34
-    local _35
+fn http.header_line #16(_0/data: Bytes, _1/from: I64, _2/stop: I64) -> Result<Header, String>
+    local _3/colon: I64
+    local _4/lo: I64
+    local _5/hi: I64
+    local _6: I64
+    local _7: ()
+    local _8: Bool
+    local _9: Result<Header, String>
+    local _10: ()
+    local _11: Bool
+    local _12: Bool
+    local _13: Bool
+    local _14: I64
+    local _15: Bool
+    local _16: I64
+    local _17: Bool
+    local _18: Result<Header, String>
+    local _19: I64
+    local _20: Bool
+    local _21: Bool
+    local _22: I64
+    local _23: Bool
+    local _24: I64
+    local _25: Bool
+    local _26: Bool
+    local _27: I64
+    local _28: I64
+    local _29: Bool
+    local _30: I64
+    local _31: String
+    local _32: Bytes
+    local _33: String
+    local _34: Header
+    local _35: Result<Header, String>
   b0:
     _6 = call http.find_at#19(_0/data, 58, _1/from, _2/stop)
     _3/colon = _6
@@ -1452,29 +1452,29 @@ fn http.header_line #16(_0/data, _1/from, _2/stop)
     _5/hi = _30
     goto b16
 
-fn http.terminator #17(_0/data, _1/len)
-    local _2/i
-    local _3
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
-    local _12
-    local _13
-    local _14
-    local _15
-    local _16
-    local _17
-    local _18
-    local _19
-    local _20
-    local _21
-    local _22
-    local _23
+fn http.terminator #17(_0/data: Bytes, _1/len: I64) -> Option<I64>
+    local _2/i: I64
+    local _3: I64
+    local _4: Bool
+    local _5: ()
+    local _6: Bool
+    local _7: Bool
+    local _8: Bool
+    local _9: I64
+    local _10: Bool
+    local _11: I64
+    local _12: I64
+    local _13: Bool
+    local _14: I64
+    local _15: I64
+    local _16: Bool
+    local _17: I64
+    local _18: I64
+    local _19: Bool
+    local _20: I64
+    local _21: Option<I64>
+    local _22: I64
+    local _23: Option<I64>
   b0:
     _2/i = 0
     goto b1
@@ -1528,18 +1528,18 @@ fn http.terminator #17(_0/data, _1/len)
     _2/i = _22
     goto b1
 
-fn http.line_break #18(_0/data, _1/from, _2/stop)
-    local _3/i
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
-    local _12
-    local _13
+fn http.line_break #18(_0/data: Bytes, _1/from: I64, _2/stop: I64) -> I64
+    local _3/i: I64
+    local _4: I64
+    local _5: Bool
+    local _6: ()
+    local _7: Bool
+    local _8: I64
+    local _9: Bool
+    local _10: I64
+    local _11: I64
+    local _12: Bool
+    local _13: I64
   b0:
     _3/i = _1/from
     goto b1
@@ -1572,13 +1572,13 @@ fn http.line_break #18(_0/data, _1/from, _2/stop)
     _3/i = _13
     goto b1
 
-fn http.find_at #19(_0/data, _1/wanted, _2/from, _3/stop)
-    local _4/i
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
+fn http.find_at #19(_0/data: Bytes, _1/wanted: I64, _2/from: I64, _3/stop: I64) -> I64
+    local _4/i: I64
+    local _5: Bool
+    local _6: ()
+    local _7: I64
+    local _8: Bool
+    local _9: I64
   b0:
     _4/i = _2/from
     goto b1
@@ -1601,15 +1601,15 @@ fn http.find_at #19(_0/data, _1/wanted, _2/from, _3/stop)
     _4/i = _9
     goto b1
 
-fn http.count_at #20(_0/data, _1/wanted, _2/from, _3/stop)
-    local _4/n
-    local _5/i
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
+fn http.count_at #20(_0/data: Bytes, _1/wanted: I64, _2/from: I64, _3/stop: I64) -> I64
+    local _4/n: I64
+    local _5/i: I64
+    local _6: Bool
+    local _7: ()
+    local _8: I64
+    local _9: Bool
+    local _10: I64
+    local _11: I64
   b0:
     _4/n = 0
     _5/i = _2/from
@@ -1636,16 +1636,16 @@ fn http.count_at #20(_0/data, _1/wanted, _2/from, _3/stop)
     _5/i = _11
     goto b1
 
-fn http.uppercase #21(_0/data, _1/from, _2/stop)
-    local _3/i
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
+fn http.uppercase #21(_0/data: Bytes, _1/from: I64, _2/stop: I64) -> Bool
+    local _3/i: I64
+    local _4: Bool
+    local _5: ()
+    local _6: Bool
+    local _7: I64
+    local _8: Bool
+    local _9: I64
+    local _10: Bool
+    local _11: I64
   b0:
     _3/i = _1/from
     goto b1
@@ -1676,12 +1676,12 @@ fn http.uppercase #21(_0/data, _1/from, _2/stop)
     _3/i = _11
     goto b1
 
-fn http.whitespace #22(_0/b)
-    local _1
-    local _2
-    local _3
-    local _4
-    local _5
+fn http.whitespace #22(_0/b: I64) -> Bool
+    local _1: Bool
+    local _2: Bool
+    local _3: Bool
+    local _4: Bool
+    local _5: Bool
   b0:
     _2 = _0/b eq 32
     _1 = _2
@@ -1700,22 +1700,22 @@ fn http.whitespace #22(_0/b)
     _1 = _3
     goto b2
 
-fn http.lower #23(_0/data, _1/from, _2/stop)
-    local _3/out
-    local _4/i
-    local _5/b
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
-    local _12
-    local _13
-    local _14
-    local _15
-    local _16
-    local _17
+fn http.lower #23(_0/data: Bytes, _1/from: I64, _2/stop: I64) -> String
+    local _3/out: Bytes
+    local _4/i: I64
+    local _5/b: I64
+    local _6: Bytes
+    local _7: Bool
+    local _8: I64
+    local _9: ()
+    local _10: Bool
+    local _11: Bool
+    local _12: Bool
+    local _13: I64
+    local _14: Bytes
+    local _15: Bytes
+    local _16: I64
+    local _17: String
   b0:
     _6 = builtin bytes("")
     _3/out = _6
@@ -1755,15 +1755,15 @@ fn http.lower #23(_0/data, _1/from, _2/stop)
     _4/i = _16
     goto b1
 
-fn http.named #24(_0/headers, _1/name)
-    local _2/h
-    local _3/rest
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
+fn http.named #24(_0/headers: List<Header>, _1/name: String) -> I64
+    local _2/h: Header
+    local _3/rest: List<Header>
+    local _4: I64
+    local _5: I64
+    local _6: Bool
+    local _7: I64
+    local _8: I64
+    local _9: I64
   b0:
     goto b2
   b1:
@@ -1783,10 +1783,10 @@ fn http.named #24(_0/headers, _1/name)
     _6 = _2/h.0 eq _1/name
     branch _6 ? b10 : b11
   b8:
-    _2/h = _0/headers.0
+    _2/h = _0/headers.0@Cons
     goto b9
   b9:
-    _3/rest = _0/headers.1
+    _3/rest = _0/headers.1@Cons
     goto b7
   b10:
     _7 = call http.named#24(_3/rest, _1/name)
@@ -1801,15 +1801,15 @@ fn http.named #24(_0/headers, _1/name)
     _4 = _5
     goto b1
 
-fn http.lookup #25(_0/headers, _1/name)
-    local _2/h
-    local _3/rest
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
+fn http.lookup #25(_0/headers: List<Header>, _1/name: String) -> Option<String>
+    local _2/h: Header
+    local _3/rest: List<Header>
+    local _4: Option<String>
+    local _5: Option<String>
+    local _6: Option<String>
+    local _7: Bool
+    local _8: Option<String>
+    local _9: Option<String>
   b0:
     goto b2
   b1:
@@ -1830,10 +1830,10 @@ fn http.lookup #25(_0/headers, _1/name)
     _7 = _2/h.0 eq _1/name
     branch _7 ? b10 : b11
   b8:
-    _2/h = _0/headers.0
+    _2/h = _0/headers.0@Cons
     goto b9
   b9:
-    _3/rest = _0/headers.1
+    _3/rest = _0/headers.1@Cons
     goto b7
   b10:
     _8 = Option.Some(_2/h.1)
@@ -1847,15 +1847,15 @@ fn http.lookup #25(_0/headers, _1/name)
     _4 = _6
     goto b1
 
-fn http.reason #26(_0/status)
-    local _1
-    local _2
-    local _3
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
+fn http.reason #26(_0/status: I64) -> String
+    local _1: String
+    local _2: Bool
+    local _3: Bool
+    local _4: Bool
+    local _5: Bool
+    local _6: Bool
+    local _7: Bool
+    local _8: Bool
   b0:
     goto b2
   b1:
@@ -1908,53 +1908,53 @@ fn http.reason #26(_0/status)
     _1 = ""
     goto b1
 
-fn list.length #27(_0/items)
+inert fn list.length #27(_0/items: List) -> I64
   b0:
     return ()
 
-fn list.empty #28()
+inert fn list.empty #28() -> List
   b0:
     return ()
 
-fn list.append #29(_0/items, _1/tail)
+inert fn list.append #29(_0/items: List, _1/tail: List) -> List
   b0:
     return ()
 
-fn list.reverse #30(_0/items)
+inert fn list.reverse #30(_0/items: List) -> List
   b0:
     return ()
 
-fn list.walk #31(_0/items, _1/out)
+inert fn list.walk #31(_0/items: List, _1/out: List) -> List
   b0:
     return ()
 
-fn list.take #32(_0/items, _1/count)
+inert fn list.take #32(_0/items: List, _1/count: I64) -> List
   b0:
     return ()
 
-fn list.drop #33(_0/items, _1/count)
+inert fn list.drop #33(_0/items: List, _1/count: I64) -> List
   b0:
     return ()
 
-fn list.nth #34(_0/items, _1/index)
+inert fn list.nth #34(_0/items: List, _1/index: I64) -> Option<T>
   b0:
     return ()
 
-fn list.contains #35(_0/items, _1/wanted)
+inert fn list.contains #35(_0/items: List, _1/wanted: T) -> Bool
   b0:
     return ()
 
-fn list.join #36(_0/items, _1/separator)
+inert fn list.join #36(_0/items: List, _1/separator: String) -> String
   b0:
     return ()
 
-fn fmt.Display.to_string for I64 #37(_0/value)
-    local _1
+fn fmt.Display.to_string for I64 #37(_0/value: I64) -> String
+    local _1: String
   b0:
     _1 = call fmt.to_string#2(_0/value)
     return _1
 
-fn fmt.Display.to_string for T #38(_0)
+inert fn fmt.Display.to_string for T #38(_0: ?) -> String
   b0:
     return ()
 

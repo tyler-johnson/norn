@@ -1,20 +1,20 @@
 === nir ===
-struct Config #0 (port, host)
-enum Option #0 (None/0, Some/1)
-enum Result #1 (Ok/1, Err/1)
-enum IoError #2 (NotFound/0, Denied/0, InUse/0, Refused/0, Closed/0, Other/1)
-enum ConfigError #3 (Missing/1, OutOfRange/2)
+struct Config #0 (port: I64, host: String)
+enum Option #0 (None, Some(?))
+enum Result #1 (Ok(?), Err(?))
+enum IoError #2 (NotFound, Denied, InUse, Refused, Closed, Other(String))
+enum ConfigError #3 (Missing(String), OutOfRange(field: String, value: I64))
 
-fn port_of #0(_0/raw)
-    local _1
-    local _2
-    local _3
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
+fn port_of #0(_0/raw: I64) -> Result<I64, ConfigError>
+    local _1: ()
+    local _2: Bool
+    local _3: ConfigError
+    local _4: Result<I64, ConfigError>
+    local _5: ()
+    local _6: Bool
+    local _7: ConfigError
+    local _8: Result<I64, ConfigError>
+    local _9: Result<I64, ConfigError>
   b0:
     _2 = _0/raw lt 1
     branch _2 ? b1 : b2
@@ -39,12 +39,12 @@ fn port_of #0(_0/raw)
     _9 = Result.Ok(_0/raw)
     return _9
 
-fn host_of #1(_0/raw)
-    local _1
-    local _2
-    local _3
-    local _4
-    local _5
+fn host_of #1(_0/raw: String) -> Result<String, ConfigError>
+    local _1: Result<String, ConfigError>
+    local _2: Bool
+    local _3: ConfigError
+    local _4: Result<String, ConfigError>
+    local _5: Result<String, ConfigError>
   b0:
     _2 = _0/raw eq ""
     branch _2 ? b1 : b2
@@ -60,52 +60,52 @@ fn host_of #1(_0/raw)
   b3:
     return _1
 
-fn load #2(_0/raw_port, _1/raw_host)
-    local _2/port
-    local _3/host
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
+fn load #2(_0/raw_port: I64, _1/raw_host: String) -> Result<Config, ConfigError>
+    local _2/port: I64
+    local _3/host: String
+    local _4: Result<I64, ConfigError>
+    local _5: I64
+    local _6: Result<Config, ConfigError>
+    local _7: Result<String, ConfigError>
+    local _8: String
+    local _9: Result<Config, ConfigError>
+    local _10: Config
+    local _11: Result<Config, ConfigError>
   b0:
     _4 = call port_of#0(_0/raw_port)
     switch tag _4 [0 => b1] else b2
   b1:
-    _5 = _4.0
+    _5 = _4.0@Ok
     _2/port = _5
     _7 = call host_of#1(_1/raw_host)
     switch tag _7 [0 => b3] else b4
   b2:
-    _6 = Result.Err(_4.0)
+    _6 = Result.Err(_4.0@Err)
     return _6
   b3:
-    _8 = _7.0
+    _8 = _7.0@Ok
     _3/host = _8
     _10 = Config(_2/port, _3/host)
     _11 = Result.Ok(_10)
     return _11
   b4:
-    _9 = Result.Err(_7.0)
+    _9 = Result.Err(_7.0@Err)
     return _9
 
-fn report #3(_0/result)
-    local _1/config
-    local _2/field
-    local _3/field
-    local _4/value
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
-    local _12
-    local _13
+fn report #3(_0/result: Result<Config, ConfigError>) -> String
+    local _1/config: Config
+    local _2/field: String
+    local _3/field: String
+    local _4/value: I64
+    local _5: String
+    local _6: String
+    local _7: String
+    local _8: String
+    local _9: String
+    local _10: String
+    local _11: String
+    local _12: String
+    local _13: String
   b0:
     goto b2
   b1:
@@ -126,16 +126,16 @@ fn report #3(_0/result)
     _5 = _9
     goto b1
   b7:
-    _1/config = _0/result.0
+    _1/config = _0/result.0@Ok
     goto b6
   b8:
     _10 = "missing " concat _2/field
     _5 = _10
     goto b1
   b9:
-    switch tag _0/result.0 [0 => b10] else b4
+    switch tag _0/result.0@Err [0 => b10] else b4
   b10:
-    _2/field = _0/result.0.0
+    _2/field = _0/result.0@Err.0@Missing
     goto b8
   b11:
     _11 = _3/field concat " is out of range: "
@@ -144,26 +144,26 @@ fn report #3(_0/result)
     _5 = _13
     goto b1
   b12:
-    switch tag _0/result.0 [1 => b13] else b5
+    switch tag _0/result.0@Err [1 => b13] else b5
   b13:
-    _3/field = _0/result.0.0
+    _3/field = _0/result.0@Err.0@OutOfRange
     goto b14
   b14:
-    _4/value = _0/result.0.1
+    _4/value = _0/result.0@Err.1@OutOfRange
     goto b11
 
-fn first_word #4(_0/text)
-    local _1/index
-    local _2
-    local _3
-    local _4
-    local _5
-    local _6
+fn first_word #4(_0/text: String) -> Option<String>
+    local _1/index: I64
+    local _2: Option<I64>
+    local _3: I64
+    local _4: Option<String>
+    local _5: String
+    local _6: Option<String>
   b0:
     _2 = call index_of_space#5(_0/text)
     switch tag _2 [1 => b1] else b2
   b1:
-    _3 = _2.0
+    _3 = _2.0@Some
     _1/index = _3
     _5 = call prefix#6(_0/text, _1/index)
     _6 = Option.Some(_5)
@@ -172,11 +172,11 @@ fn first_word #4(_0/text)
     _4 = Option.None()
     return _4
 
-fn index_of_space #5(_0/text)
-    local _1
-    local _2
-    local _3
-    local _4
+fn index_of_space #5(_0/text: String) -> Option<I64>
+    local _1: Option<I64>
+    local _2: Bool
+    local _3: Option<I64>
+    local _4: Option<I64>
   b0:
     _2 = _0/text eq "hello world"
     branch _2 ? b1 : b2
@@ -191,11 +191,11 @@ fn index_of_space #5(_0/text)
   b3:
     return _1
 
-fn prefix #6(_0/text, _1/upto)
-    local _2
-    local _3
-    local _4
-    local _5
+fn prefix #6(_0/text: String, _1/upto: I64) -> String
+    local _2: String
+    local _3: Bool
+    local _4: Bool
+    local _5: Bool
   b0:
     _4 = _0/text eq "hello world"
     _3 = _4
@@ -215,10 +215,10 @@ fn prefix #6(_0/text, _1/upto)
   b5:
     return _2
 
-fn describe_word #7(_0/word)
-    local _1/word
-    local _2
-    local _3
+fn describe_word #7(_0/word: Option<String>) -> String
+    local _1/word: String
+    local _2: String
+    local _3: String
   b0:
     goto b2
   b1:
@@ -234,7 +234,7 @@ fn describe_word #7(_0/word)
     _2 = _3
     goto b1
   b6:
-    _1/word = _0/word.0
+    _1/word = _0/word.0@Some
     goto b5
   b7:
     _2 = "no space found"
@@ -242,31 +242,31 @@ fn describe_word #7(_0/word)
   b8:
     goto b7
 
-fn main #8()
-    local _0/config
-    local _1
-    local _2
-    local _3
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
-    local _12
-    local _13
-    local _14
-    local _15
-    local _16
-    local _17
-    local _18
-    local _19
-    local _20
-    local _21
-    local _22
-    local _23
+fn main #8() -> Result<(), ConfigError>
+    local _0/config: Config
+    local _1: Result<Config, ConfigError>
+    local _2: String
+    local _3: ()
+    local _4: Result<Config, ConfigError>
+    local _5: String
+    local _6: ()
+    local _7: Result<Config, ConfigError>
+    local _8: String
+    local _9: ()
+    local _10: Option<String>
+    local _11: String
+    local _12: ()
+    local _13: Option<String>
+    local _14: String
+    local _15: ()
+    local _16: ConfigError
+    local _17: ()
+    local _18: Result<Config, ConfigError>
+    local _19: Config
+    local _20: Result<(), ConfigError>
+    local _21: String
+    local _22: ()
+    local _23: Result<(), ConfigError>
   b0:
     _1 = call load#2(8080, "localhost")
     _2 = call report#3(_1)
@@ -288,32 +288,32 @@ fn main #8()
     _18 = call load#2(443, "example.com")
     switch tag _18 [0 => b1] else b2
   b1:
-    _19 = _18.0
+    _19 = _18.0@Ok
     _0/config = _19
     _21 = "checked " concat _0/config.1
     _22 = builtin print(_21)
     _23 = Result.Ok(())
     return _23
   b2:
-    _20 = Result.Err(_18.0)
+    _20 = Result.Err(_18.0@Err)
     return _20
 
-fn fmt.to_string #9(_0/n)
-    local _1/rest
-    local _2/out
-    local _3
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
-    local _12
-    local _13
-    local _14
-    local _15
+fn fmt.to_string #9(_0/n: I64) -> String
+    local _1/rest: I64
+    local _2/out: String
+    local _3: I64
+    local _4: Bool
+    local _5: I64
+    local _6: I64
+    local _7: String
+    local _8: Bool
+    local _9: I64
+    local _10: I64
+    local _11: String
+    local _12: String
+    local _13: String
+    local _14: Bool
+    local _15: String
   b0:
     _4 = _0/n lt 0
     branch _4 ? b1 : b2
@@ -354,39 +354,39 @@ fn fmt.to_string #9(_0/n)
   b9:
     return _13
 
-fn fmt.to_int #10(_0/s)
-    local _1/data
-    local _2/len
-    local _3/i
-    local _4/negative
-    local _5/value
-    local _6/b
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
-    local _12
-    local _13
-    local _14
-    local _15
-    local _16
-    local _17
-    local _18
-    local _19
-    local _20
-    local _21
-    local _22
-    local _23
-    local _24
-    local _25
-    local _26
-    local _27
-    local _28
-    local _29
-    local _30
-    local _31
-    local _32
+fn fmt.to_int #10(_0/s: String) -> Option<I64>
+    local _1/data: Bytes
+    local _2/len: I64
+    local _3/i: I64
+    local _4/negative: Bool
+    local _5/value: I64
+    local _6/b: I64
+    local _7: Bytes
+    local _8: I64
+    local _9: ()
+    local _10: Bool
+    local _11: Option<I64>
+    local _12: ()
+    local _13: I64
+    local _14: Bool
+    local _15: ()
+    local _16: Bool
+    local _17: Option<I64>
+    local _18: Bool
+    local _19: I64
+    local _20: ()
+    local _21: Bool
+    local _22: Bool
+    local _23: Bool
+    local _24: Option<I64>
+    local _25: I64
+    local _26: I64
+    local _27: I64
+    local _28: I64
+    local _29: Option<I64>
+    local _30: I64
+    local _31: Option<I64>
+    local _32: Option<I64>
   b0:
     _7 = builtin bytes(_0/s)
     _1/data = _7
@@ -469,18 +469,18 @@ fn fmt.to_int #10(_0/s)
   b20:
     return _29
 
-fn fmt.digit #11(_0/n)
-    local _1
-    local _2
-    local _3
-    local _4
-    local _5
-    local _6
-    local _7
-    local _8
-    local _9
-    local _10
-    local _11
+fn fmt.digit #11(_0/n: I64) -> String
+    local _1: String
+    local _2: Bool
+    local _3: Bool
+    local _4: Bool
+    local _5: Bool
+    local _6: Bool
+    local _7: Bool
+    local _8: Bool
+    local _9: Bool
+    local _10: Bool
+    local _11: Bool
   b0:
     goto b2
   b1:
@@ -551,8 +551,8 @@ fn fmt.digit #11(_0/n)
     _1 = "?"
     goto b1
 
-fn fmt.Display.to_string for I64 #12(_0/value)
-    local _1
+fn fmt.Display.to_string for I64 #12(_0/value: I64) -> String
+    local _1: String
   b0:
     _1 = call fmt.to_string#9(_0/value)
     return _1
