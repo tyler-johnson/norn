@@ -1,10 +1,10 @@
-//! `pipe_to` as a native binary, held byte for byte against the interpreter.
+//! `std/flow`'s `pipe` as a native binary, held byte for byte against the interpreter.
 //!
-//! The twin of `crates/norn-nir/tests/pipe.rs`: the same inline program — absolute paths formatted
-//! in, because three run contexts share the source and would not share a working directory — run
-//! under both engines with `--trace --virtual-clock`, and stdout, stderr, and the exit code must
-//! match exactly. File I/O is deterministic under the virtual clock, so unlike the socket tests
-//! this one gets the full differential treatment, `pipe` trace lines included.
+//! The twin of `crates/norn-nir/tests/pipe.rs`: the same program — absolute paths formatted in
+//! and the source written to the tmp directory, because three run contexts share it and would
+//! not share a working directory — run under both engines with `--trace --virtual-clock`, and
+//! stdout, stderr, and the exit code must match exactly. File I/O is deterministic under the
+//! virtual clock, so unlike the socket tests this one gets the full differential treatment.
 
 mod common;
 
@@ -23,12 +23,14 @@ fn the_native_pipe_matches_the_interpreter() {
     std::fs::write(&src, &fixture).unwrap();
 
     let source = format!(
-        r#"task fn main() -> Result<(), IoError>
+        r#"import {{ pipe }} from "std/flow"
+
+task fn main() -> Result<(), IoError>
     uses {{ fs.read, fs.write }}
 {{
     let flow = await flow_of_file("{}")?
     let sink = await file_create("{}")?
-    let moved = await pipe_to(flow, sink)?
+    let moved = await pipe(flow, sink)?
     print(moved)
     Ok(())
 }}
@@ -37,7 +39,9 @@ fn the_native_pipe_matches_the_interpreter() {
         dst.display()
     );
 
-    let (nir, main) = common::build_source("pipe.norn", &source);
+    let entry = dir.join("pipe.norn");
+    std::fs::write(&entry, &source).unwrap();
+    let (nir, main) = common::build(&entry);
     let mut out = Captured::default();
     let outcome = execute(&nir, main, &mut out, Config::deterministic());
     if let Err(trap) = &outcome.value {

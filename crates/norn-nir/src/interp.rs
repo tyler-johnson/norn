@@ -671,14 +671,6 @@ impl Interpreter<'_> {
                 }
                 Poll::Pending => Poll::Pending,
             },
-            Builtin::PipeTo => {
-                let flow = resource(name, &args[0])?;
-                let sink = resource(name, &args[1])?;
-                match cx.pipe(flow, sink) {
-                    Poll::Ready(outcome) => Poll::Ready(fallible(outcome.map(Value::Int))),
-                    Poll::Pending => Poll::Pending,
-                }
-            }
             Builtin::HttpReadRequest => match cx.http_read_request(resource(name, &args[0])?) {
                 Poll::Ready(outcome) => Poll::Ready(fallible(
                     outcome.map(|id| Value::Resource(ResourceKind::Request, id)),

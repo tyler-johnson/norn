@@ -1,14 +1,16 @@
-//! `pipe_to` under the interpreter: a file flows into a file, chunk by chunk, on the trace.
+//! `std/flow`'s `pipe` under the interpreter: a file flows into a file, and the trace closes
+//! what it opens.
 //!
-//! The program is inline because it needs absolute paths — the same source runs here, under the
-//! codegen twin, and inside `norn build`'s cache, and a cwd-relative fixture would mean three
-//! different working directories to agree on. The fixture is 10,000 bytes so the transfer takes
-//! three chunks (4096 + 4096 + 1808), which is what makes "at most one chunk in flight" visible:
-//! three `pipe` lines, not one.
+//! The program is written into the test's tmp directory because it needs absolute paths — the
+//! same source runs here, under the codegen twin, and inside `norn build`'s cache, and a
+//! cwd-relative fixture would mean three different working directories to agree on. The fixture
+//! is 10,000 bytes, so the transfer takes three `flow_next` chunks (4096 + 4096 + 1808) — but
+//! that shape is now internal to the std loop rather than traced: the per-chunk `pipe` lines
+//! died with the `pipe_to` builtin, and what the trace asserts is the eager closes.
 //!
 //! Mid-pipe cancellation is not testable here: a file-backed flow is always ready, so the whole
 //! transfer completes in a single resumption and there is no suspension point to cancel at. That
-//! claim is exercised by the HTTP file-server tests, where a request body parks the pipe.
+//! claim is exercised by the HTTP file-server tests, where a request body parks the transfer.
 
 mod common;
 
@@ -17,7 +19,7 @@ use std::path::{Path, PathBuf};
 use norn_nir::{Captured, Config, execute};
 
 #[test]
-fn a_file_flows_into_a_file_in_chunks() {
+fn a_file_flows_into_a_file() {
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("pipe-interp");
     std::fs::create_dir_all(&dir).unwrap();
     let src = dir.join("source.bin");
@@ -25,8 +27,9 @@ fn a_file_flows_into_a_file_in_chunks() {
     let fixture: Vec<u8> = (0..10_000u32).map(|i| (i % 251) as u8).collect();
     std::fs::write(&src, &fixture).unwrap();
 
-    let source = program(&src, &dst);
-    let (nir, main) = common::build_source("pipe.norn", &source);
+    let entry = dir.join("pipe.norn");
+    std::fs::write(&entry, program(&src, &dst)).unwrap();
+    let (nir, main) = common::build(&entry);
     let mut out = Captured::default();
     let outcome = execute(&nir, main, &mut out, Config::deterministic());
     if let Err(trap) = outcome.value {
@@ -45,16 +48,6 @@ fn a_file_flows_into_a_file_in_chunks() {
     let closed = resources(trace, "close");
     assert_eq!(opened.len(), 2, "expected a flow and a file:\n{trace}");
     assert_eq!(opened, closed, "a resource was left open:\n{trace}");
-    let chunks: Vec<&str> = trace
-        .lines()
-        .filter(|line| line.split_whitespace().nth(2) == Some("pipe"))
-        .map(|line| line.split_whitespace().last().unwrap())
-        .collect();
-    assert_eq!(
-        chunks,
-        vec!["4096", "4096", "1808"],
-        "one trace line per delivered chunk:\n{trace}"
-    );
 
     // The paths never reach the output or the trace, so both are stable enough to pin.
     let mut snapshot = String::from("=== output ===\n");
@@ -66,16 +59,18 @@ fn a_file_flows_into_a_file_in_chunks() {
     check_snapshot("pipe", &snapshot);
 }
 
-/// The done-when program: open a flow over a file, create a sink, and let the runtime move the
-/// bytes. Both handles are consumed by `pipe_to` — naming either afterwards would be a move error.
+/// The done-when program: open a flow over a file, create a sink, and let `std/flow` move the
+/// bytes. Both handles are consumed by `pipe` — naming either afterwards would be a move error.
 fn program(src: &Path, dst: &Path) -> String {
     format!(
-        r#"task fn main() -> Result<(), IoError>
+        r#"import {{ pipe }} from "std/flow"
+
+task fn main() -> Result<(), IoError>
     uses {{ fs.read, fs.write }}
 {{
     let flow = await flow_of_file("{}")?
     let sink = await file_create("{}")?
-    let moved = await pipe_to(flow, sink)?
+    let moved = await pipe(flow, sink)?
     print(moved)
     Ok(())
 }}

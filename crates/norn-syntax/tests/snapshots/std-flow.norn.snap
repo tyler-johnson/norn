@@ -1,0 +1,51 @@
+=== ast ===
+(module
+  (fn pipe export task
+    (params (param flow (ty Flow Bytes)) (param sink File))
+    (ret (ty Result I64 IoError))
+    (block
+      (let outcome
+        (await
+          (call
+            (path transfer)
+            (arg (unary & (path flow)))
+            (arg (unary & (path sink))))))
+      (await (call (path flow_close) (arg (path flow))))
+      (await (call (path file_close) (arg (path sink))))
+      (path outcome)))
+  (fn transfer task
+    (params (param flow (ref (ty Flow Bytes))) (param sink (ref File)))
+    (ret (ty Result I64 IoError))
+    (block
+      (let moved mut (int 0))
+      (loop
+        (block
+          (let chunk (try (await (call (path flow_next) (arg (path flow))))))
+          (if
+            (binary == (call (path bytes_len) (arg (path chunk))) (int 0))
+            (block (return (call (path Ok) (arg (path moved))))))
+          (try
+            (await (call (path file_write) (arg (path sink)) (arg (path chunk)))))
+          (assign
+            (path moved)
+            (binary + (path moved) (call (path bytes_len) (arg (path chunk))))))))))
+
+=== canonical ===
+export task fn pipe(flow: Flow<Bytes>, sink: File) -> Result<I64, IoError> {
+    let outcome = await transfer(&flow, &sink)
+    await flow_close(flow)
+    await file_close(sink)
+    outcome
+}
+
+task fn transfer(flow: &Flow<Bytes>, sink: &File) -> Result<I64, IoError> {
+    let mut moved = 0
+    loop {
+        let chunk = await flow_next(flow)?
+        if bytes_len(chunk) == 0 {
+            return Ok(moved)
+        }
+        await file_write(sink, chunk)?
+        moved = moved + bytes_len(chunk)
+    }
+}

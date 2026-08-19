@@ -1,10 +1,10 @@
 // The M6 done-when: an HTTP file server, streaming in both directions.
 //
-// A PUT streams the request body to disk through `pipe_to` — the body is a `Flow<Bytes>`, the
-// file is the sink, and the runtime moves at most one chunk at a time, so a large upload never
-// sits in memory. A GET answers with a file as the response body, the same machinery pointed the
-// other way. Dispatch is a `match` on the method, because v0 has free functions and string
-// patterns and does not need more than that.
+// A PUT streams the request body to disk through std/flow's `pipe` — the body is a `Flow<Bytes>`,
+// the file is the sink, and the transfer moves at most one chunk at a time, so a large upload
+// never sits in memory. A GET answers with a file as the response body, the runtime's machinery
+// pointed the other way. Dispatch is a `match` on the method, because v0 has free functions and
+// string patterns and does not need more than that.
 //
 // `?` in `upload` is the error story: if the file cannot be created, the function unwinds, the
 // handler's scope closes, and the request socket is closed by the scope rather than by code —
@@ -14,13 +14,14 @@
 // and a request that tries `..` traversal is answered 400 before the method is dispatched.
 
 import { to_string } from "std/fmt"
+import { pipe } from "std/flow"
 
 task fn upload(req: Request) -> Result<(), IoError>
     uses { net.io, fs.write }
 {
     let sink = await file_create("." + request_path(&req))?
     let body = request_body(&req)
-    let moved = await pipe_to(body, sink)?
+    let moved = await pipe(body, sink)?
     await http_respond_empty(req, 204)
 }
 

@@ -73,8 +73,8 @@ pub enum Resource {
     /// Connection and parsed a head on it. Responding consumes it back.
     Request,
     /// A finite stream of bytes with demand-driven transfer. Its type is spelled `Flow<Bytes>` —
-    /// the only element type in v0 — and the only things that consume one are `pipe_to` and
-    /// `http_respond_flow`.
+    /// the only element type in v0. Consumed from Norn through the flow intrinsics — `std/flow`'s
+    /// `pipe` is the canonical consumer — or by `http_respond_flow`.
     Flow,
 }
 
@@ -724,7 +724,6 @@ pub enum Builtin {
     FlowNext,
     FlowLen,
     FlowClose,
-    PipeTo,
     HttpReadRequest,
     RequestMethod,
     RequestPath,
@@ -764,7 +763,6 @@ impl Builtin {
         Builtin::FlowNext,
         Builtin::FlowLen,
         Builtin::FlowClose,
-        Builtin::PipeTo,
         Builtin::HttpReadRequest,
         Builtin::RequestMethod,
         Builtin::RequestPath,
@@ -800,7 +798,6 @@ impl Builtin {
             "flow_next" => Some(Builtin::FlowNext),
             "flow_len" => Some(Builtin::FlowLen),
             "flow_close" => Some(Builtin::FlowClose),
-            "pipe_to" => Some(Builtin::PipeTo),
             "http_read_request" => Some(Builtin::HttpReadRequest),
             "request_method" => Some(Builtin::RequestMethod),
             "request_path" => Some(Builtin::RequestPath),
@@ -839,7 +836,6 @@ impl Builtin {
             Builtin::FlowNext => "flow_next",
             Builtin::FlowLen => "flow_len",
             Builtin::FlowClose => "flow_close",
-            Builtin::PipeTo => "pipe_to",
             Builtin::HttpReadRequest => "http_read_request",
             Builtin::RequestMethod => "request_method",
             Builtin::RequestPath => "request_path",
@@ -886,7 +882,6 @@ impl Builtin {
             | Builtin::FlowClose
             | Builtin::Send
             | Builtin::Latest
-            | Builtin::PipeTo
             | Builtin::HttpReadRequest
             // `request_body` computes nothing, but it opens a traced resource, and a turn must
             // not be able to make the resource table move.
@@ -923,7 +918,6 @@ impl Builtin {
             | Builtin::FlowNext
             | Builtin::FlowLen
             | Builtin::FlowClose
-            | Builtin::PipeTo
             | Builtin::RequestMethod
             | Builtin::RequestPath
             | Builtin::RequestHeader
@@ -989,7 +983,6 @@ impl Builtin {
             Builtin::FlowNext => (vec![borrowed(flow())], task(fallible(Ty::Bytes))),
             Builtin::FlowLen => (vec![borrowed(flow())], Ty::I64),
             Builtin::FlowClose => (vec![flow()], task(Ty::Unit)),
-            Builtin::PipeTo => (vec![flow(), file()], task(fallible(Ty::I64))),
             Builtin::HttpReadRequest => (vec![connection()], task(fallible(request()))),
             Builtin::RequestMethod => (vec![borrowed(request())], Ty::Str),
             Builtin::RequestPath => (vec![borrowed(request())], Ty::Str),
