@@ -520,7 +520,7 @@ Ordered roughly by when it becomes worth doing, not by importance:
     `continue`, expressions all, with turns barred from reaching them so the termination theorem
     narrowed instead of dying — and a few byte primitives — met: `data[i]` indexing (out of range
     traps, like `bytes_slice`) and `byte` with `bytes_concat` for building. Every proto-std gate
-    is met and the lane is live: `std/fmt` (`digits`, `parse_int`) is the first embedded module,
+    is met and the lane is live: `std/fmt` (`to_string`, `to_int`) is the first embedded module,
     one implementation executed by both engines with the differential oracle covering it for
     free, and the six hand-written `digits` copies the examples grew are gone. `std/time` joined
     it: `wait(ms)` is `sleep` wrapped in a task fn — the named clock effect `after` requires,
@@ -529,7 +529,18 @@ Ordered roughly by when it becomes worth doing, not by importance:
     (`delay` stays reserved for the FRP signal operator, which is why the name is `wait`).
     Recorded absences: `timeout` waits for a race/select primitive that does not exist — scopes
     join everything — until a real consumer, likely the std/http client, drives it; `now()` is
-    deliberately absent, absolute-time reads breaking virtual-clock determinism. The ordering
+    deliberately absent, absolute-time reads breaking virtual-clock determinism.
+    Std names follow a format — a guideline, not a strict rule. Conversions are `to_<target>`
+    (`to_string`, `to_int`; `digits` and `parse_int` renamed to fit), guessable on the first try
+    and reading unchanged as the future method (`n.to_string()`). The source type lives in the
+    module today and the receiver tomorrow, never in the function name — `i64_to_string` would
+    re-import the builtin-table disease std exists to cure, and the same name in different std
+    modules is the intended pattern, unified under one trait when item 7 lands rather than by
+    ad-hoc overloading, which is deliberately not built. Quantity constructors stay bare nouns
+    (`seconds(2)` reads as "2 seconds", later the literal-like `2.seconds`); effects stay bare
+    imperative verbs (`wait`, `send`), which is what makes a reactor's `after` list read as a
+    list of verbs; fallibility lives in the type, never the name (`to_int(s) -> Option<I64>`, no
+    `try_`), with `_unchecked` reserved for the intrinsic layer underneath. The ordering
     ahead: `bytes_text` dissolves next — the first builtin deleted from the table and
     reimplemented in Norn, establishing the delete-and-import migration, atomic by construction
     since builtins are reserved names — then `std/http` ports `norn-rt`'s pure `parse_head` and
