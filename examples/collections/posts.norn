@@ -1,0 +1,317 @@
+// The hand-written expansion of a collection derive that does not exist yet.
+//
+// The platform sketch: a dev declares a collection and its indexes, and a derive generates the
+// reactors that store it, index it, and push changes to subscribers —
+//
+//     @derive(Collection)
+//     @index("by_author", key: (author, desc(created)))
+//     struct Post { ... }
+//
+// This file is that expansion written by hand, per the derive-design method: make the generated
+// code something you would willingly write, then mechanize it. The dev's contribution is the four
+// lines of `struct Post`; everything else here is what `@derive(Collection)` would emit.
+//
+// The shape is forced, and the forcing is the finding. A turn may neither loop nor recurse — that
+// is what makes it provably terminating — so no turn can walk a table. A partition therefore
+// commits O(1) per turn: cons a delta onto a journal, bump a sequence number, request delivery.
+// Materialization happens in task land, where recursion is legal, and re-enters as a later input.
+// The collection is event-sourced by construction; the turn log is the WAL. When std grows a
+// `Table` value with bounded per-operation primitives (insert, remove, range), same-partition
+// indexes can become same-turn atomic — but the cross-partition machinery demonstrated here, delta
+// delivery to an index shard and push notification to a subscriber, stays exactly as written.
+//
+// Cast, and what each member stands in for at platform scale:
+//   PostPartition — one shard of the collection's write authority; `journal` stands in for the
+//                   durable row table, and `latest(history)` for the stale-tolerant read.
+//   ByAuthor     — one index shard. Real generated code shards this family by the index's equality
+//                   prefix (one shard per author) and numbers deltas so replay is idempotent; one
+//                   reactor and in-order delivery stand in for both here.
+//   Subscriber   — the client end of a watch: at scale, a session reactor fanning deltas out over
+//                   a websocket. `.watch()` is a send away from what `changed` receives.
+//   by_author / take / find — the generated query surface. `Post.by_author(x).first(20)` exists
+//                   because the index was declared; the unindexed query is a method that was never
+//                   generated, not a runtime error.
+
+import { to_string } from "std/fmt"
+
+// ── What the dev writes ─────────────────────────────────────────────────────
+
+struct Post {
+    id: I64
+    author: String
+    created: I64
+    body: String
+}
+
+// ── Generated vocabulary: deltas, and cons-lists standing in for Table ──────
+
+enum Delta {
+    Put(Post)
+    Erase(I64)
+}
+
+// Monomorphized by hand because v0 has no generics: one list of index entries, one list of
+// journalled deltas. The derive would emit exactly this pair per collection.
+enum Rows {
+    Nil
+    Cons(Post, Rows)
+}
+
+enum Deltas {
+    Nil
+    Cons(Delta, Deltas)
+}
+
+struct Indexed {
+    entries: Rows
+    count: I64
+}
+
+// ── The partition: write authority, O(1) per turn ───────────────────────────
+
+reactor PostPartition(index: ByAuthor) {
+    state journal: Deltas = Deltas.Nil
+    state seq: I64 = 0
+    state acked: I64 = 0
+
+    on put(post: Post) [capacity: 64, overflow: wait] {
+        journal = Deltas.Cons(Delta.Put(post), journal)
+        seq = seq + 1
+        after deliver(Delta.Put(post), index) -> delivered
+    }
+
+    on erase(id: I64) [capacity: 64, overflow: wait] {
+        journal = Deltas.Cons(Delta.Erase(id), journal)
+        seq = seq + 1
+        after deliver(Delta.Erase(id), index) -> delivered
+    }
+
+    on delivered() [capacity: 64, overflow: wait] {
+        acked = acked + 1
+    }
+
+    // Pressure is a value: how many deltas have committed here but not yet reached the index.
+    export signal backlog = seq - acked
+    export signal history = journal
+}
+
+task fn deliver(delta: Delta, index: ByAuthor) -> () {
+    await send(index.arrived, delta)
+}
+
+// ── The index shard: single-flight materialization, coherent snapshots ──────
+//
+// The turn cannot sort, so it queues. At most one `apply` task is in flight; deltas arriving
+// meanwhile cons onto `queued` and ride the next batch. `entries` and `count` commit in the same
+// turn, so a watcher can never observe a list and a count that disagree — the aggregate is
+// glitch-free with the data it summarizes, which is the thing hand-maintained counters get wrong.
+
+reactor ByAuthor(subscriber: Subscriber) {
+    state rows: Rows = Rows.Nil
+    state total: I64 = 0
+    state revision: I64 = 0
+    state queued: Deltas = Deltas.Nil
+    state busy: Bool = false
+
+    on arrived(delta: Delta) [capacity: 64, overflow: wait] {
+        if busy {
+            queued = Deltas.Cons(delta, queued)
+        } else {
+            busy = true
+            after apply(rows, Deltas.Cons(delta, Deltas.Nil)) -> applied
+        }
+    }
+
+    on applied(result: Indexed) [capacity: 8, overflow: wait] {
+        rows = result.entries
+        total = result.count
+        revision = revision + 1
+        after notify(revision, subscriber) -> notified
+        match queued {
+            Deltas.Cons(_, _) => {
+                after apply(rows, queued) -> applied
+                queued = Deltas.Nil
+            }
+            Deltas.Nil => {
+                busy = false
+            }
+        }
+    }
+
+    on notified() [capacity: 8, overflow: wait] {}
+
+    export signal entries = rows
+    export signal count = total
+    export signal version = revision
+}
+
+// Fold the batch oldest-first onto the snapshot, then measure it. Recursion lives here, in task
+// land, where it is legal — the reactor above only ever does O(1) work per turn.
+task fn apply(entries: Rows, batch: Deltas) -> Indexed {
+    let merged = apply_all(entries, batch)
+    Indexed(entries: merged, count: size(merged))
+}
+
+fn apply_all(entries: Rows, batch: Deltas) -> Rows {
+    match batch {
+        Deltas.Nil => entries
+        Deltas.Cons(delta, rest) => apply_one(apply_all(entries, rest), delta)
+    }
+}
+
+fn apply_one(entries: Rows, delta: Delta) -> Rows {
+    match delta {
+        Delta.Put(post) => insert(post, remove(post.id, entries))
+        Delta.Erase(id) => remove(id, entries)
+    }
+}
+
+// Ordered insert on the declared key: (author ascending, created descending).
+fn insert(post: Post, entries: Rows) -> Rows {
+    match entries {
+        Rows.Nil => Rows.Cons(post, Rows.Nil)
+        Rows.Cons(head, rest) => {
+            if post.author < head.author || post.author == head.author && post.created >= head.created {
+                Rows.Cons(post, Rows.Cons(head, rest))
+            } else {
+                Rows.Cons(head, insert(post, rest))
+            }
+        }
+    }
+}
+
+fn remove(id: I64, entries: Rows) -> Rows {
+    match entries {
+        Rows.Nil => Rows.Nil
+        Rows.Cons(head, rest) => {
+            if head.id == id {
+                remove(id, rest)
+            } else {
+                Rows.Cons(head, remove(id, rest))
+            }
+        }
+    }
+}
+
+fn size(entries: Rows) -> I64 {
+    match entries {
+        Rows.Nil => 0
+        Rows.Cons(_, rest) => 1 + size(rest)
+    }
+}
+
+// ── The subscription: a watch is a reactor being told about versions ────────
+
+reactor Subscriber() {
+    state seen_count: I64 = 0
+    state last_version: I64 = 0
+
+    // A watch wants `coalesce_latest` — a slow client should skip to the newest version, not
+    // replay every one — but that policy is design vocabulary v0 doesn't have yet, and
+    // `drop_oldest` is its nearest neighbour: under pressure, old versions fall away first.
+    on changed(version: I64) [capacity: 64, overflow: drop_oldest] {
+        seen_count = seen_count + 1
+        last_version = version
+    }
+
+    export signal seen = seen_count
+    export signal last = last_version
+}
+
+task fn notify(version: I64, subscriber: Subscriber) -> () {
+    await send(subscriber.changed, version)
+}
+
+// ── The generated query surface ─────────────────────────────────────────────
+//
+// Reads never enter a reactor: `latest` hands back the last published snapshot and the fold walks
+// it in task land. This is the stale-tolerant read the design doc names, and the causal-token
+// upgrade ("wait until the index has seen seq n") slots in beside it later.
+
+fn by_author(author: String, entries: Rows) -> Rows {
+    match entries {
+        Rows.Nil => Rows.Nil
+        Rows.Cons(post, rest) => {
+            if post.author == author {
+                Rows.Cons(post, by_author(author, rest))
+            } else {
+                by_author(author, rest)
+            }
+        }
+    }
+}
+
+fn take(n: I64, entries: Rows) -> Rows {
+    if n <= 0 {
+        return Rows.Nil
+    }
+    match entries {
+        Rows.Nil => Rows.Nil
+        Rows.Cons(post, rest) => Rows.Cons(post, take(n - 1, rest))
+    }
+}
+
+// Point read against the journal, newest entry first: the first Put with the id wins, and a
+// newer Erase shadows anything older. Event-sourced get, with compaction done by the read.
+fn find(id: I64, journal: Deltas) -> Option<Post> {
+    match journal {
+        Deltas.Nil => None
+        Deltas.Cons(delta, rest) => match delta {
+            Delta.Put(post) => {
+                if post.id == id {
+                    Some(post)
+                } else {
+                    find(id, rest)
+                }
+            }
+            Delta.Erase(gone) => {
+                if gone == id {
+                    None
+                } else {
+                    find(id, rest)
+                }
+            }
+        }
+    }
+}
+
+fn render(entries: Rows) -> String {
+    match entries {
+        Rows.Nil => ""
+        Rows.Cons(post, rest) => post.author + "/" + to_string(post.id) + ": " + post.body + "\n" + render(rest)
+    }
+}
+
+// ── A session: create, edit, delete, query, watch ───────────────────────────
+
+task fn main() -> ()
+    uses { clock }
+{
+    scope {
+        let subscriber = spawn reactor Subscriber()
+        let index = spawn reactor ByAuthor(subscriber: subscriber)
+        let posts = spawn reactor PostPartition(index: index)
+
+        await send(posts.put, Post(id: 1, author: "alice", created: 100, body: "first"))
+        await send(posts.put, Post(id: 2, author: "bob", created: 200, body: "hello"))
+        await send(posts.put, Post(id: 3, author: "alice", created: 300, body: "newest"))
+        await send(posts.put, Post(id: 1, author: "alice", created: 100, body: "first, edited"))
+        await send(posts.erase, 2)
+
+        await sleep(50)
+
+        print("alice, newest first:")
+        print(render(take(20, by_author("alice", latest(index.entries)))))
+        print("indexed: " + to_string(latest(index.count)))
+        print("watched: " + to_string(latest(subscriber.seen)) + " changes, at version " + to_string(latest(subscriber.last)))
+        match find(1, latest(posts.history)) {
+            Some(post) => print("get(1): " + post.body)
+            None => print("get(1): gone")
+        }
+        match find(2, latest(posts.history)) {
+            Some(post) => print("get(2): " + post.body)
+            None => print("get(2): gone")
+        }
+        print("partition backlog: " + to_string(latest(posts.backlog)))
+    }
+}
