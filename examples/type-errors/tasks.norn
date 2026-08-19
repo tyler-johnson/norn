@@ -13,20 +13,11 @@ task fn counted() -> I64
     7
 }
 
-// A spawned task needs a scope to belong to: something has to cancel and join it.
-task fn spawn_without_a_scope() -> ()
-    uses { clock }
-{
-    spawn work()
-}
-
 // There are no task handles, so a spawned task has nowhere to put a value.
 task fn spawn_of_a_value() -> ()
     uses { clock }
 {
-    scope {
-        spawn counted()
-    }
+    spawn counted()
 }
 
 // Building a task and dropping it is the obvious first bug laziness invites.

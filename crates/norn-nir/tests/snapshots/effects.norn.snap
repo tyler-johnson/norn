@@ -58,33 +58,28 @@ task fn main #1()
     local _13
     local _14
     local _15
-    local _16
   b0:
-    scope enter
-    _2 = spawn reactor Mailbox#0()
-    _0/mailbox = _2
-    _3 = input 0 of _0/mailbox
-    _4 = task builtin send(_3, 1)
-    await _4 -> _5, resume b1
+    _1 = spawn reactor Mailbox#0()
+    _0/mailbox = _1
+    _2 = input 0 of _0/mailbox
+    _3 = task builtin send(_2, 1)
+    await _3 -> _4, resume b1
   b1:
-    _6 = input 0 of _0/mailbox
-    _7 = task builtin send(_6, 2)
-    await _7 -> _8, resume b2
+    _5 = input 0 of _0/mailbox
+    _6 = task builtin send(_5, 2)
+    await _6 -> _7, resume b2
   b2:
-    _9 = input 0 of _0/mailbox
-    _10 = task builtin send(_9, 3)
-    await _10 -> _11, resume b3
+    _8 = input 0 of _0/mailbox
+    _9 = task builtin send(_8, 3)
+    await _9 -> _10, resume b3
   b3:
-    _12 = task builtin sleep(50)
-    await _12 -> _13, resume b4
+    _11 = task builtin sleep(50)
+    await _11 -> _12, resume b4
   b4:
-    _14 = export 0 of _0/mailbox
-    _15 = builtin latest(_14)
-    _16 = builtin print(_15)
-    _1 = _16
-    scope exit, resume b5
-  b5:
-    return _1
+    _13 = export 0 of _0/mailbox
+    _14 = builtin latest(_13)
+    _15 = builtin print(_14)
+    return _15
 
 fn Mailbox.on.queued #2(_0/id, _1/pending, _2/delivered, _3/failed)
     local _4
@@ -170,7 +165,6 @@ Report(pending: 0, delivered: 2, failed: 1)
 === trace ===
 0ms t0 spawn main root
 0ms t0 resume
-0ms t0 scope enter 1
 0ms R0 create Mailbox in t0
 0ms R0 publish 0
 0ms t0 park timer 50ms
@@ -225,5 +219,4 @@ Report(pending: 0, delivered: 2, failed: 1)
 50ms -- clock
 50ms t0 resume
 50ms R0 stop
-50ms t0 scope exit 1
 50ms t0 done

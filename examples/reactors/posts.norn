@@ -263,31 +263,29 @@ fn render(entries: List<Post>) -> String {
 task fn main() -> ()
     uses { clock }
 {
-    scope {
-        let subscriber = spawn reactor Subscriber()
-        let index = spawn reactor ByAuthor(subscriber: subscriber)
-        let posts = spawn reactor PostPartition(index: index)
+    let subscriber = spawn reactor Subscriber()
+    let index = spawn reactor ByAuthor(subscriber: subscriber)
+    let posts = spawn reactor PostPartition(index: index)
 
-        await send(posts.put, Post(id: 1, author: "alice", created: 100, body: "first"))
-        await send(posts.put, Post(id: 2, author: "bob", created: 200, body: "hello"))
-        await send(posts.put, Post(id: 3, author: "alice", created: 300, body: "newest"))
-        await send(posts.put, Post(id: 1, author: "alice", created: 100, body: "first, edited"))
-        await send(posts.erase, 2)
+    await send(posts.put, Post(id: 1, author: "alice", created: 100, body: "first"))
+    await send(posts.put, Post(id: 2, author: "bob", created: 200, body: "hello"))
+    await send(posts.put, Post(id: 3, author: "alice", created: 300, body: "newest"))
+    await send(posts.put, Post(id: 1, author: "alice", created: 100, body: "first, edited"))
+    await send(posts.erase, 2)
 
-        await sleep(50)
+    await sleep(50)
 
-        print("alice, newest first:")
-        print(render(take(by_author("alice", latest(index.entries)), 20)))
-        print("indexed: " + to_string(latest(index.count)))
-        print("watched: " + to_string(latest(subscriber.seen)) + " changes, at version " + to_string(latest(subscriber.last)))
-        match find(1, latest(posts.history)) {
-            Some(post) => print("get(1): " + post.body)
-            None => print("get(1): gone")
-        }
-        match find(2, latest(posts.history)) {
-            Some(post) => print("get(2): " + post.body)
-            None => print("get(2): gone")
-        }
-        print("partition backlog: " + to_string(latest(posts.backlog)))
+    print("alice, newest first:")
+    print(render(take(by_author("alice", latest(index.entries)), 20)))
+    print("indexed: " + to_string(latest(index.count)))
+    print("watched: " + to_string(latest(subscriber.seen)) + " changes, at version " + to_string(latest(subscriber.last)))
+    match find(1, latest(posts.history)) {
+        Some(post) => print("get(1): " + post.body)
+        None => print("get(1): gone")
     }
+    match find(2, latest(posts.history)) {
+        Some(post) => print("get(2): " + post.body)
+        None => print("get(2): gone")
+    }
+    print("partition backlog: " + to_string(latest(posts.backlog)))
 }

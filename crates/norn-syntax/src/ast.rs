@@ -353,10 +353,11 @@ pub enum ExprKind {
     /// `scope { … }` — structured concurrency. Valued as its body, and the point at which every
     /// task spawned inside is cancelled and joined.
     Scope(Block),
-    /// `spawn e` — start a task in the enclosing scope. It cannot outlive that scope.
+    /// `spawn e` — start a task, owned by the nearest enclosing `scope { … }`, or by the task body
+    /// when there is none. It cannot outlive its owner.
     Spawn(Box<Expr>),
     /// `spawn reactor Gate(limit: 8)` — create a reactor and hand back a handle to it. Spelled as
-    /// a form of `spawn` because it is one: the reactor is owned by the scope that started it.
+    /// a form of `spawn` because it is one: the reactor is owned the same way a spawned task is.
     SpawnReactor {
         path: Path,
         args: Vec<Arg>,

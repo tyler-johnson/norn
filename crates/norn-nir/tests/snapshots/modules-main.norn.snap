@@ -80,7 +80,6 @@ task fn main #1()
     local _33
     local _34
     local _35
-    local _36
   b0:
     _3 = Report("width", 12)
     _0/report = _3
@@ -101,12 +100,11 @@ task fn main #1()
     _19 = call fmt.to_int#7("41")
     goto b2
   b1:
-    scope enter
-    _25 = spawn reactor fmt.Counter#0(2)
-    _2/counter = _25
-    _26 = input 0 of _2/counter
-    _27 = task builtin send(_26, ())
-    await _27 -> _28, resume b9
+    _24 = spawn reactor fmt.Counter#0(2)
+    _2/counter = _24
+    _25 = input 0 of _2/counter
+    _26 = task builtin send(_25, ())
+    await _26 -> _27, resume b9
   b2:
     switch tag _19 [1 => b6] else b3
   b3:
@@ -129,20 +127,17 @@ task fn main #1()
   b8:
     goto b7
   b9:
-    _29 = input 0 of _2/counter
-    _30 = task builtin send(_29, ())
-    await _30 -> _31, resume b10
+    _28 = input 0 of _2/counter
+    _29 = task builtin send(_28, ())
+    await _29 -> _30, resume b10
   b10:
-    _32 = task builtin sleep(10)
-    await _32 -> _33, resume b11
+    _31 = task builtin sleep(10)
+    await _31 -> _32, resume b11
   b11:
-    _34 = export 0 of _2/counter
-    _35 = builtin latest(_34)
-    _36 = builtin print(_35)
-    _24 = _36
-    scope exit, resume b12
-  b12:
-    return _24
+    _33 = export 0 of _2/counter
+    _34 = builtin latest(_33)
+    _35 = builtin print(_34)
+    return _35
 
 fn fmt.describe #2(_0/report)
     local _1

@@ -38,12 +38,10 @@ task fn main() -> ()
         None => print("not a number")
     }
 
-    scope {
-        let counter = spawn reactor fmt.Counter(step: 2)
-        await send(counter.bump, ())
-        await send(counter.bump, ())
-        // Sending only queues; parking is what lets the reactor take its turns before the read.
-        await sleep(10)
-        print(latest(counter.count))
-    }
+    let counter = spawn reactor fmt.Counter(step: 2)
+    await send(counter.bump, ())
+    await send(counter.bump, ())
+    // Sending only queues; parking is what lets the reactor take its turns before the read.
+    await sleep(10)
+    print(latest(counter.count))
 }

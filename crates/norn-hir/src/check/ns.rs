@@ -110,7 +110,6 @@ impl Checker {
             reactor: None,
             in_handler: false,
             assigning: false,
-            scope_depth: 0,
             loops: Vec::new(),
             generics: Generics::new(),
             type_params_in_scope: Vec::new(),

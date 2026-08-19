@@ -33,14 +33,12 @@ reactor Ticker(ms: I64)
 task fn main() -> ()
     uses { clock }
 {
-    scope {
-        let ticker = spawn reactor Ticker(ms: 10)
+    let ticker = spawn reactor Ticker(ms: 10)
 
-        // There is no on-spawn hook — a reactor only ever reacts. The first tick is the task's
-        // to send; every one after that, the reactor feeds itself.
-        await send(ticker.tick, ())
+    // There is no on-spawn hook — a reactor only ever reacts. The first tick is the task's
+    // to send; every one after that, the reactor feeds itself.
+    await send(ticker.tick, ())
 
-        await sleep(45)
-        print(latest(ticker.count))
-    }
+    await sleep(45)
+    print(latest(ticker.count))
 }

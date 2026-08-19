@@ -72,11 +72,9 @@
     (ret unit)
     (uses clock)
     (block
-      (scope
-        (block
-          (let gate (spawn-reactor Gate (arg limit (path limit))))
-          (await (call (path send) (arg (path gate.opened)) (arg unit)))
-          (call (path print) (arg (call (path latest) (arg (path gate.snapshot))))))))))
+      (let gate (spawn-reactor Gate (arg limit (path limit))))
+      (await (call (path send) (arg (path gate.opened)) (arg unit)))
+      (call (path print) (arg (call (path latest) (arg (path gate.snapshot))))))))
 
 === canonical ===
 struct Snapshot {
@@ -147,9 +145,7 @@ reactor Meter(window: I64) {
 task fn drive(limit: I64) -> ()
     uses { clock }
 {
-    scope {
-        let gate = spawn reactor Gate(limit: limit)
-        await send(gate.opened, ())
-        print(latest(gate.snapshot))
-    }
+    let gate = spawn reactor Gate(limit: limit)
+    await send(gate.opened, ())
+    print(latest(gate.snapshot))
 }

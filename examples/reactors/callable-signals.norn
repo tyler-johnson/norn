@@ -56,15 +56,13 @@ reactor Gate(limit: I64) {
 task fn main() -> ()
     uses { clock }
 {
-    scope {
-        let gate = spawn reactor Gate(limit: 4)
-        await send(gate.added, 1)
-        await send(gate.added, 2)
-        // Both of these are refused without ever moving `count`: 3 + 3 and then 3 + 1 each reach
-        // the limit of 4, and the guard asks about the sum rather than about the cell.
-        await send(gate.added, 3)
-        await send(gate.added, 1)
-        await sleep(10)
-        print(latest(gate.report))
-    }
+    let gate = spawn reactor Gate(limit: 4)
+    await send(gate.added, 1)
+    await send(gate.added, 2)
+    // Both of these are refused without ever moving `count`: 3 + 3 and then 3 + 1 each reach
+    // the limit of 4, and the guard asks about the sum rather than about the cell.
+    await send(gate.added, 3)
+    await send(gate.added, 1)
+    await sleep(10)
+    print(latest(gate.report))
 }

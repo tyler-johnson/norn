@@ -339,9 +339,6 @@ struct Checker {
     in_handler: bool,
     /// Whether the expression being checked is an assignment target.
     assigning: bool,
-    /// How many `scope { … }` expressions enclose the expression being checked. Reset per function,
-    /// which is what makes "inside a scope in the same function" the rule `spawn` enforces.
-    scope_depth: usize,
     /// The loops enclosing the expression being checked, innermost last. `break` and `continue`
     /// target the last frame; a `loop`'s frame is also where its `break value`s agree on a type.
     loops: Vec<LoopCtx>,

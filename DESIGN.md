@@ -265,7 +265,7 @@ scope {
 // Leaving the scope cancels and joins all three children.
 ```
 
-A task spawned inside a scope cannot silently outlive it. Cancellation flows downward; completion and failure flow upward. Detaching work requires an explicit runtime operation and should be rare.
+`spawn` is legal anywhere inside a `task fn`. A spawned task is owned by the nearest enclosing `scope { … }`, or by the function body when there is none — every task body is itself the outermost scope — and it cannot silently outlive its owner: when the owner's region ends, whatever is still running is cancelled. An explicit `scope` is therefore not ceremony but a narrowing tool, for bounding work to a region shorter than the function, as above, where the serving tasks live exactly as long as the await on the shutdown signal. Cancellation flows downward; completion and failure flow upward. Detaching work requires an explicit runtime operation and should be rare.
 
 ### Reactors as parallel islands
 

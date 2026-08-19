@@ -66,17 +66,15 @@ reactor Gate(limit: I64)
 task fn main() -> ()
     uses { clock }
 {
-    scope {
-        let gate = spawn reactor Gate(limit: 2)
+    let gate = spawn reactor Gate(limit: 2)
 
-        await send(gate.opened, ())
-        await send(gate.opened, ())
-        await send(gate.opened, ())
-        await send(gate.closed, ())
+    await send(gate.opened, ())
+    await send(gate.opened, ())
+    await send(gate.opened, ())
+    await send(gate.closed, ())
 
-        // Sending only queues. Parking here is what lets the reactor take its four turns, so the
-        // snapshot read afterwards is the one that has seen all of them.
-        await sleep(50)
-        print(latest(gate.snapshot))
-    }
+    // Sending only queues. Parking here is what lets the reactor take its four turns, so the
+    // snapshot read afterwards is the one that has seen all of them.
+    await sleep(50)
+    print(latest(gate.snapshot))
 }

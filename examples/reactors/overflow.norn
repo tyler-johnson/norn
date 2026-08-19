@@ -73,10 +73,8 @@ task fn flood(sink: Sink) -> ()
 task fn main() -> ()
     uses { clock }
 {
-    scope {
-        let sink = spawn reactor Sink()
-        await flood(sink)
-        await sleep(10)
-        print(latest(sink.counts))
-    }
+    let sink = spawn reactor Sink()
+    await flood(sink)
+    await sleep(10)
+    print(latest(sink.counts))
 }

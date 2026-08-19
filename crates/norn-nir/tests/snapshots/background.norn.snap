@@ -1,0 +1,45 @@
+=== nir ===
+enum Option #0 (None/0, Some/1)
+enum Result #1 (Ok/1, Err/1)
+enum IoError #2 (NotFound/0, Denied/0, InUse/0, Refused/0, Closed/0, Other/1)
+
+task fn wait_forever #0()
+    local _0
+    local _1
+    local _2
+  b0:
+    _0 = task builtin sleep(1000000)
+    await _0 -> _1, resume b1
+  b1:
+    _2 = builtin print("this line is never reached")
+    return _2
+
+task fn main #1()
+    local _0
+    local _1
+    local _2
+    local _3
+  b0:
+    _0 = task wait_forever#0()
+    spawn _0
+    _1 = task builtin sleep(50)
+    await _1 -> _2, resume b1
+  b1:
+    _3 = builtin print("main is done; the child dies with it")
+    return _3
+
+=== output ===
+main is done; the child dies with it
+=== result ===
+()
+=== trace ===
+0ms t0 spawn main root
+0ms t0 resume
+0ms t1 spawn wait_forever in t0
+0ms t0 park timer 50ms
+0ms t1 resume
+0ms t1 park timer 1000000ms
+50ms -- clock
+50ms t0 resume
+50ms t1 cancel
+50ms t0 done

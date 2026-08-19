@@ -544,7 +544,8 @@ impl Checker {
 
     /// `spawn reactor Gate(limit: 8)`.
     ///
-    /// The reactor is owned by the scope that started it, exactly as a spawned task is, and the
+    /// The reactor is owned by the nearest enclosing `scope { … }` — or the task body when there
+    /// is none — exactly as a spawned task is, and the
     /// capability check is the same one a task gets: authority is checked where the thing that
     /// will use it is created, because afterwards nothing can tell what a handle will do.
     pub(super) fn check_spawn_reactor(
@@ -562,14 +563,6 @@ impl Checker {
                 Diagnostic::new(span, "`spawn reactor` is only available inside a `task fn`")
                     .label("only a task may own a reactor")
                     .note("mark the enclosing function `task fn`"),
-            );
-            return self.error_expr(span);
-        }
-        if self.scope_depth == 0 {
-            self.push(
-                Diagnostic::new(span, "`spawn reactor` must appear inside a `scope`")
-                    .label("nothing here would cancel it")
-                    .note("wrap it in `scope { … }`: a reactor may not outlive the scope that started it"),
             );
             return self.error_expr(span);
         }

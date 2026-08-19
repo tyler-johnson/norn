@@ -57,8 +57,8 @@ impl<'e, V: Clone> Core<'e, V> {
             name: name.clone(),
             body: Some(body),
             parent: parent.map(|parent| parent.task),
-            // Every task starts with one implicit scope, so that whatever it spawns dies with it
-            // even if lowering never emitted an explicit one.
+            // Every task starts with one implicit scope: the default owner of anything spawned
+            // outside an explicit `scope { … }`, cancelled when the task finishes.
             scopes: vec![Scope::default()],
             wait: None,
             completion: None,

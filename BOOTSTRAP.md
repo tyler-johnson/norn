@@ -105,7 +105,12 @@ Alternatives considered:
 
 - **Values** — `I64`, `F64`, `Bool`, `String`, `Bytes`, structs, enums with payloads, `match`,
   built-in `Result<T, E>` and `Option<T>` with `?`.
-- **Tasks** — `task fn`, `await`, `scope { spawn ... }`, cancellation, structured join on scope exit.
+- **Tasks** — `task fn`, `await`, `spawn`, `scope`, cancellation, structured join on scope exit.
+  A spawn is owned by the nearest enclosing `scope { … }`, or by the task body when there is none;
+  `scope` narrows ownership to a region shorter than the function. (Originally `spawn` *required*
+  an enclosing `scope`; the requirement was dropped once it was clear the runtime's implicit
+  outermost scope — which always existed as a backstop — is the right default owner, and the
+  mandatory wrapper was pure ceremony.)
 - **Reactors** — static graphs only: `input` with declared capacity and overflow policy, `state`,
   `signal`, `on` handlers, `after` effect requests, `export`, `latest`, and `send`.
   `uses { … }` applies to a reactor as well as to a task: it is the authority the reactor's effects

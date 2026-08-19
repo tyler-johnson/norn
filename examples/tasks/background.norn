@@ -1,0 +1,20 @@
+// A bare `spawn`, owned by the task body itself.
+//
+// No `scope { … }` anywhere: the function body is the outermost scope, so the child belongs to
+// `main` and is cancelled when `main` finishes. An explicit scope narrows ownership to a smaller
+// region; without one, the region is the whole function.
+
+task fn wait_forever() -> ()
+    uses { clock }
+{
+    await sleep(1000000)
+    print("this line is never reached")
+}
+
+task fn main() -> ()
+    uses { clock }
+{
+    spawn wait_forever()
+    await sleep(50)
+    print("main is done; the child dies with it")
+}

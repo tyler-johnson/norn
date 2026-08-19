@@ -514,7 +514,6 @@ impl Checker {
         self.reactor = None;
         self.in_handler = false;
         self.uses = self.program.fns[id.index()].uses.clone();
-        self.scope_depth = 0;
         self.loops = Vec::new();
         // A template body is checked exactly once, its parameters opaque: this scope is what
         // lets a `let` annotation inside it spell `List<T>`, and the bounds beside it are what

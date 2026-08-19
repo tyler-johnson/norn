@@ -89,9 +89,7 @@ reactor Meter(window: I64) {
 task fn drive(limit: I64) -> ()
     uses { clock }
 {
-    scope {
-        let gate = spawn reactor Gate(limit: limit)
-        await send(gate.opened, ())
-        print(latest(gate.snapshot))
-    }
+    let gate = spawn reactor Gate(limit: limit)
+    await send(gate.opened, ())
+    print(latest(gate.snapshot))
 }

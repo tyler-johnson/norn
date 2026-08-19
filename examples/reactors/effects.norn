@@ -61,12 +61,10 @@ reactor Mailbox()
 task fn main() -> ()
     uses { clock }
 {
-    scope {
-        let mailbox = spawn reactor Mailbox()
-        await send(mailbox.queued, 1)
-        await send(mailbox.queued, 2)
-        await send(mailbox.queued, 3)
-        await sleep(50)
-        print(latest(mailbox.report))
-    }
+    let mailbox = spawn reactor Mailbox()
+    await send(mailbox.queued, 1)
+    await send(mailbox.queued, 2)
+    await send(mailbox.queued, 3)
+    await sleep(50)
+    print(latest(mailbox.report))
 }

@@ -191,7 +191,7 @@ impl Checker {
         self.push(
             Diagnostic::new(span, "this builds a task and then discards it")
                 .label("the task never runs")
-                .note("`await` it to run it here, or `spawn` it to run it in a scope"),
+                .note("`await` it to run it here, or `spawn` it to run it alongside"),
         );
     }
 
@@ -255,9 +255,7 @@ impl Checker {
             );
             return self.error_expr(span);
         }
-        self.scope_depth += 1;
         let body = self.check_block(block, expected, block.span);
-        self.scope_depth -= 1;
         let ty = body.ty.clone();
         Expr {
             kind: ExprKind::Scope {
@@ -278,14 +276,6 @@ impl Checker {
                 Diagnostic::new(span, "`spawn` is only available inside a `task fn`")
                     .label("only a task may start other tasks")
                     .note("mark the enclosing function `task fn`"),
-            );
-            return self.error_expr(span);
-        }
-        if self.scope_depth == 0 {
-            self.push(
-                Diagnostic::new(span, "`spawn` must appear inside a `scope`")
-                    .label("nothing here would cancel or join it")
-                    .note("wrap it in `scope { … }`: a spawned task may not outlive the scope that started it"),
             );
             return self.error_expr(span);
         }

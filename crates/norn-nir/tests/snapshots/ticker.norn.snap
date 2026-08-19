@@ -23,25 +23,20 @@ task fn main #0()
     local _7
     local _8
     local _9
-    local _10
   b0:
-    scope enter
-    _2 = spawn reactor Ticker#0(10)
-    _0/ticker = _2
-    _3 = input 0 of _0/ticker
-    _4 = task builtin send(_3, ())
-    await _4 -> _5, resume b1
+    _1 = spawn reactor Ticker#0(10)
+    _0/ticker = _1
+    _2 = input 0 of _0/ticker
+    _3 = task builtin send(_2, ())
+    await _3 -> _4, resume b1
   b1:
-    _6 = task builtin sleep(45)
-    await _6 -> _7, resume b2
+    _5 = task builtin sleep(45)
+    await _5 -> _6, resume b2
   b2:
-    _8 = export 0 of _0/ticker
-    _9 = builtin latest(_8)
-    _10 = builtin print(_9)
-    _1 = _10
-    scope exit, resume b3
-  b3:
-    return _1
+    _7 = export 0 of _0/ticker
+    _8 = builtin latest(_7)
+    _9 = builtin print(_8)
+    return _9
 
 task fn time.wait #1(_0/ms)
     local _1
@@ -100,7 +95,6 @@ reactor Ticker #0
 === trace ===
 0ms t0 spawn main root
 0ms t0 resume
-0ms t0 scope enter 1
 0ms R0 create Ticker in t0
 0ms R0 publish 0
 0ms t0 park timer 45ms
@@ -160,5 +154,4 @@ reactor Ticker #0
 45ms t0 resume
 45ms t5 cancel
 45ms R0 stop
-45ms t0 scope exit 1
 45ms t0 done

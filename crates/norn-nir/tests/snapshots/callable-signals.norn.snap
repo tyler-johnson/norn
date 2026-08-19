@@ -37,37 +37,32 @@ task fn main #0()
     local _16
     local _17
     local _18
-    local _19
   b0:
-    scope enter
-    _2 = spawn reactor Gate#0(4)
-    _0/gate = _2
-    _3 = input 0 of _0/gate
-    _4 = task builtin send(_3, 1)
-    await _4 -> _5, resume b1
+    _1 = spawn reactor Gate#0(4)
+    _0/gate = _1
+    _2 = input 0 of _0/gate
+    _3 = task builtin send(_2, 1)
+    await _3 -> _4, resume b1
   b1:
-    _6 = input 0 of _0/gate
-    _7 = task builtin send(_6, 2)
-    await _7 -> _8, resume b2
+    _5 = input 0 of _0/gate
+    _6 = task builtin send(_5, 2)
+    await _6 -> _7, resume b2
   b2:
-    _9 = input 0 of _0/gate
-    _10 = task builtin send(_9, 3)
-    await _10 -> _11, resume b3
+    _8 = input 0 of _0/gate
+    _9 = task builtin send(_8, 3)
+    await _9 -> _10, resume b3
   b3:
-    _12 = input 0 of _0/gate
-    _13 = task builtin send(_12, 1)
-    await _13 -> _14, resume b4
+    _11 = input 0 of _0/gate
+    _12 = task builtin send(_11, 1)
+    await _12 -> _13, resume b4
   b4:
-    _15 = task builtin sleep(10)
-    await _15 -> _16, resume b5
+    _14 = task builtin sleep(10)
+    await _14 -> _15, resume b5
   b5:
-    _17 = export 0 of _0/gate
-    _18 = builtin latest(_17)
-    _19 = builtin print(_18)
-    _1 = _19
-    scope exit, resume b6
-  b6:
-    return _1
+    _16 = export 0 of _0/gate
+    _17 = builtin latest(_16)
+    _18 = builtin print(_17)
+    return _18
 
 fn Gate.on.added #1(_0/n, _1/limit, _2/count, _3/rejected)
     local _4
@@ -156,7 +151,6 @@ Report(count: 3, rejected: 2, full: false, warn: true)
 === trace ===
 0ms t0 spawn main root
 0ms t0 resume
-0ms t0 scope enter 1
 0ms R0 create Gate in t0
 0ms R0 publish 0
 0ms t0 park timer 10ms
@@ -191,5 +185,4 @@ Report(count: 3, rejected: 2, full: false, warn: true)
 10ms -- clock
 10ms t0 resume
 10ms R0 stop
-10ms t0 scope exit 1
 10ms t0 done

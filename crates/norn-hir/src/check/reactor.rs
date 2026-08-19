@@ -656,7 +656,6 @@ impl Checker {
         self.fn_name = self.program.fns[function.index()].name.clone();
         self.ctx = ctx;
         self.uses = uses.to_vec();
-        self.scope_depth = 0;
         self.loops = Vec::new();
         // Reactors declare no type parameters, so nothing generic is ever in scope here.
         self.type_params_in_scope.clear();
