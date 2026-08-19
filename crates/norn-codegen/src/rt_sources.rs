@@ -11,7 +11,6 @@ pub const RT_SOURCES: &[(&str, &str)] = &[
     ("lib.rs", include_str!("../../norn-rt/src/lib.rs")),
     ("clock.rs", include_str!("../../norn-rt/src/clock.rs")),
     ("graph.rs", include_str!("../../norn-rt/src/graph.rs")),
-    ("http.rs", include_str!("../../norn-rt/src/http.rs")),
     ("poll.rs", include_str!("../../norn-rt/src/poll.rs")),
     ("scope.rs", include_str!("../../norn-rt/src/scope.rs")),
     ("task.rs", include_str!("../../norn-rt/src/task.rs")),

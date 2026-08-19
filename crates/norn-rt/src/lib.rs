@@ -15,7 +15,6 @@ use std::io;
 
 pub mod clock;
 pub mod graph;
-pub mod http;
 pub mod poll;
 pub mod scope;
 pub mod task;
@@ -23,7 +22,7 @@ pub mod timer;
 pub mod trace;
 
 use crate::graph::{ReactorSpec, ReactorState};
-use crate::poll::{PipeProgress, Readiness};
+use crate::poll::Readiness;
 use crate::task::{TaskState, Wait};
 use crate::timer::Timers;
 use crate::trace::{Event, Trace, WaitReason};
@@ -479,41 +478,6 @@ impl<'e, V: Clone> Cx<'_, 'e, V> {
     /// How many bytes the flow still promises to deliver.
     pub fn flow_len(&mut self, flow: ResourceId) -> io::Result<i64> {
         self.core.readiness.flow_len(flow).map(|len| len as i64)
-    }
-
-    /// Drive `flow` into `sink` until everything the flow promised has arrived. One trace line per
-    /// delivered chunk; all transfer state lives in the flow's table entry, so a parked transfer
-    /// resumes by asking again. Completion — and failure — consumes both ends: the language moved
-    /// them into this call, so nothing can legally touch either again, and the close happens here
-    /// rather than at whenever the owning scope ends.
-    pub fn pipe(&mut self, flow: ResourceId, sink: ResourceId) -> Poll<io::Result<i64>> {
-        loop {
-            match self.core.readiness.pipe_step(flow, sink) {
-                Ok(PipeProgress::Chunk(bytes)) => {
-                    let task = self.task;
-                    self.core.emit(Event::Pipe {
-                        task,
-                        source: flow,
-                        sink,
-                        bytes,
-                    });
-                }
-                Ok(PipeProgress::Done(total)) => {
-                    self.finish_wait();
-                    self.close(flow);
-                    self.close(sink);
-                    return Poll::Ready(Ok(total as i64));
-                }
-                Ok(PipeProgress::ParkWrite(on)) => return self.park_on(on, true),
-                Ok(PipeProgress::ParkRead(on)) => return self.park_on(on, false),
-                Err(err) => {
-                    self.finish_wait();
-                    self.close(flow);
-                    self.close(sink);
-                    return Poll::Ready(Err(err));
-                }
-            }
-        }
     }
 
     /// Register interest and park. `Pending` is returned as whatever the caller's result type is,

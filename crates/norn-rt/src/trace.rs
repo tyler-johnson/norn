@@ -57,15 +57,6 @@ pub enum Event {
         resource: ResourceId,
         from: TaskId,
     },
-    /// One chunk of a flow delivered into a sink. The per-chunk line is what makes "at most one
-    /// chunk in flight" a property a reader can check in the trace rather than a claim about the
-    /// implementation.
-    Pipe {
-        task: TaskId,
-        source: ResourceId,
-        sink: ResourceId,
-        bytes: usize,
-    },
     /// A virtual clock arriving at the next deadline because nothing else could run.
     Clock,
 
@@ -171,8 +162,7 @@ impl Event {
             | Event::ScopeExit { task, .. }
             | Event::Open { task, .. }
             | Event::Close { task, .. }
-            | Event::Move { task, .. }
-            | Event::Pipe { task, .. } => Subject::Task(*task),
+            | Event::Move { task, .. } => Subject::Task(*task),
             Event::ReactorCreated { reactor, .. }
             | Event::Turn { reactor, .. }
             | Event::Node { reactor, .. }
@@ -199,12 +189,6 @@ impl Event {
             Event::Open { resource, kind, .. } => format!("open {resource} {}", kind.name()),
             Event::Close { resource, .. } => format!("close {resource}"),
             Event::Move { resource, from, .. } => format!("move {resource} from {from}"),
-            Event::Pipe {
-                source,
-                sink,
-                bytes,
-                ..
-            } => format!("pipe {source} -> {sink} {bytes}"),
             Event::ReactorCreated { name, owner, .. } => format!("create {name} in {owner}"),
             Event::Turn { seq, input, .. } => format!("turn {seq} {input}"),
             Event::Node { node, commit, .. } => {
