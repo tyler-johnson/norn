@@ -90,7 +90,7 @@ fn describe #0(_0/shape)
     _16 = _0/shape.1 eq 0
     branch _16 ? b19 : b7
   b22:
-    _17 = call digits#4(_5/radius)
+    _17 = call fmt.digits#4(_5/radius)
     _18 = "circle of radius " concat _17
     _19 = _18 concat " at "
     _20 = call show#2(_4/centre)
@@ -174,10 +174,10 @@ fn show #2(_0/point)
     local _5
     local _6
   b0:
-    _1 = call digits#4(_0/point.0)
+    _1 = call fmt.digits#4(_0/point.0)
     _2 = "(" concat _1
     _3 = _2 concat ", "
-    _4 = call digits#4(_0/point.1)
+    _4 = call fmt.digits#4(_0/point.1)
     _5 = _3 concat _4
     _6 = _5 concat ")"
     return _6
@@ -264,13 +264,69 @@ fn main #3()
     _38 = builtin print(_37)
     return _38
 
-fn digits #4(_0/n)
+fn fmt.digits #4(_0/n)
     local _1/rest
-    local _2/last
+    local _2/out
     local _3
     local _4
     local _5
     local _6
+    local _7
+    local _8
+    local _9
+    local _10
+    local _11
+    local _12
+    local _13
+    local _14
+    local _15
+  b0:
+    _4 = _0/n lt 0
+    branch _4 ? b1 : b2
+  b1:
+    _5 = 0 sub.i _0/n
+    _3 = _5
+    goto b3
+  b2:
+    _3 = _0/n
+    goto b3
+  b3:
+    _1/rest = _3
+    _6 = _1/rest rem.i 10
+    _7 = call fmt.digit#6(_6)
+    _2/out = _7
+    goto b4
+  b4:
+    _8 = _1/rest gt 9
+    branch _8 ? b6 : b5
+  b5:
+    _14 = _0/n lt 0
+    branch _14 ? b7 : b8
+  b6:
+    _9 = _1/rest div.i 10
+    _1/rest = _9
+    _10 = _1/rest rem.i 10
+    _11 = call fmt.digit#6(_10)
+    _12 = _11 concat _2/out
+    _2/out = _12
+    goto b4
+  b7:
+    _15 = "-" concat _2/out
+    _13 = _15
+    goto b9
+  b8:
+    _13 = _2/out
+    goto b9
+  b9:
+    return _13
+
+fn fmt.parse_int #5(_0/s)
+    local _1/data
+    local _2/len
+    local _3/i
+    local _4/negative
+    local _5/value
+    local _6/b
     local _7
     local _8
     local _9
@@ -289,101 +345,177 @@ fn digits #4(_0/n)
     local _22
     local _23
     local _24
+    local _25
+    local _26
+    local _27
+    local _28
+    local _29
+    local _30
+    local _31
+    local _32
   b0:
-    _4 = _0/n lt 0
-    branch _4 ? b1 : b2
+    _7 = builtin bytes(_0/s)
+    _1/data = _7
+    _8 = builtin bytes_len(_1/data)
+    _2/len = _8
+    _3/i = 0
+    _4/negative = false
+    _10 = _2/len eq 0
+    branch _10 ? b1 : b2
   b1:
-    _5 = 0 sub.i _0/n
-    _6 = call digits#4(_5)
-    _7 = "-" concat _6
-    return _7
+    _11 = Option.None()
+    return _11
   b2:
-    _3 = ()
+    _9 = ()
     goto b3
   b3:
-    _8 = _0/n div.i 10
-    _1/rest = _8
-    _10 = _0/n rem.i 10
-    goto b5
+    _13 = builtin bytes_at(_1/data, 0)
+    _14 = _13 eq 45
+    branch _14 ? b4 : b5
   b4:
-    _2/last = _9
-    _22 = _1/rest eq 0
-    branch _22 ? b27 : b28
+    _4/negative = true
+    _3/i = 1
+    _12 = ()
+    goto b6
   b5:
-    _11 = _10 eq 0
-    branch _11 ? b16 : b6
+    _12 = ()
+    goto b6
   b6:
-    _12 = _10 eq 1
-    branch _12 ? b17 : b7
+    _16 = _3/i eq _2/len
+    branch _16 ? b7 : b8
   b7:
-    _13 = _10 eq 2
-    branch _13 ? b18 : b8
+    _17 = Option.None()
+    return _17
   b8:
-    _14 = _10 eq 3
-    branch _14 ? b19 : b9
+    _15 = ()
+    goto b9
   b9:
-    _15 = _10 eq 4
-    branch _15 ? b20 : b10
+    _5/value = 0
+    goto b10
   b10:
-    _16 = _10 eq 5
-    branch _16 ? b21 : b11
+    _18 = _3/i lt _2/len
+    branch _18 ? b12 : b11
   b11:
-    _17 = _10 eq 6
-    branch _17 ? b22 : b12
+    branch _4/negative ? b18 : b19
   b12:
-    _18 = _10 eq 7
-    branch _18 ? b23 : b13
+    _19 = builtin bytes_at(_1/data, _3/i)
+    _6/b = _19
+    _22 = _6/b lt 48
+    _21 = _22
+    branch _21 ? b14 : b13
   b13:
-    _19 = _10 eq 8
-    branch _19 ? b24 : b14
+    _23 = _6/b gt 57
+    _21 = _23
+    goto b14
   b14:
-    _20 = _10 eq 9
-    branch _20 ? b25 : b15
+    branch _21 ? b15 : b16
   b15:
-    goto b26
+    _24 = Option.None()
+    return _24
   b16:
-    _9 = "0"
-    goto b4
+    _20 = ()
+    goto b17
   b17:
-    _9 = "1"
-    goto b4
+    _25 = _5/value mul.i 10
+    _26 = _6/b sub.i 48
+    _27 = _25 add.i _26
+    _5/value = _27
+    _28 = _3/i add.i 1
+    _3/i = _28
+    goto b10
   b18:
-    _9 = "2"
-    goto b4
+    _30 = 0 sub.i _5/value
+    _31 = Option.Some(_30)
+    _29 = _31
+    goto b20
   b19:
-    _9 = "3"
-    goto b4
+    _32 = Option.Some(_5/value)
+    _29 = _32
+    goto b20
   b20:
-    _9 = "4"
-    goto b4
+    return _29
+
+fn fmt.digit #6(_0/n)
+    local _1
+    local _2
+    local _3
+    local _4
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+    local _10
+    local _11
+  b0:
+    goto b2
+  b1:
+    return _1
+  b2:
+    _2 = _0/n eq 0
+    branch _2 ? b13 : b3
+  b3:
+    _3 = _0/n eq 1
+    branch _3 ? b14 : b4
+  b4:
+    _4 = _0/n eq 2
+    branch _4 ? b15 : b5
+  b5:
+    _5 = _0/n eq 3
+    branch _5 ? b16 : b6
+  b6:
+    _6 = _0/n eq 4
+    branch _6 ? b17 : b7
+  b7:
+    _7 = _0/n eq 5
+    branch _7 ? b18 : b8
+  b8:
+    _8 = _0/n eq 6
+    branch _8 ? b19 : b9
+  b9:
+    _9 = _0/n eq 7
+    branch _9 ? b20 : b10
+  b10:
+    _10 = _0/n eq 8
+    branch _10 ? b21 : b11
+  b11:
+    _11 = _0/n eq 9
+    branch _11 ? b22 : b12
+  b12:
+    goto b23
+  b13:
+    _1 = "0"
+    goto b1
+  b14:
+    _1 = "1"
+    goto b1
+  b15:
+    _1 = "2"
+    goto b1
+  b16:
+    _1 = "3"
+    goto b1
+  b17:
+    _1 = "4"
+    goto b1
+  b18:
+    _1 = "5"
+    goto b1
+  b19:
+    _1 = "6"
+    goto b1
+  b20:
+    _1 = "7"
+    goto b1
   b21:
-    _9 = "5"
-    goto b4
+    _1 = "8"
+    goto b1
   b22:
-    _9 = "6"
-    goto b4
+    _1 = "9"
+    goto b1
   b23:
-    _9 = "7"
-    goto b4
-  b24:
-    _9 = "8"
-    goto b4
-  b25:
-    _9 = "9"
-    goto b4
-  b26:
-    _9 = "?"
-    goto b4
-  b27:
-    _21 = _2/last
-    goto b29
-  b28:
-    _23 = call digits#4(_1/rest)
-    _24 = _23 concat _2/last
-    _21 = _24
-    goto b29
-  b29:
-    return _21
+    _1 = "?"
+    goto b1
 
 === output ===
 empty

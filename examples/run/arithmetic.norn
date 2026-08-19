@@ -1,3 +1,5 @@
+import { digits } from "std/fmt"
+
 fn factorial(n: I64) -> I64 {
     if n <= 1 {
         return 1
@@ -31,15 +33,15 @@ fn trace(label: String, value: Bool) -> Bool {
 }
 
 fn main() {
-    print("factorial(10) = " + describe(factorial(10)))
-    print("fib(15) = " + describe(fib(15)))
+    print("factorial(10) = " + digits(factorial(10)))
+    print("fib(15) = " + digits(fib(15)))
     print(classify(-3) + " " + classify(0) + " " + classify(9))
 
     let precedence = 2 + 3 * 4 - 6 / 2
-    print("2 + 3 * 4 - 6 / 2 = " + describe(precedence))
+    print("2 + 3 * 4 - 6 / 2 = " + digits(precedence))
 
     let grouped = (2 + 3) * (4 - 6) / 2
-    print("(2 + 3) * (4 - 6) / 2 = " + describe(grouped))
+    print("(2 + 3) * (4 - 6) / 2 = " + digits(grouped))
 
     print("short circuit &&:")
     let and_result = trace("left", false) && trace("right", true)
@@ -53,41 +55,7 @@ fn main() {
     let mut total = 0
     total = total + factorial(5)
     total = total + fib(10)
-    print("mutated total = " + describe(total))
-}
-
-fn describe(n: I64) -> String {
-    if n < 0 {
-        "-" + digits(0 - n)
-    } else {
-        digits(n)
-    }
-}
-
-fn digits(n: I64) -> String {
-    let rest = n / 10
-    let last = digit(n % 10)
-    if rest == 0 {
-        last
-    } else {
-        digits(rest) + last
-    }
-}
-
-fn digit(n: I64) -> String {
-    match n {
-        0 => "0"
-        1 => "1"
-        2 => "2"
-        3 => "3"
-        4 => "4"
-        5 => "5"
-        6 => "6"
-        7 => "7"
-        8 => "8"
-        9 => "9"
-        _ => "?"
-    }
+    print("mutated total = " + digits(total))
 }
 
 fn describe_bool(value: Bool) -> String {

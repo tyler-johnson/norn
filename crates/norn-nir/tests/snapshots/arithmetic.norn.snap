@@ -144,11 +144,11 @@ fn main #4()
     local _58
   b0:
     _6 = call factorial#0(10)
-    _7 = call describe#5(_6)
+    _7 = call fmt.digits#6(_6)
     _8 = "factorial(10) = " concat _7
     _9 = builtin print(_8)
     _10 = call fib#1(15)
-    _11 = call describe#5(_10)
+    _11 = call fmt.digits#6(_10)
     _12 = "fib(15) = " concat _11
     _13 = builtin print(_12)
     _14 = neg 3
@@ -165,7 +165,7 @@ fn main #4()
     _25 = 6 div.i 2
     _26 = _24 sub.i _25
     _0/precedence = _26
-    _27 = call describe#5(_0/precedence)
+    _27 = call fmt.digits#6(_0/precedence)
     _28 = "2 + 3 * 4 - 6 / 2 = " concat _27
     _29 = builtin print(_28)
     _30 = 2 add.i 3
@@ -173,7 +173,7 @@ fn main #4()
     _32 = _30 mul.i _31
     _33 = _32 div.i 2
     _1/grouped = _33
-    _34 = call describe#5(_1/grouped)
+    _34 = call fmt.digits#6(_1/grouped)
     _35 = "(2 + 3) * (4 - 6) / 2 = " concat _34
     _36 = builtin print(_35)
     _37 = builtin print("short circuit &&:")
@@ -196,9 +196,9 @@ fn main #4()
     goto b4
   b4:
     _3/or_result = _42
-    _45 = call describe_bool#8(_2/and_result)
+    _45 = call describe_bool#5(_2/and_result)
     _46 = _45 concat " "
-    _47 = call describe_bool#8(_3/or_result)
+    _47 = call describe_bool#5(_3/or_result)
     _48 = _46 concat _47
     _49 = builtin print(_48)
     _50 = 7.5 div.f 2.0
@@ -211,37 +211,27 @@ fn main #4()
     _54 = call fib#1(10)
     _55 = _5/total add.i _54
     _5/total = _55
-    _56 = call describe#5(_5/total)
+    _56 = call fmt.digits#6(_5/total)
     _57 = "mutated total = " concat _56
     _58 = builtin print(_57)
     return _58
 
-fn describe #5(_0/n)
+fn describe_bool #5(_0/value)
     local _1
-    local _2
-    local _3
-    local _4
-    local _5
-    local _6
   b0:
-    _2 = _0/n lt 0
-    branch _2 ? b1 : b2
+    branch _0/value ? b1 : b2
   b1:
-    _3 = 0 sub.i _0/n
-    _4 = call digits#6(_3)
-    _5 = "-" concat _4
-    _1 = _5
+    _1 = "true"
     goto b3
   b2:
-    _6 = call digits#6(_0/n)
-    _1 = _6
+    _1 = "false"
     goto b3
   b3:
     return _1
 
-fn digits #6(_0/n)
+fn fmt.digits #6(_0/n)
     local _1/rest
-    local _2/last
+    local _2/out
     local _3
     local _4
     local _5
@@ -249,26 +239,168 @@ fn digits #6(_0/n)
     local _7
     local _8
     local _9
+    local _10
+    local _11
+    local _12
+    local _13
+    local _14
+    local _15
   b0:
-    _3 = _0/n div.i 10
-    _1/rest = _3
-    _4 = _0/n rem.i 10
-    _5 = call digit#7(_4)
-    _2/last = _5
-    _7 = _1/rest eq 0
-    branch _7 ? b1 : b2
+    _4 = _0/n lt 0
+    branch _4 ? b1 : b2
   b1:
-    _6 = _2/last
+    _5 = 0 sub.i _0/n
+    _3 = _5
     goto b3
   b2:
-    _8 = call digits#6(_1/rest)
-    _9 = _8 concat _2/last
-    _6 = _9
+    _3 = _0/n
     goto b3
   b3:
-    return _6
+    _1/rest = _3
+    _6 = _1/rest rem.i 10
+    _7 = call fmt.digit#8(_6)
+    _2/out = _7
+    goto b4
+  b4:
+    _8 = _1/rest gt 9
+    branch _8 ? b6 : b5
+  b5:
+    _14 = _0/n lt 0
+    branch _14 ? b7 : b8
+  b6:
+    _9 = _1/rest div.i 10
+    _1/rest = _9
+    _10 = _1/rest rem.i 10
+    _11 = call fmt.digit#8(_10)
+    _12 = _11 concat _2/out
+    _2/out = _12
+    goto b4
+  b7:
+    _15 = "-" concat _2/out
+    _13 = _15
+    goto b9
+  b8:
+    _13 = _2/out
+    goto b9
+  b9:
+    return _13
 
-fn digit #7(_0/n)
+fn fmt.parse_int #7(_0/s)
+    local _1/data
+    local _2/len
+    local _3/i
+    local _4/negative
+    local _5/value
+    local _6/b
+    local _7
+    local _8
+    local _9
+    local _10
+    local _11
+    local _12
+    local _13
+    local _14
+    local _15
+    local _16
+    local _17
+    local _18
+    local _19
+    local _20
+    local _21
+    local _22
+    local _23
+    local _24
+    local _25
+    local _26
+    local _27
+    local _28
+    local _29
+    local _30
+    local _31
+    local _32
+  b0:
+    _7 = builtin bytes(_0/s)
+    _1/data = _7
+    _8 = builtin bytes_len(_1/data)
+    _2/len = _8
+    _3/i = 0
+    _4/negative = false
+    _10 = _2/len eq 0
+    branch _10 ? b1 : b2
+  b1:
+    _11 = Option.None()
+    return _11
+  b2:
+    _9 = ()
+    goto b3
+  b3:
+    _13 = builtin bytes_at(_1/data, 0)
+    _14 = _13 eq 45
+    branch _14 ? b4 : b5
+  b4:
+    _4/negative = true
+    _3/i = 1
+    _12 = ()
+    goto b6
+  b5:
+    _12 = ()
+    goto b6
+  b6:
+    _16 = _3/i eq _2/len
+    branch _16 ? b7 : b8
+  b7:
+    _17 = Option.None()
+    return _17
+  b8:
+    _15 = ()
+    goto b9
+  b9:
+    _5/value = 0
+    goto b10
+  b10:
+    _18 = _3/i lt _2/len
+    branch _18 ? b12 : b11
+  b11:
+    branch _4/negative ? b18 : b19
+  b12:
+    _19 = builtin bytes_at(_1/data, _3/i)
+    _6/b = _19
+    _22 = _6/b lt 48
+    _21 = _22
+    branch _21 ? b14 : b13
+  b13:
+    _23 = _6/b gt 57
+    _21 = _23
+    goto b14
+  b14:
+    branch _21 ? b15 : b16
+  b15:
+    _24 = Option.None()
+    return _24
+  b16:
+    _20 = ()
+    goto b17
+  b17:
+    _25 = _5/value mul.i 10
+    _26 = _6/b sub.i 48
+    _27 = _25 add.i _26
+    _5/value = _27
+    _28 = _3/i add.i 1
+    _3/i = _28
+    goto b10
+  b18:
+    _30 = 0 sub.i _5/value
+    _31 = Option.Some(_30)
+    _29 = _31
+    goto b20
+  b19:
+    _32 = Option.Some(_5/value)
+    _29 = _32
+    goto b20
+  b20:
+    return _29
+
+fn fmt.digit #8(_0/n)
     local _1
     local _2
     local _3
@@ -349,19 +481,6 @@ fn digit #7(_0/n)
   b23:
     _1 = "?"
     goto b1
-
-fn describe_bool #8(_0/value)
-    local _1
-  b0:
-    branch _0/value ? b1 : b2
-  b1:
-    _1 = "true"
-    goto b3
-  b2:
-    _1 = "false"
-    goto b3
-  b3:
-    return _1
 
 === output ===
 factorial(10) = 3628800

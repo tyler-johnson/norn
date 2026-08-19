@@ -1,3 +1,5 @@
+import { digits } from "std/fmt"
+
 struct Point {
     x: I64
     y: I64
@@ -57,25 +59,4 @@ fn main() {
 
     // Values print in the syntax that builds them.
     print(Shape.Circle(centre: corner, radius: 7))
-}
-
-fn digits(n: I64) -> String {
-    if n < 0 {
-        return "-" + digits(0 - n)
-    }
-    let rest = n / 10
-    let last = match n % 10 {
-        0 => "0"
-        1 => "1"
-        2 => "2"
-        3 => "3"
-        4 => "4"
-        5 => "5"
-        6 => "6"
-        7 => "7"
-        8 => "8"
-        9 => "9"
-        _ => "?"
-    }
-    if rest == 0 { last } else { digits(rest) + last }
 }

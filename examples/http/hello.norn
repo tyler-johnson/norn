@@ -8,6 +8,8 @@
 // As in the echo server, `main` prints the port the operating system chose so a client can find
 // it, and the accept loop is the same `scope { loop { … } }`.
 
+import { digits } from "std/fmt"
+
 task fn serve(conn: Connection) -> ()
     uses { net.io }
 {
@@ -44,30 +46,4 @@ task fn main() -> Result<(), IoError>
         await sleep(200)
     }
     Ok(())
-}
-
-fn digits(n: I64) -> String {
-    let mut rest = n
-    let mut out = digit(n % 10)
-    while rest > 9 {
-        rest = rest / 10
-        out = digit(rest % 10) + out
-    }
-    out
-}
-
-fn digit(n: I64) -> String {
-    match n {
-        0 => "0"
-        1 => "1"
-        2 => "2"
-        3 => "3"
-        4 => "4"
-        5 => "5"
-        6 => "6"
-        7 => "7"
-        8 => "8"
-        9 => "9"
-        _ => "?"
-    }
 }

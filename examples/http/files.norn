@@ -13,6 +13,8 @@
 // The path is prefixed with `.` and guarded: `has_dotdot` walks the path's bytes with `data[i]`,
 // and a request that tries `..` traversal is answered 400 before the method is dispatched.
 
+import { digits } from "std/fmt"
+
 task fn upload(req: Request) -> Result<(), IoError>
     uses { net.io, fs.write }
 {
@@ -95,30 +97,4 @@ fn has_dotdot(path: String) -> Bool {
         i = i + 1
     }
     false
-}
-
-fn digits(n: I64) -> String {
-    let mut rest = n
-    let mut out = digit(n % 10)
-    while rest > 9 {
-        rest = rest / 10
-        out = digit(rest % 10) + out
-    }
-    out
-}
-
-fn digit(n: I64) -> String {
-    match n {
-        0 => "0"
-        1 => "1"
-        2 => "2"
-        3 => "3"
-        4 => "4"
-        5 => "5"
-        6 => "6"
-        7 => "7"
-        8 => "8"
-        9 => "9"
-        _ => "?"
-    }
 }
