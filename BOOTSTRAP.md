@@ -493,8 +493,11 @@ Ordered roughly by when it becomes worth doing, not by importance:
     quoted and resolved relative to the importing file, `.norn` implied, subdirectories in,
     cycles legal (no module initialisers means no order to violate). `export` before `fn`,
     `task fn`, `struct`, `enum`, or `reactor` marks what a file offers; everything else is
-    file-private. Bare specifiers — `"std/fs"`, no leading `./` — parse but are reserved for the
-    standard library: the package lane exists with zero syntax change left to make. `use` and
+    file-private. Bare `std/…` specifiers resolve to standard-library modules written in Norn
+    and embedded in the compiler — `norn-hir`'s `stdlib` table, the `rt_sources.rs` precedent,
+    keys extensionless and provenance carried by `resolve_specifier` so a relative `./std/fs`
+    stays a user file — while other bare specifiers are refused: the package lane exists with
+    zero syntax change left to make. `use` and
     `module` are no longer keywords (the `uses { … }` capability clause is untouched);
     `import` is one, `as` was promoted out of the reserved list, and `from` is contextual,
     still bindable everywhere else.
@@ -517,9 +520,20 @@ Ordered roughly by when it becomes worth doing, not by importance:
     `continue`, expressions all, with turns barred from reaching them so the termination theorem
     narrowed instead of dying — and a few byte primitives — met: `data[i]` indexing (out of range
     traps, like `bytes_slice`) and `byte` with `bytes_concat` for building. Every proto-std gate
-    is now met and the absorption is unblocked: HTTP parsing and rendering, `bytes_text`, and
-    `pipe_to` over `flow_next` — deferred to that work, so a real consumer drives its design —
-    become concrete Norn modules: most of the table.
+    is met and the lane is live: `std/fmt` (`digits`, `parse_int`) is the first embedded module,
+    one implementation executed by both engines with the differential oracle covering it for
+    free, and the six hand-written `digits` copies the examples grew are gone. The ordering
+    ahead: `bytes_text` dissolves next — the first builtin deleted from the table and
+    reimplemented in Norn, establishing the delete-and-import migration, atomic by construction
+    since builtins are reserved names — then `std/http` ports `norn-rt`'s pure `parse_head` and
+    response rendering, which retypes `tcp_read` to yield `Bytes` (breaking freely: nobody is
+    using the language, and syscalls speak bytes) and dissolves the `Request` *resource* the
+    honest way — std/http reads bytes from a connection and parses the head into an ordinary
+    Norn struct, responding is writing bytes back, and the connection becomes the traced,
+    scope-closed seam — then `flow_next` with `pipe_to` in Norn, the deferred intrinsic designed
+    by its first real consumer. (`examples/tasks.norn`'s aspirational `std/fs`/`std/http`/
+    `std/json`/`std/time` imports stay parse-only; checked, they would now diagnose as unknown
+    std modules, and they stand until those modules exist.)
     The general std — collections, `Flow<T>` beyond `Bytes`, and the method spelling that turns
     `request_header(&req, h)` into `req.header(h)` — waits for item 7's generics and traits.
     What never dissolves is a small intrinsic layer at the syscall boundary, which is also where
