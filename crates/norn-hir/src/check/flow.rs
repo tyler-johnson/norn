@@ -386,7 +386,9 @@ impl Checker {
                     "`?` applies to Result and Option, not {}",
                     self.program.ty_name(other)
                 );
-                self.error(span, message);
+                let other = other.clone();
+                let diagnostic = self.with_opaque_note(Diagnostic::new(span, message), &other);
+                self.push(diagnostic);
                 Expr {
                     kind: ExprKind::Error,
                     ty: Ty::Error,

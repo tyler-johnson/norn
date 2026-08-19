@@ -1,33 +1,54 @@
-error: `length` takes 1 type argument, found 2
-  --> generics.norn:30:13
+error: `+` does not apply to T
+  --> generics.norn:34:5
    |
-30 |     let a = length<I64, Bool>(List.Nil)
+34 |     value + value
+   |     ^^^^^^^^^^^^^
+   = note: `T` is opaque inside `combine`: without a bound it can only be moved, stored, matched by binding, or passed on
+
+error: `T` is a type parameter, not a constructor
+  --> generics.norn:39:5
+   |
+39 |     T()
+   |     ^^^ a bare parameter cannot be built
+   = note: `T` is opaque inside `make`: without a bound it can only be moved, stored, matched by binding, or passed on
+
+error: `length` takes 1 type argument, found 2
+  --> generics.norn:50:13
+   |
+50 |     let a = length<I64, Bool>(List.Nil)
    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
    = note: the declaration is `length<T>`
 
 error: cannot tell what type `T` is in this call of `empty`
-  --> generics.norn:32:13
+  --> generics.norn:52:13
    |
-32 |     let b = empty()
+52 |     let b = empty()
    |             ^^^^^^^ no argument or expectation pins it down
    = note: say it explicitly, as in `empty<I64>(…)`
 
 error: expected I64, found Bool
-  --> generics.norn:34:21
+  --> generics.norn:54:21
    |
-34 |     let c = both(1, true)
+54 |     let c = both(1, true)
    |                     ^^^^
 
 error: `plain` takes no type arguments
-  --> generics.norn:36:13
+  --> generics.norn:56:13
    |
-36 |     let d = plain<I64>()
+56 |     let d = plain<I64>()
    |             ^^^^^^^^^^^^
    = note: its declaration has no type parameters
 
 error: `Some` takes no type arguments
-  --> generics.norn:38:13
+  --> generics.norn:58:13
    |
-38 |     let e = Some<I64>(3)
+58 |     let e = Some<I64>(3)
    |             ^^^^^^^^^^^^
    = note: its payload type comes from the expectation; annotate the binding instead
+
+error: `deep` instantiates itself at an ever-deeper type
+  --> generics.norn:60:13
+   |
+60 |     let f = deep(0)
+   |             ^^^^^^^ more than 32 instantiations deep
+   = note: a generic function that calls itself at a bigger type than it was given never stops instantiating; make the recursion reuse the caller's own type parameters

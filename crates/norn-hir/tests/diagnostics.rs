@@ -208,6 +208,36 @@ fn main() {
 ",
     );
 
+    // A generic calling a generic at a type built from its own parameter: the inner call is a
+    // symbolic instance inside the template, resolved per-instance during monomorphization.
+    accepted(
+        "generics calling generics compose through instances",
+        "\
+enum List<T> {
+    Nil
+    Cons(T, List<T>)
+}
+
+fn prepend<T>(value: T, rest: List<T>) -> List<T> {
+    List.Cons(value, rest)
+}
+
+fn double_wrap<T>(value: T) -> List<List<T>> {
+    prepend(prepend(value, List.Nil), List.Nil)
+}
+
+fn main() {
+    match double_wrap(3) {
+        List.Cons(inner, _) => match inner {
+            List.Cons(value, _) => print(value)
+            List.Nil => print(\"empty\")
+        }
+        List.Nil => print(\"empty\")
+    }
+}
+",
+    );
+
     // The `state journal: List<Delta>` shape: the member's type resolves after the fill drain,
     // so the eager affinity question `reactor_ty` asks sees real fields.
     accepted(

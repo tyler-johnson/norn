@@ -220,11 +220,11 @@ impl Checker {
                 "`await` applies to a task, not {}",
                 self.program.ty_name(&task.ty)
             );
-            self.push(
-                Diagnostic::new(span, message)
-                    .label("not a task")
-                    .note("a task comes from calling a `task fn`, and nothing else in v0"),
-            );
+            let diagnostic = Diagnostic::new(span, message)
+                .label("not a task")
+                .note("a task comes from calling a `task fn`, and nothing else in v0");
+            let diagnostic = self.with_opaque_note(diagnostic, &task.ty);
+            self.push(diagnostic);
             return self.error_expr(span);
         };
         let ty = (**produced).clone();
@@ -645,9 +645,10 @@ impl Checker {
 
         let Ty::Struct(id) = base.ty else {
             let message = format!("{} has no fields", self.program.ty_name(&base.ty));
-            self.push(
-                Diagnostic::new(span, message).label(format!("`{}` accessed here", name.name)),
-            );
+            let diagnostic =
+                Diagnostic::new(span, message).label(format!("`{}` accessed here", name.name));
+            let diagnostic = self.with_opaque_note(diagnostic, &base.ty);
+            self.push(diagnostic);
             return Expr {
                 kind: ExprKind::Error,
                 ty: Ty::Error,
@@ -693,10 +694,10 @@ impl Checker {
                 "only `Bytes` can be indexed in v0, not {}",
                 self.program.ty_name(&base.ty)
             );
-            self.push(
-                Diagnostic::new(span, message)
-                    .note("collections and their indexing arrive with the standard library"),
-            );
+            let diagnostic = Diagnostic::new(span, message)
+                .note("collections and their indexing arrive with the standard library");
+            let diagnostic = self.with_opaque_note(diagnostic, &base.ty);
+            self.push(diagnostic);
             return self.error_expr(span);
         }
         let index = self.check_expr(index, Some(&Ty::I64));
@@ -747,7 +748,9 @@ impl Checker {
                     op.text().trim(),
                     self.program.ty_name(ty)
                 );
-                self.error(span, message);
+                let ty = ty.clone();
+                let diagnostic = self.with_opaque_note(Diagnostic::new(span, message), &ty);
+                self.push(diagnostic);
                 return Expr {
                     kind: ExprKind::Error,
                     ty: Ty::Error,
@@ -858,6 +861,8 @@ impl Checker {
                     "structural equality on structs and enums is not derived yet; match instead",
                 );
             }
+            let operand = operand.clone();
+            let diagnostic = self.with_opaque_note(diagnostic, &operand);
             self.push(diagnostic);
             return Expr {
                 kind: ExprKind::Error,

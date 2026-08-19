@@ -25,6 +25,26 @@ fn plain() -> I64 {
     1
 }
 
+enum Box<T> {
+    Full(T)
+}
+
+// An operator needs to know its operand, and a bare parameter says nothing.
+fn combine<T>(value: T) -> T {
+    value + value
+}
+
+// A parameter is a hole, not a constructor.
+fn make<T>() -> T {
+    T()
+}
+
+// Polymorphic recursion: every call instantiates at a bigger type, so the worklist never
+// converges — the depth fuse is what stops it.
+fn deep<T>(value: T) -> I64 {
+    deep(Box.Full(value))
+}
+
 fn main() {
     // The wrong number of explicit type arguments.
     let a = length<I64, Bool>(List.Nil)
@@ -36,4 +56,6 @@ fn main() {
     let d = plain<I64>()
     // The builtin constructors take their payload type from the expectation alone.
     let e = Some<I64>(3)
+    // The instantiation chain from this call is what trips the recursion fuse.
+    let f = deep(0)
 }

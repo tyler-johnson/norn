@@ -114,6 +114,21 @@ impl Checker {
         }
 
         let Some(&id) = self.ns[self.current].fns.get(name) else {
+            // A type parameter shadows the module's types in type position, so it answers here
+            // too — with what a bare parameter cannot do, rather than "unknown function".
+            if self.type_params_in_scope.contains(name) {
+                let diagnostic = Diagnostic::new(
+                    span,
+                    format!("`{name}` is a type parameter, not a constructor"),
+                )
+                .label("a bare parameter cannot be built")
+                .note(format!(
+                    "`{name}` is opaque inside `{}`: without a bound it can only be moved, stored, matched by binding, or passed on",
+                    self.fn_name
+                ));
+                self.push(diagnostic);
+                return self.error_expr(span);
+            }
             // Construction is spelled like a call; resolution is what tells the two apart. A
             // struct name builds the struct, and the type namespace answers before the reactor
             // member fallback does — matching the scan in `reactor_graph`, which skips type

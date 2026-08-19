@@ -758,6 +758,26 @@ impl Checker {
         checked
     }
 
+    /// Attach the opaque-parameter teaching note when the offending type is a bare `T` — the one
+    /// note every operation a parameter cannot do shares.
+    pub(super) fn with_opaque_note(&self, diagnostic: Diagnostic, ty: &Ty) -> Diagnostic {
+        if let Ty::Param { name, .. } = ty.owned() {
+            diagnostic.note(format!(
+                "`{name}` is opaque inside `{}`: without a bound it can only be moved, stored, matched by binding, or passed on",
+                self.fn_name
+            ))
+        } else {
+            diagnostic
+        }
+    }
+
+    /// The instantiation gate: asked before a generic function's settled arguments mint an
+    /// instance. A no-op until bounds land with traits — the seam sits here so the caller does
+    /// not change again. Bounds live on functions alone (struct and enum parameters may not
+    /// declare them), which is why type instantiation has no twin of this.
+    #[allow(unused_variables, clippy::unused_self)]
+    pub(super) fn check_type_param_bounds(&mut self, template: FnId, args: &[Ty], at: Span) {}
+
     // ---------------------------------------------------------------- generic functions
 
     /// What a fn id means generically — `struct_base`'s shape for functions.
@@ -981,6 +1001,7 @@ impl Checker {
         if instance_args.iter().any(Ty::is_error) {
             return self.error_expr(span);
         }
+        self.check_type_param_bounds(template, &instance_args, span);
         let instance = self.request_fn_instance(template, instance_args, span, 0);
         let ret = self.signatures[instance.index()].1.clone();
         let ty = if is_task {
