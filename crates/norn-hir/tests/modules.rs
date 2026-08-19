@@ -259,7 +259,13 @@ fn a_std_import_binds_in_memory() {
             norn_hir::stdlib::source("std/fmt").expect("std/fmt is embedded"),
         ),
     ]);
-    assert!(checked.program.fns.iter().any(|f| f.name == "fmt.to_string"));
+    assert!(
+        checked
+            .program
+            .fns
+            .iter()
+            .any(|f| f.name == "fmt.to_string")
+    );
 }
 
 #[test]
@@ -621,11 +627,11 @@ fn a_relative_std_path_still_reaches_the_filesystem() {
 fn an_unknown_std_module_is_diagnosed_without_a_read() {
     let loaded = load_from(&[(
         "main.norn",
-        "import { get } from \"std/http\"\n\nfn main() {}\n",
+        "import { get } from \"std/json\"\n\nfn main() {}\n",
     )]);
     let out = rendered_load_errors(&loaded);
     assert!(
-        out.contains("no module `std/http` in the standard library"),
+        out.contains("no module `std/json` in the standard library"),
         "{out}"
     );
 }

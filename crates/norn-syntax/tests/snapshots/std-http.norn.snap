@@ -1,0 +1,985 @@
+=== ast ===
+(module
+  (import "std/fmt" (item to_string) (item to_int))
+  (struct Header export (field name String) (field value String))
+  (enum Headers export (variant Nil) (variant Cons (tuple Header Headers)))
+  (struct Request export
+    (field method String)
+    (field path String)
+    (field headers Headers)
+    (field content_length I64)
+    (field leftover Bytes))
+  (enum HeadParse export
+    (variant Incomplete)
+    (variant Complete (tuple Request I64))
+    (variant Invalid (tuple String)))
+  (fn head export
+    (params (param data Bytes))
+    (ret HeadParse)
+    (block
+      (let len (call (path bytes_len) (arg (path data))))
+      (match
+        (call (path terminator) (arg (path data)) (arg (path len)))
+        (arm
+          (bind None)
+          (block
+            (if
+              (binary >= (path len) (int 8192))
+              (block
+                (return
+                  (call
+                    (path HeadParse.Invalid)
+                    (arg (str "the request head exceeds 8192 bytes"))))))
+            (path HeadParse.Incomplete)))
+        (arm
+          (construct Some (arg (bind end)))
+          (block
+            (if
+              (binary > (path end) (int 8192))
+              (block
+                (return
+                  (call
+                    (path HeadParse.Invalid)
+                    (arg (str "the request head exceeds 8192 bytes"))))))
+            (call (path parse) (arg (path data)) (arg (path end))))))))
+  (fn header export
+    (params (param req Request) (param name String))
+    (ret (ty Option String))
+    (block
+      (let wanted (call (path bytes) (arg (path name))))
+      (call
+        (path lookup)
+        (arg (path req.headers))
+        (arg
+          (call
+            (path lower)
+            (arg (path wanted))
+            (arg (int 0))
+            (arg (call (path bytes_len) (arg (path wanted)))))))))
+  (fn response_head export
+    (params (param status I64) (param content_length I64))
+    (ret String)
+    (block
+      (binary +
+        (binary +
+          (binary +
+            (binary +
+              (binary +
+                (binary +
+                  (str "HTTP/1.1 ")
+                  (call (path to_string) (arg (path status))))
+                (str " "))
+              (call (path reason) (arg (path status))))
+            (str "\r\nContent-Length: "))
+          (call (path to_string) (arg (path content_length))))
+        (str "\r\nConnection: close\r\n\r\n"))))
+  (fn read_request export task
+    (params (param conn (ref Connection)))
+    (ret (ty Result Request IoError))
+    (uses net.io)
+    (block
+      (let gathered mut (call (path bytes) (arg (str ""))))
+      (loop
+        (block
+          (match
+            (call (path head) (arg (path gathered)))
+            (arm
+              (construct HeadParse.Complete (arg (bind req)) (arg (bind consumed)))
+              (block
+                (let len (call (path bytes_len) (arg (path gathered))))
+                (let stop mut (binary + (path consumed) (path req.content_length)))
+                (if
+                  (binary > (path stop) (path len))
+                  (block (assign (path stop) (path len))))
+                (return
+                  (call
+                    (path Ok)
+                    (arg
+                      (call
+                        (path Request)
+                        (arg method (path req.method))
+                        (arg path (path req.path))
+                        (arg headers (path req.headers))
+                        (arg content_length (path req.content_length))
+                        (arg leftover
+                          (call
+                            (path bytes_slice)
+                            (arg (path gathered))
+                            (arg (path consumed))
+                            (arg (path stop))))))))))
+            (arm
+              (construct HeadParse.Invalid (arg (bind rule)))
+              (block
+                (return
+                  (call
+                    (path Err)
+                    (arg (call (path IoError.Other) (arg (path rule))))))))
+            (arm
+              (construct HeadParse.Incomplete)
+              (block
+                (assign
+                  (path gathered)
+                  (call
+                    (path bytes_concat)
+                    (arg (path gathered))
+                    (arg (try (await (call (path tcp_read) (arg (path conn)))))))))))))))
+  (fn respond export task
+    (params (param conn Connection) (param status I64) (param body String))
+    (ret (ty Result unit IoError))
+    (uses net.io)
+    (block
+      (let payload (call (path bytes) (arg (path body))))
+      (let outcome
+        (await
+          (call
+            (path tcp_write)
+            (arg (unary & (path conn)))
+            (arg
+              (call
+                (path bytes_concat)
+                (arg
+                  (call
+                    (path bytes)
+                    (arg
+                      (call
+                        (path response_head)
+                        (arg (path status))
+                        (arg (call (path bytes_len) (arg (path payload))))))))
+                (arg (path payload)))))))
+      (await (call (path tcp_close) (arg (path conn))))
+      (path outcome)))
+  (fn respond_empty export task
+    (params (param conn Connection) (param status I64))
+    (ret (ty Result unit IoError))
+    (uses net.io)
+    (block
+      (await
+        (call (path respond) (arg (path conn)) (arg (path status)) (arg (str ""))))))
+  (fn respond_flow export task
+    (params (param conn Connection) (param status I64) (param body (ty Flow Bytes)))
+    (ret (ty Result unit IoError))
+    (uses net.io)
+    (block
+      (let outcome
+        (await
+          (call
+            (path stream)
+            (arg (unary & (path conn)))
+            (arg (unary & (path body)))
+            (arg (path status)))))
+      (await (call (path flow_close) (arg (path body))))
+      (await (call (path tcp_close) (arg (path conn))))
+      (path outcome)))
+  (fn stream task
+    (params
+      (param conn (ref Connection))
+      (param body (ref (ty Flow Bytes)))
+      (param status I64))
+    (ret (ty Result unit IoError))
+    (uses net.io)
+    (block
+      (try
+        (await
+          (call
+            (path tcp_write)
+            (arg (path conn))
+            (arg
+              (call
+                (path bytes)
+                (arg
+                  (call
+                    (path response_head)
+                    (arg (path status))
+                    (arg (call (path flow_len) (arg (path body)))))))))))
+      (loop
+        (block
+          (let chunk (try (await (call (path flow_next) (arg (path body))))))
+          (if
+            (binary == (call (path bytes_len) (arg (path chunk))) (int 0))
+            (block (return (call (path Ok) (arg unit)))))
+          (try (await (call (path tcp_write) (arg (path conn)) (arg (path chunk)))))))))
+  (fn save_body export task
+    (params (param conn (ref Connection)) (param req Request) (param sink File))
+    (ret (ty Result I64 IoError))
+    (uses net.io)
+    (block
+      (let outcome
+        (await
+          (call
+            (path receive)
+            (arg (path conn))
+            (arg (unary & (path sink)))
+            (arg (path req)))))
+      (await (call (path file_close) (arg (path sink))))
+      (path outcome)))
+  (fn receive task
+    (params
+      (param conn (ref Connection))
+      (param sink (ref File))
+      (param req Request))
+    (ret (ty Result I64 IoError))
+    (uses net.io)
+    (block
+      (try
+        (await (call (path file_write) (arg (path sink)) (arg (path req.leftover)))))
+      (let written mut (call (path bytes_len) (arg (path req.leftover))))
+      (while
+        (binary < (path written) (path req.content_length))
+        (block
+          (let chunk (try (await (call (path tcp_read) (arg (path conn))))))
+          (let due (binary - (path req.content_length) (path written)))
+          (let take mut (call (path bytes_len) (arg (path chunk))))
+          (if
+            (binary > (path take) (path due))
+            (block (assign (path take) (path due))))
+          (try
+            (await
+              (call
+                (path file_write)
+                (arg (path sink))
+                (arg
+                  (call
+                    (path bytes_slice)
+                    (arg (path chunk))
+                    (arg (int 0))
+                    (arg (path take)))))))
+          (assign (path written) (binary + (path written) (path take)))))
+      (call (path Ok) (arg (path written)))))
+  (fn parse
+    (params (param data Bytes) (param end I64))
+    (ret HeadParse)
+    (block
+      (let stop (binary - (path end) (int 4)))
+      (let i mut (int 0))
+      (while
+        (binary < (path i) (path stop))
+        (block
+          (if
+            (binary > (index (path data) (path i)) (int 127))
+            (block
+              (return
+                (call
+                  (path HeadParse.Invalid)
+                  (arg (str "the request head is not ASCII text"))))))
+          (assign (path i) (binary + (path i) (int 1)))))
+      (let line_end
+        (call (path line_break) (arg (path data)) (arg (int 0)) (arg (path stop))))
+      (if
+        (binary !=
+          (call
+            (path count_at)
+            (arg (path data))
+            (arg (int 32))
+            (arg (int 0))
+            (arg (path line_end)))
+          (int 2))
+        (block
+          (return
+            (call
+              (path HeadParse.Invalid)
+              (arg (str "the request line is not `METHOD PATH HTTP/1.1`"))))))
+      (let sp1
+        (call
+          (path find_at)
+          (arg (path data))
+          (arg (int 32))
+          (arg (int 0))
+          (arg (path line_end))))
+      (let sp2
+        (call
+          (path find_at)
+          (arg (path data))
+          (arg (int 32))
+          (arg (binary + (path sp1) (int 1)))
+          (arg (path line_end))))
+      (if
+        (binary ||
+          (binary == (path sp1) (int 0))
+          (unary !
+            (call (path uppercase) (arg (path data)) (arg (int 0)) (arg (path sp1)))))
+        (block
+          (return
+            (call
+              (path HeadParse.Invalid)
+              (arg (str "the method is not an upper-case token"))))))
+      (if
+        (binary == (path sp2) (binary + (path sp1) (int 1)))
+        (block
+          (return
+            (call (path HeadParse.Invalid) (arg (str "the request path is empty"))))))
+      (if
+        (binary !=
+          (call
+            (path bytes_slice)
+            (arg (path data))
+            (arg (binary + (path sp2) (int 1)))
+            (arg (path line_end)))
+          (call (path bytes) (arg (str "HTTP/1.1"))))
+        (block
+          (return
+            (call
+              (path HeadParse.Invalid)
+              (arg (str "only HTTP/1.1 is spoken here"))))))
+      (let headers mut (path Headers.Nil))
+      (let cursor mut (path line_end))
+      (while
+        (binary < (path cursor) (path stop))
+        (block
+          (assign (path cursor) (binary + (path cursor) (int 2)))
+          (let brk
+            (call
+              (path line_break)
+              (arg (path data))
+              (arg (path cursor))
+              (arg (path stop))))
+          (match
+            (call
+              (path header_line)
+              (arg (path data))
+              (arg (path cursor))
+              (arg (path brk)))
+            (arm
+              (construct Ok (arg (bind h)))
+              (block
+                (assign
+                  (path headers)
+                  (call (path Headers.Cons) (arg (path h)) (arg (path headers))))))
+            (arm
+              (construct Err (arg (bind rule)))
+              (block (return (call (path HeadParse.Invalid) (arg (path rule)))))))
+          (assign (path cursor) (path brk))))
+      (if
+        (binary >
+          (call (path named) (arg (path headers)) (arg (str "transfer-encoding")))
+          (int 0))
+        (block
+          (return
+            (call
+              (path HeadParse.Invalid)
+              (arg
+                (str "Transfer-Encoding is not supported; bodies are Content-Length"))))))
+      (let lengths
+        (call (path named) (arg (path headers)) (arg (str "content-length"))))
+      (if
+        (binary > (path lengths) (int 1))
+        (block
+          (return
+            (call
+              (path HeadParse.Invalid)
+              (arg (str "Content-Length appears twice"))))))
+      (let content_length mut (int 0))
+      (if
+        (binary == (path lengths) (int 1))
+        (block
+          (match
+            (call (path lookup) (arg (path headers)) (arg (str "content-length")))
+            (arm
+              (construct Some (arg (bind value)))
+              (match
+                (call (path to_int) (arg (path value)))
+                (arm
+                  (construct Some (arg (bind n)))
+                  (block
+                    (if
+                      (binary < (path n) (int 0))
+                      (block
+                        (return
+                          (call
+                            (path HeadParse.Invalid)
+                            (arg (str "Content-Length is not a number"))))))
+                    (assign (path content_length) (path n))))
+                (arm
+                  (bind None)
+                  (block
+                    (return
+                      (call
+                        (path HeadParse.Invalid)
+                        (arg (str "Content-Length is not a number"))))))))
+            (arm (bind None) unit))))
+      (let req
+        (call
+          (path Request)
+          (arg method
+            (call
+              (path text_unchecked)
+              (arg
+                (call
+                  (path bytes_slice)
+                  (arg (path data))
+                  (arg (int 0))
+                  (arg (path sp1))))))
+          (arg path
+            (call
+              (path text_unchecked)
+              (arg
+                (call
+                  (path bytes_slice)
+                  (arg (path data))
+                  (arg (binary + (path sp1) (int 1)))
+                  (arg (path sp2))))))
+          (arg headers (path headers))
+          (arg content_length (path content_length))
+          (arg leftover (call (path bytes) (arg (str ""))))))
+      (call (path HeadParse.Complete) (arg (path req)) (arg (path end)))))
+  (fn header_line
+    (params (param data Bytes) (param from I64) (param stop I64))
+    (ret (ty Result Header String))
+    (block
+      (let colon
+        (call
+          (path find_at)
+          (arg (path data))
+          (arg (int 58))
+          (arg (path from))
+          (arg (path stop))))
+      (if
+        (binary == (path colon) (path stop))
+        (block (return (call (path Err) (arg (str "a header line has no `:`"))))))
+      (if
+        (binary ||
+          (binary ||
+            (binary == (path colon) (path from))
+            (binary !=
+              (call
+                (path find_at)
+                (arg (path data))
+                (arg (int 32))
+                (arg (path from))
+                (arg (path colon)))
+              (path colon)))
+          (binary !=
+            (call
+              (path find_at)
+              (arg (path data))
+              (arg (int 9))
+              (arg (path from))
+              (arg (path colon)))
+            (path colon)))
+        (block
+          (return (call (path Err) (arg (str "a header name is not a token"))))))
+      (let lo mut (binary + (path colon) (int 1)))
+      (let hi mut (path stop))
+      (while
+        (binary &&
+          (binary < (path lo) (path hi))
+          (call (path whitespace) (arg (index (path data) (path lo)))))
+        (block (assign (path lo) (binary + (path lo) (int 1)))))
+      (while
+        (binary &&
+          (binary > (path hi) (path lo))
+          (call
+            (path whitespace)
+            (arg (index (path data) (binary - (path hi) (int 1))))))
+        (block (assign (path hi) (binary - (path hi) (int 1)))))
+      (call
+        (path Ok)
+        (arg
+          (call
+            (path Header)
+            (arg name
+              (call
+                (path lower)
+                (arg (path data))
+                (arg (path from))
+                (arg (path colon))))
+            (arg value
+              (call
+                (path text_unchecked)
+                (arg
+                  (call
+                    (path bytes_slice)
+                    (arg (path data))
+                    (arg (path lo))
+                    (arg (path hi)))))))))))
+  (fn terminator
+    (params (param data Bytes) (param len I64))
+    (ret (ty Option I64))
+    (block
+      (let i mut (int 0))
+      (while
+        (binary < (binary + (path i) (int 3)) (path len))
+        (block
+          (if
+            (binary &&
+              (binary &&
+                (binary &&
+                  (binary == (index (path data) (path i)) (int 13))
+                  (binary ==
+                    (index (path data) (binary + (path i) (int 1)))
+                    (int 10)))
+                (binary == (index (path data) (binary + (path i) (int 2))) (int 13)))
+              (binary == (index (path data) (binary + (path i) (int 3))) (int 10)))
+            (block (return (call (path Some) (arg (binary + (path i) (int 4)))))))
+          (assign (path i) (binary + (path i) (int 1)))))
+      (path None)))
+  (fn line_break
+    (params (param data Bytes) (param from I64) (param stop I64))
+    (ret I64)
+    (block
+      (let i mut (path from))
+      (while
+        (binary < (binary + (path i) (int 1)) (path stop))
+        (block
+          (if
+            (binary &&
+              (binary == (index (path data) (path i)) (int 13))
+              (binary == (index (path data) (binary + (path i) (int 1))) (int 10)))
+            (block (return (path i))))
+          (assign (path i) (binary + (path i) (int 1)))))
+      (path stop)))
+  (fn find_at
+    (params (param data Bytes) (param wanted I64) (param from I64) (param stop I64))
+    (ret I64)
+    (block
+      (let i mut (path from))
+      (while
+        (binary < (path i) (path stop))
+        (block
+          (if
+            (binary == (index (path data) (path i)) (path wanted))
+            (block (return (path i))))
+          (assign (path i) (binary + (path i) (int 1)))))
+      (path stop)))
+  (fn count_at
+    (params (param data Bytes) (param wanted I64) (param from I64) (param stop I64))
+    (ret I64)
+    (block
+      (let n mut (int 0))
+      (let i mut (path from))
+      (while
+        (binary < (path i) (path stop))
+        (block
+          (if
+            (binary == (index (path data) (path i)) (path wanted))
+            (block (assign (path n) (binary + (path n) (int 1)))))
+          (assign (path i) (binary + (path i) (int 1)))))
+      (path n)))
+  (fn uppercase
+    (params (param data Bytes) (param from I64) (param stop I64))
+    (ret Bool)
+    (block
+      (let i mut (path from))
+      (while
+        (binary < (path i) (path stop))
+        (block
+          (if
+            (binary ||
+              (binary < (index (path data) (path i)) (int 65))
+              (binary > (index (path data) (path i)) (int 90)))
+            (block (return (bool false))))
+          (assign (path i) (binary + (path i) (int 1)))))
+      (bool true)))
+  (fn whitespace
+    (params (param b I64))
+    (ret Bool)
+    (block
+      (binary ||
+        (binary == (path b) (int 32))
+        (binary && (binary >= (path b) (int 9)) (binary <= (path b) (int 13))))))
+  (fn lower
+    (params (param data Bytes) (param from I64) (param stop I64))
+    (ret String)
+    (block
+      (let out mut (call (path bytes) (arg (str ""))))
+      (let i mut (path from))
+      (while
+        (binary < (path i) (path stop))
+        (block
+          (let b mut (index (path data) (path i)))
+          (if
+            (binary && (binary >= (path b) (int 65)) (binary <= (path b) (int 90)))
+            (block (assign (path b) (binary + (path b) (int 32)))))
+          (assign
+            (path out)
+            (call
+              (path bytes_concat)
+              (arg (path out))
+              (arg (call (path byte) (arg (path b))))))
+          (assign (path i) (binary + (path i) (int 1)))))
+      (call (path text_unchecked) (arg (path out)))))
+  (fn named
+    (params (param headers Headers) (param name String))
+    (ret I64)
+    (block
+      (match
+        (path headers)
+        (arm (construct Headers.Nil) (int 0))
+        (arm
+          (construct Headers.Cons (arg (bind h)) (arg (bind rest)))
+          (block
+            (if
+              (binary == (path h.name) (path name))
+              (block
+                (binary +
+                  (int 1)
+                  (call (path named) (arg (path rest)) (arg (path name)))))
+              (else (block (call (path named) (arg (path rest)) (arg (path name)))))))))))
+  (fn lookup
+    (params (param headers Headers) (param name String))
+    (ret (ty Option String))
+    (block
+      (match
+        (path headers)
+        (arm (construct Headers.Nil) (path None))
+        (arm
+          (construct Headers.Cons (arg (bind h)) (arg (bind rest)))
+          (block
+            (if
+              (binary == (path h.name) (path name))
+              (block (call (path Some) (arg (path h.value))))
+              (else
+                (block (call (path lookup) (arg (path rest)) (arg (path name)))))))))))
+  (fn reason
+    (params (param status I64))
+    (ret String)
+    (block
+      (match
+        (path status)
+        (arm (int 200) (str "OK"))
+        (arm (int 201) (str "Created"))
+        (arm (int 204) (str "No Content"))
+        (arm (int 400) (str "Bad Request"))
+        (arm (int 404) (str "Not Found"))
+        (arm (int 405) (str "Method Not Allowed"))
+        (arm (int 500) (str "Internal Server Error"))
+        (arm _ (str ""))))))
+
+=== canonical ===
+import { to_string, to_int } from "std/fmt"
+
+export struct Header {
+    name: String
+    value: String
+}
+
+export enum Headers {
+    Nil
+    Cons(Header, Headers)
+}
+
+export struct Request {
+    method: String
+    path: String
+    headers: Headers
+    content_length: I64
+    leftover: Bytes
+}
+
+export enum HeadParse {
+    Incomplete
+    Complete(Request, I64)
+    Invalid(String)
+}
+
+export fn head(data: Bytes) -> HeadParse {
+    let len = bytes_len(data)
+    match terminator(data, len) {
+        None => {
+            if len >= 8192 {
+                return HeadParse.Invalid("the request head exceeds 8192 bytes")
+            }
+            HeadParse.Incomplete
+        }
+        Some(end) => {
+            if end > 8192 {
+                return HeadParse.Invalid("the request head exceeds 8192 bytes")
+            }
+            parse(data, end)
+        }
+    }
+}
+
+export fn header(req: Request, name: String) -> Option<String> {
+    let wanted = bytes(name)
+    lookup(req.headers, lower(wanted, 0, bytes_len(wanted)))
+}
+
+export fn response_head(status: I64, content_length: I64) -> String {
+    "HTTP/1.1 " + to_string(status) + " " + reason(status) + "\r\nContent-Length: " + to_string(content_length) + "\r\nConnection: close\r\n\r\n"
+}
+
+export task fn read_request(conn: &Connection) -> Result<Request, IoError>
+    uses { net.io }
+{
+    let mut gathered = bytes("")
+    loop {
+        match head(gathered) {
+            HeadParse.Complete(req, consumed) => {
+                let len = bytes_len(gathered)
+                let mut stop = consumed + req.content_length
+                if stop > len {
+                    stop = len
+                }
+                return Ok(Request(method: req.method, path: req.path, headers: req.headers, content_length: req.content_length, leftover: bytes_slice(gathered, consumed, stop)))
+            }
+            HeadParse.Invalid(rule) => {
+                return Err(IoError.Other(rule))
+            }
+            HeadParse.Incomplete => {
+                gathered = bytes_concat(gathered, await tcp_read(conn)?)
+            }
+        }
+    }
+}
+
+export task fn respond(conn: Connection, status: I64, body: String) -> Result<(), IoError>
+    uses { net.io }
+{
+    let payload = bytes(body)
+    let outcome = await tcp_write(&conn, bytes_concat(bytes(response_head(status, bytes_len(payload))), payload))
+    await tcp_close(conn)
+    outcome
+}
+
+export task fn respond_empty(conn: Connection, status: I64) -> Result<(), IoError>
+    uses { net.io }
+{
+    await respond(conn, status, "")
+}
+
+export task fn respond_flow(conn: Connection, status: I64, body: Flow<Bytes>) -> Result<(), IoError>
+    uses { net.io }
+{
+    let outcome = await stream(&conn, &body, status)
+    await flow_close(body)
+    await tcp_close(conn)
+    outcome
+}
+
+task fn stream(conn: &Connection, body: &Flow<Bytes>, status: I64) -> Result<(), IoError>
+    uses { net.io }
+{
+    await tcp_write(conn, bytes(response_head(status, flow_len(body))))?
+    loop {
+        let chunk = await flow_next(body)?
+        if bytes_len(chunk) == 0 {
+            return Ok(())
+        }
+        await tcp_write(conn, chunk)?
+    }
+}
+
+export task fn save_body(conn: &Connection, req: Request, sink: File) -> Result<I64, IoError>
+    uses { net.io }
+{
+    let outcome = await receive(conn, &sink, req)
+    await file_close(sink)
+    outcome
+}
+
+task fn receive(conn: &Connection, sink: &File, req: Request) -> Result<I64, IoError>
+    uses { net.io }
+{
+    await file_write(sink, req.leftover)?
+    let mut written = bytes_len(req.leftover)
+    while written < req.content_length {
+        let chunk = await tcp_read(conn)?
+        let due = req.content_length - written
+        let mut take = bytes_len(chunk)
+        if take > due {
+            take = due
+        }
+        await file_write(sink, bytes_slice(chunk, 0, take))?
+        written = written + take
+    }
+    Ok(written)
+}
+
+fn parse(data: Bytes, end: I64) -> HeadParse {
+    let stop = end - 4
+    let mut i = 0
+    while i < stop {
+        if data[i] > 127 {
+            return HeadParse.Invalid("the request head is not ASCII text")
+        }
+        i = i + 1
+    }
+    let line_end = line_break(data, 0, stop)
+    if count_at(data, 32, 0, line_end) != 2 {
+        return HeadParse.Invalid("the request line is not `METHOD PATH HTTP/1.1`")
+    }
+    let sp1 = find_at(data, 32, 0, line_end)
+    let sp2 = find_at(data, 32, sp1 + 1, line_end)
+    if sp1 == 0 || !uppercase(data, 0, sp1) {
+        return HeadParse.Invalid("the method is not an upper-case token")
+    }
+    if sp2 == sp1 + 1 {
+        return HeadParse.Invalid("the request path is empty")
+    }
+    if bytes_slice(data, sp2 + 1, line_end) != bytes("HTTP/1.1") {
+        return HeadParse.Invalid("only HTTP/1.1 is spoken here")
+    }
+    let mut headers = Headers.Nil
+    let mut cursor = line_end
+    while cursor < stop {
+        cursor = cursor + 2
+        let brk = line_break(data, cursor, stop)
+        match header_line(data, cursor, brk) {
+            Ok(h) => {
+                headers = Headers.Cons(h, headers)
+            }
+            Err(rule) => {
+                return HeadParse.Invalid(rule)
+            }
+        }
+        cursor = brk
+    }
+    if named(headers, "transfer-encoding") > 0 {
+        return HeadParse.Invalid("Transfer-Encoding is not supported; bodies are Content-Length")
+    }
+    let lengths = named(headers, "content-length")
+    if lengths > 1 {
+        return HeadParse.Invalid("Content-Length appears twice")
+    }
+    let mut content_length = 0
+    if lengths == 1 {
+        match lookup(headers, "content-length") {
+            Some(value) => match to_int(value) {
+                Some(n) => {
+                    if n < 0 {
+                        return HeadParse.Invalid("Content-Length is not a number")
+                    }
+                    content_length = n
+                }
+                None => {
+                    return HeadParse.Invalid("Content-Length is not a number")
+                }
+            }
+            None => ()
+        }
+    }
+    let req = Request(method: text_unchecked(bytes_slice(data, 0, sp1)), path: text_unchecked(bytes_slice(data, sp1 + 1, sp2)), headers: headers, content_length: content_length, leftover: bytes(""))
+    HeadParse.Complete(req, end)
+}
+
+fn header_line(data: Bytes, from: I64, stop: I64) -> Result<Header, String> {
+    let colon = find_at(data, 58, from, stop)
+    if colon == stop {
+        return Err("a header line has no `:`")
+    }
+    if colon == from || find_at(data, 32, from, colon) != colon || find_at(data, 9, from, colon) != colon {
+        return Err("a header name is not a token")
+    }
+    let mut lo = colon + 1
+    let mut hi = stop
+    while lo < hi && whitespace(data[lo]) {
+        lo = lo + 1
+    }
+    while hi > lo && whitespace(data[hi - 1]) {
+        hi = hi - 1
+    }
+    Ok(Header(name: lower(data, from, colon), value: text_unchecked(bytes_slice(data, lo, hi))))
+}
+
+fn terminator(data: Bytes, len: I64) -> Option<I64> {
+    let mut i = 0
+    while i + 3 < len {
+        if data[i] == 13 && data[i + 1] == 10 && data[i + 2] == 13 && data[i + 3] == 10 {
+            return Some(i + 4)
+        }
+        i = i + 1
+    }
+    None
+}
+
+fn line_break(data: Bytes, from: I64, stop: I64) -> I64 {
+    let mut i = from
+    while i + 1 < stop {
+        if data[i] == 13 && data[i + 1] == 10 {
+            return i
+        }
+        i = i + 1
+    }
+    stop
+}
+
+fn find_at(data: Bytes, wanted: I64, from: I64, stop: I64) -> I64 {
+    let mut i = from
+    while i < stop {
+        if data[i] == wanted {
+            return i
+        }
+        i = i + 1
+    }
+    stop
+}
+
+fn count_at(data: Bytes, wanted: I64, from: I64, stop: I64) -> I64 {
+    let mut n = 0
+    let mut i = from
+    while i < stop {
+        if data[i] == wanted {
+            n = n + 1
+        }
+        i = i + 1
+    }
+    n
+}
+
+fn uppercase(data: Bytes, from: I64, stop: I64) -> Bool {
+    let mut i = from
+    while i < stop {
+        if data[i] < 65 || data[i] > 90 {
+            return false
+        }
+        i = i + 1
+    }
+    true
+}
+
+fn whitespace(b: I64) -> Bool {
+    b == 32 || b >= 9 && b <= 13
+}
+
+fn lower(data: Bytes, from: I64, stop: I64) -> String {
+    let mut out = bytes("")
+    let mut i = from
+    while i < stop {
+        let mut b = data[i]
+        if b >= 65 && b <= 90 {
+            b = b + 32
+        }
+        out = bytes_concat(out, byte(b))
+        i = i + 1
+    }
+    text_unchecked(out)
+}
+
+fn named(headers: Headers, name: String) -> I64 {
+    match headers {
+        Headers.Nil => 0
+        Headers.Cons(h, rest) => {
+            if h.name == name {
+                1 + named(rest, name)
+            } else {
+                named(rest, name)
+            }
+        }
+    }
+}
+
+fn lookup(headers: Headers, name: String) -> Option<String> {
+    match headers {
+        Headers.Nil => None
+        Headers.Cons(h, rest) => {
+            if h.name == name {
+                Some(h.value)
+            } else {
+                lookup(rest, name)
+            }
+        }
+    }
+}
+
+fn reason(status: I64) -> String {
+    match status {
+        200 => "OK"
+        201 => "Created"
+        204 => "No Content"
+        400 => "Bad Request"
+        404 => "Not Found"
+        405 => "Method Not Allowed"
+        500 => "Internal Server Error"
+        _ => ""
+    }
+}

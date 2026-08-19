@@ -1,0 +1,103 @@
+// The parse spec, reborn: the rules std/http's `head` ports from the runtime's Rust parser,
+// exercised case by case and printed one line each — the snapshot pins them under the
+// interpreter, and the differential oracle holds the native engine to the same bytes. The
+// deltas the port made on purpose are pinned here too: heads must be ASCII, duplicate headers
+// resolve last-wins through the cons list, and any status renders a response head, an unknown
+// number carrying the empty reason phrase HTTP permits.
+
+import { to_string } from "std/fmt"
+import { head, header, response_head, HeadParse } from "std/http"
+
+fn verdict(data: Bytes) -> String {
+    match head(data) {
+        HeadParse.Incomplete => "incomplete"
+        HeadParse.Complete(req, consumed) => "complete " + req.method + " " + req.path + " consuming " + to_string(consumed)
+        HeadParse.Invalid(rule) => "invalid: " + rule
+    }
+}
+
+fn main() -> () {
+    // Every strict prefix of a whole head is Incomplete: parsing never guesses early.
+    let whole = bytes("GET / HTTP/1.1\r\nHost: a\r\n\r\n")
+    let mut early = 0
+    let mut cut = 0
+    while cut < bytes_len(whole) {
+        match head(bytes_slice(whole, 0, cut)) {
+            HeadParse.Incomplete => ()
+            _ => {
+                early = early + 1
+            }
+        }
+        cut = cut + 1
+    }
+    print("prefixes settled early: " + to_string(early))
+    print(verdict(whole))
+
+    // The malformed request lines, one rule each.
+    print(verdict(bytes("GET /\r\n\r\n")))
+    print(verdict(bytes("get / HTTP/1.1\r\n\r\n")))
+    print(verdict(bytes("GET / HTTP/1.0\r\n\r\n")))
+    print(verdict(bytes("GET / HTTP/1.1\r\nno-colon\r\n\r\n")))
+    print(verdict(bytes("GET / HTTP/1.1\r\nbad name: x\r\n\r\n")))
+
+    // Body framing: Content-Length must be one plain number, and chunked bodies are refused.
+    print(verdict(bytes("PUT / HTTP/1.1\r\nContent-Length: ten\r\n\r\n")))
+    print(verdict(bytes("PUT / HTTP/1.1\r\nContent-Length: 1\r\nContent-Length: 2\r\n\r\n")))
+    print(verdict(bytes("POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n")))
+
+    // The ASCII delta: a byte past 127 anywhere in the head refuses the whole head — even one
+    // that is perfectly good UTF-8, which the old runtime parser would have let through.
+    print(verdict(bytes("GET /☃ HTTP/1.1\r\n\r\n")))
+
+    // The cap: a head that reaches 8192 bytes without a blank line is refused, and a terminator
+    // arriving past the cap is no better.
+    let mut endless = bytes("GET / HTTP/1.1\r\n")
+    let padding = bytes("X-Padding: yes, quite a lot of padding rides on this line\r\n")
+    while bytes_len(endless) < 8192 {
+        endless = bytes_concat(endless, padding)
+    }
+    print(verdict(endless))
+    print(verdict(bytes_concat(endless, bytes("\r\n"))))
+
+    // The body starts exactly where the head says it consumed.
+    let put = bytes("PUT /f HTTP/1.1\r\nContent-Length: 5\r\n\r\nhello")
+    match head(put) {
+        HeadParse.Complete(req, consumed) => {
+            if bytes_slice(put, consumed, bytes_len(put)) == bytes("hello") {
+                print("declared " + to_string(req.content_length) + ", body starts at consumed")
+            } else {
+                print("the body moved")
+            }
+        }
+        _ => print("the PUT head did not parse")
+    }
+
+    // Lookup is case-insensitive, and a repeated name resolves to its last appearance.
+    let get = bytes("GET /x HTTP/1.1\r\nHost: localhost\r\nX-Tag: one\r\nX-Tag: two\r\n\r\n")
+    match head(get) {
+        HeadParse.Complete(req, _) => {
+            match header(req, "HOST") {
+                Some(value) => print("host: " + value)
+                None => print("no host")
+            }
+            match header(req, "x-tag") {
+                Some(value) => print("x-tag: " + value)
+                None => print("no x-tag")
+            }
+        }
+        _ => print("the GET head did not parse")
+    }
+
+    // Response heads always declare a length and a close; 418 has no reason phrase and renders
+    // anyway — any status does, where the dissolved builtin trapped outside 100..=999.
+    if response_head(204, 0) == "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n" {
+        print("the 204 head is pinned")
+    } else {
+        print("the 204 head moved")
+    }
+    if response_head(418, 3) == "HTTP/1.1 418 \r\nContent-Length: 3\r\nConnection: close\r\n\r\n" {
+        print("the 418 head is pinned, reason empty")
+    } else {
+        print("the 418 head moved")
+    }
+}

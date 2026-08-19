@@ -144,14 +144,6 @@ pub enum Builtin {
     FlowNext,
     FlowLen,
     FlowClose,
-    HttpReadRequest,
-    RequestMethod,
-    RequestPath,
-    RequestHeader,
-    RequestBody,
-    HttpRespond,
-    HttpRespondEmpty,
-    HttpRespondFlow,
 }
 
 impl Builtin {
@@ -181,14 +173,6 @@ impl Builtin {
             Builtin::FlowNext => "flow_next",
             Builtin::FlowLen => "flow_len",
             Builtin::FlowClose => "flow_close",
-            Builtin::HttpReadRequest => "http_read_request",
-            Builtin::RequestMethod => "request_method",
-            Builtin::RequestPath => "request_path",
-            Builtin::RequestHeader => "request_header",
-            Builtin::RequestBody => "request_body",
-            Builtin::HttpRespond => "http_respond",
-            Builtin::HttpRespondEmpty => "http_respond_empty",
-            Builtin::HttpRespondFlow => "http_respond_flow",
         }
     }
 }
@@ -517,60 +501,6 @@ fn eval_builtin(
                 }
             }
         }
-        Builtin::RequestMethod => {
-            let id = resource("request_method", &args[0])?;
-            let Some(cx) = cx else {
-                return Err(impure_trap("request_method"));
-            };
-            match cx.request_method(id) {
-                Ok(method) => Value::Str(method.into()),
-                // Unreachable from a checked program — the borrow keeps the request alive —
-                // but the wording is ABI all the same, mirroring the interpreter.
-                Err(err) => {
-                    return Err(Trap::new(format!("`request_method`: {}", err.kind()), func));
-                }
-            }
-        }
-        Builtin::RequestPath => {
-            let id = resource("request_path", &args[0])?;
-            let Some(cx) = cx else {
-                return Err(impure_trap("request_path"));
-            };
-            match cx.request_path(id) {
-                Ok(path) => Value::Str(path.into()),
-                Err(err) => {
-                    return Err(Trap::new(format!("`request_path`: {}", err.kind()), func));
-                }
-            }
-        }
-        Builtin::RequestHeader => {
-            let id = resource("request_header", &args[0])?;
-            let name = text("request_header", &args[1])?;
-            let Some(cx) = cx else {
-                return Err(impure_trap("request_header"));
-            };
-            match cx.request_header(id, &name) {
-                Ok(Some(value)) => Value::Variant(
-                    ENUM_OPTION,
-                    TAG_SOME,
-                    Rc::new(vec![Value::Str(value.into())]),
-                ),
-                Ok(None) => Value::Variant(ENUM_OPTION, TAG_NONE, Rc::new(Vec::new())),
-                Err(err) => {
-                    return Err(Trap::new(format!("`request_header`: {}", err.kind()), func));
-                }
-            }
-        }
-        Builtin::RequestBody => {
-            let id = resource("request_body", &args[0])?;
-            let Some(cx) = cx else {
-                return Err(impure_trap("request_body"));
-            };
-            match cx.request_body(id) {
-                Ok(flow) => Value::Resource(ResourceKind::Flow, flow),
-                Err(trap) => return Err(trap),
-            }
-        }
         Builtin::Bytes => Value::Bytes(text("bytes", &args[0])?.into_bytes().into()),
         Builtin::BytesLen => Value::Int(blob("bytes_len", &args[0])?.len() as i64),
         Builtin::BytesSlice => {
@@ -697,38 +627,6 @@ fn poll_builtin(
             }
             Poll::Pending => Poll::Pending,
         },
-        Builtin::HttpReadRequest => match cx.http_read_request(resource(name, &args[0])?) {
-            Poll::Ready(outcome) => Poll::Ready(fallible(
-                outcome.map(|id| Value::Resource(ResourceKind::Request, id)),
-            )),
-            Poll::Pending => Poll::Pending,
-        },
-        Builtin::HttpRespond => {
-            let request = resource(name, &args[0])?;
-            let status = status(name, &args[1])?;
-            let body = text(name, &args[2])?;
-            match cx.http_respond(request, status, &body) {
-                Poll::Ready(outcome) => Poll::Ready(fallible(outcome.map(|()| Value::Unit))),
-                Poll::Pending => Poll::Pending,
-            }
-        }
-        Builtin::HttpRespondEmpty => {
-            let request = resource(name, &args[0])?;
-            let status = status(name, &args[1])?;
-            match cx.http_respond(request, status, "") {
-                Poll::Ready(outcome) => Poll::Ready(fallible(outcome.map(|()| Value::Unit))),
-                Poll::Pending => Poll::Pending,
-            }
-        }
-        Builtin::HttpRespondFlow => {
-            let request = resource(name, &args[0])?;
-            let status = status(name, &args[1])?;
-            let flow = resource(name, &args[2])?;
-            match cx.http_respond_flow(request, status, flow) {
-                Poll::Ready(outcome) => Poll::Ready(fallible(outcome.map(|()| Value::Unit))),
-                Poll::Pending => Poll::Pending,
-            }
-        }
         Builtin::Send => {
             let Value::Input(reactor, input) = &args[0] else {
                 return Err(Trap::new(
@@ -778,20 +676,6 @@ fn resource(builtin: &str, value: &Value) -> Result<ResourceId, Trap> {
             "runtime",
         )),
     }
-}
-
-// A status code the wire can carry: HTTP's status line is exactly three digits. The trap is
-// unreachable through the differential oracle — reaching it needs a socket — so the wording is
-// pinned by being the same source string here and in the interpreter.
-fn status(builtin: &str, value: &Value) -> Result<i64, Trap> {
-    let status = integer(builtin, value)?;
-    if !(100..=999).contains(&status) {
-        return Err(Trap::new(
-            format!("`{builtin}` status must be 100..=999, found {status}"),
-            "runtime",
-        ));
-    }
-    Ok(status)
 }
 
 fn blob(builtin: &str, value: &Value) -> Result<Rc<[u8]>, Trap> {

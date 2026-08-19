@@ -1,24 +1,27 @@
-// An HTTP hello server: the echo server's shape, speaking a real protocol.
+// An HTTP hello server: the echo server's shape, speaking a real protocol from std.
 //
-// `http_read_request` consumes the Connection — the socket becomes a Request, same descriptor,
-// and the head is parsed by the runtime. `http_respond` consumes the Request back: every v0
-// response says `Connection: close`, so answering and closing are one act, and no cleanup is
-// written anywhere in this file.
+// `read_request` borrows the Connection and parses the head into an ordinary struct — a request
+// is plain data now, not a resource, so nothing changes kind and nothing is left to double-take.
+// `respond` consumes the Connection: every v0 response says `Connection: close`, so answering
+// and closing are one act, and answering twice would be a move error. A malformed head is an
+// `Err` naming the broken rule, and the socket stays the scope's to close on the way out — no
+// cleanup is written anywhere in this file.
 //
 // As in the echo server, `main` prints the port the operating system chose so a client can find
 // it, and the accept loop is the same `scope { loop { … } }`.
 
 import { to_string } from "std/fmt"
+import { read_request, respond } from "std/http"
 
 task fn serve(conn: Connection) -> ()
     uses { net.io }
 {
-    match await http_read_request(conn) {
-        Ok(req) => match await http_respond(req, 200, "hello from norn\n") {
+    match await read_request(&conn) {
+        Ok(_) => match await respond(conn, 200, "hello from norn\n") {
             Ok(_) => ()
             Err(_) => ()
         }
-        // A malformed head is an Err value, and the runtime has already closed the socket.
+        // The connection was only borrowed, so it is still owned here; the scope closes it.
         Err(_) => ()
     }
 }

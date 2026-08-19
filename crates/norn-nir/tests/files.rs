@@ -7,10 +7,11 @@
 //! The script covers both streaming directions and the cancellation claim the pipe tests could
 //! not make: a PUT big enough to take multiple chunks lands on disk byte for byte; a GET streams
 //! it back with the right `Content-Length`; a GET for a missing file is a 404; and a PUT that
-//! promises 100,000 bytes and delivers 10 is still parked on its body flow when the server's
-//! scope closes — cancellation must close the request, the flow, and the half-written file, which
-//! is what open==close over a trace containing `file` and `flow` opens asserts. The partial file
-//! left on disk by the abandoned upload is accepted v0 behaviour.
+//! promises 100,000 bytes and delivers 10 is still parked in `save_body`'s read loop when the
+//! server's scope closes — cancellation must close the connection and the half-written file,
+//! which is what open==close over a trace containing `file` and `flow` opens asserts (the `flow`
+//! is the GET download's). The partial file left on disk by the abandoned upload is accepted v0
+//! behaviour.
 
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -135,12 +136,6 @@ fn the_file_server_streams_both_ways_and_cancellation_closes_everything() {
         .collect();
     assert!(kinds.contains(&"file"), "no file was opened:\n{trace}");
     assert!(kinds.contains(&"flow"), "no flow was opened:\n{trace}");
-    assert!(
-        trace
-            .lines()
-            .any(|line| line.split_whitespace().nth(2) == Some("pipe")),
-        "no pipe chunk was traced:\n{trace}"
-    );
 }
 
 /// One whole HTTP exchange, bytes in and bytes out. The server closes after responding, so

@@ -1,0 +1,414 @@
+// HTTP/1.1 on the wire, in Norn: the head parsed into an ordinary struct, responses rendered as
+// strings, and a Connection driven with the byte intrinsics. The Request *resource* dissolved
+// with the eight http_* builtins when this landed — reading a request no longer flips a socket
+// into another kind of thing. `read_request` borrows the connection and hands back plain data,
+// so the old double-take trap (`request_body` twice) is gone with the resource, and a head that
+// fails to parse no longer eagerly closes the socket — the owning scope does.
+//
+// Import by named items: `import { read_request, respond, Request } from "std/http"`.
+//
+// The respond family consumes the Connection: every v0 response says `Connection: close`, so
+// answering and closing are one act, and answering twice is a move error rather than a protocol
+// bug. The parser keeps the runtime parser's rules — `\r\n\r\n` terminator, the 8192-byte cap,
+// `METHOD PATH HTTP/1.1` with single spaces, `Content-Length` framing only — with deltas that
+// are deliberate and pinned by examples/run/http-head.norn: heads must be ASCII rather than
+// UTF-8; duplicate headers resolve last-wins; a malformed head surfaces the violated rule as
+// `Err(IoError.Other(rule))`; and any status renders, an unknown number carrying the empty
+// reason phrase HTTP permits, where the builtin used to trap outside 100..=999.
+
+import { to_string, to_int } from "std/fmt"
+
+export struct Header {
+    name: String
+    value: String
+}
+
+// A hand-monomorphized cons list, the posts.norn idiom, until item 7's generics arrive. Parsing
+// prepends, so the newest appearance of a name sits first and lookup is last-wins.
+export enum Headers {
+    Nil
+    Cons(Header, Headers)
+}
+
+export struct Request {
+    method: String
+    path: String
+    headers: Headers
+    content_length: I64
+    // Body bytes that arrived in the same reads as the head. `save_body` writes them first.
+    leftover: Bytes
+}
+
+// What one attempt to parse a head out of the gathered bytes produced.
+export enum HeadParse {
+    // The blank line has not arrived yet: gather more and ask again.
+    Incomplete
+    // A complete head — its `leftover` still empty; `read_request` fills it — and how many bytes
+    // of the buffer it consumed. Anything after that offset is the first piece of the body.
+    Complete(Request, I64)
+    // These bytes are not a request this server accepts; the payload names the violated rule.
+    Invalid(String)
+}
+
+// Parse a head out of the gathered bytes. The caller re-parses the whole buffer on every
+// attempt rather than resuming a half-parsed state: the buffer is capped at 8192 bytes, so the
+// wasted work is bounded and the state that has to survive a park is just the bytes.
+export fn head(data: Bytes) -> HeadParse {
+    let len = bytes_len(data)
+    match terminator(data, len) {
+        None => {
+            if len >= 8192 {
+                return HeadParse.Invalid("the request head exceeds 8192 bytes")
+            }
+            HeadParse.Incomplete
+        }
+        Some(end) => {
+            // A head whose terminator lands past the cap is no better than one with none.
+            if end > 8192 {
+                return HeadParse.Invalid("the request head exceeds 8192 bytes")
+            }
+            parse(data, end)
+        }
+    }
+}
+
+// Case-insensitive lookup. Parsing lowercased the stored names and prepended, so folding the
+// asked-for name is all that is left, and the first match is the newest appearance.
+export fn header(req: Request, name: String) -> Option<String> {
+    let wanted = bytes(name)
+    lookup(req.headers, lower(wanted, 0, bytes_len(wanted)))
+}
+
+// The response head, byte for byte. Every response declares its length and closes the
+// connection: keep-alive is deferred, and saying so on the wire is what keeps clients from
+// waiting on a socket this server is about to drop.
+export fn response_head(status: I64, content_length: I64) -> String {
+    "HTTP/1.1 " + to_string(status) + " " + reason(status) + "\r\nContent-Length: " + to_string(content_length) + "\r\nConnection: close\r\n\r\n"
+}
+
+// Gather bytes off the connection until the head completes, then hand back plain data. The
+// connection is only borrowed: a malformed head is an `Err` naming the violated rule, and the
+// socket stays with its owner. `leftover` collects any body bytes that arrived alongside the
+// head, truncated to the declared length so a pipelined next request — which every response's
+// `Connection: close` has already declined — is dropped rather than mistaken for body.
+export task fn read_request(conn: &Connection) -> Result<Request, IoError>
+    uses { net.io }
+{
+    let mut gathered = bytes("")
+    loop {
+        match head(gathered) {
+            HeadParse.Complete(req, consumed) => {
+                let len = bytes_len(gathered)
+                let mut stop = consumed + req.content_length
+                if stop > len {
+                    stop = len
+                }
+                return Ok(Request(method: req.method, path: req.path, headers: req.headers, content_length: req.content_length, leftover: bytes_slice(gathered, consumed, stop)))
+            }
+            HeadParse.Invalid(rule) => {
+                return Err(IoError.Other(rule))
+            }
+            HeadParse.Incomplete => {
+                gathered = bytes_concat(gathered, await tcp_read(conn)?)
+            }
+        }
+    }
+}
+
+// Send a whole response — head and body in one buffer, the runtime's partial-write cursor doing
+// the chunking — and close the connection. Closing on the failure path too is why the write is
+// awaited into a value rather than `?`-returned: nothing here leaks a close to task teardown.
+export task fn respond(conn: Connection, status: I64, body: String) -> Result<(), IoError>
+    uses { net.io }
+{
+    let payload = bytes(body)
+    let outcome = await tcp_write(&conn, bytes_concat(bytes(response_head(status, bytes_len(payload))), payload))
+    await tcp_close(conn)
+    outcome
+}
+
+export task fn respond_empty(conn: Connection, status: I64) -> Result<(), IoError>
+    uses { net.io }
+{
+    await respond(conn, status, "")
+}
+
+// A response whose body is a flow: the head goes out first, declaring the flow's remaining
+// length, then chunks ride `flow_next` into `tcp_write`. Both handles are owned here and closed
+// on every path — the borrowing `stream` helper is what keeps a mid-body failure from leaving
+// either to task teardown, the same split as std/flow's `pipe`.
+export task fn respond_flow(conn: Connection, status: I64, body: Flow<Bytes>) -> Result<(), IoError>
+    uses { net.io }
+{
+    let outcome = await stream(&conn, &body, status)
+    await flow_close(body)
+    await tcp_close(conn)
+    outcome
+}
+
+task fn stream(conn: &Connection, body: &Flow<Bytes>, status: I64) -> Result<(), IoError>
+    uses { net.io }
+{
+    await tcp_write(conn, bytes(response_head(status, flow_len(body))))?
+    loop {
+        let chunk = await flow_next(body)?
+        if bytes_len(chunk) == 0 {
+            return Ok(())
+        }
+        await tcp_write(conn, chunk)?
+    }
+}
+
+// Stream a request's body into a file, yielding how many bytes landed. The connection is only
+// borrowed — responding afterwards is the caller's move — while the sink is consumed and closed
+// on every path. One chunk local per iteration is the demand claim's new home: nothing beyond a
+// single read is ever held, and the slice keeps a final over-full read from writing past the
+// declared length.
+export task fn save_body(conn: &Connection, req: Request, sink: File) -> Result<I64, IoError>
+    uses { net.io }
+{
+    let outcome = await receive(conn, &sink, req)
+    await file_close(sink)
+    outcome
+}
+
+task fn receive(conn: &Connection, sink: &File, req: Request) -> Result<I64, IoError>
+    uses { net.io }
+{
+    await file_write(sink, req.leftover)?
+    let mut written = bytes_len(req.leftover)
+    while written < req.content_length {
+        let chunk = await tcp_read(conn)?
+        let due = req.content_length - written
+        let mut take = bytes_len(chunk)
+        if take > due {
+            take = due
+        }
+        await file_write(sink, bytes_slice(chunk, 0, take))?
+        written = written + take
+    }
+    Ok(written)
+}
+
+// ── The parser underneath `head` ────────────────────────────────────────────
+
+// The rules, in the order the wire meets them: ASCII, request line, headers, body framing.
+// `end` sits just past the terminator; the head text is `data[0..end - 4]`.
+fn parse(data: Bytes, end: I64) -> HeadParse {
+    let stop = end - 4
+    let mut i = 0
+    while i < stop {
+        if data[i] > 127 {
+            return HeadParse.Invalid("the request head is not ASCII text")
+        }
+        i = i + 1
+    }
+
+    // The request line: exactly `METHOD PATH HTTP/1.1`, single spaces. 32 is ` `.
+    let line_end = line_break(data, 0, stop)
+    if count_at(data, 32, 0, line_end) != 2 {
+        return HeadParse.Invalid("the request line is not `METHOD PATH HTTP/1.1`")
+    }
+    let sp1 = find_at(data, 32, 0, line_end)
+    let sp2 = find_at(data, 32, sp1 + 1, line_end)
+    if sp1 == 0 || !uppercase(data, 0, sp1) {
+        return HeadParse.Invalid("the method is not an upper-case token")
+    }
+    if sp2 == sp1 + 1 {
+        return HeadParse.Invalid("the request path is empty")
+    }
+    if bytes_slice(data, sp2 + 1, line_end) != bytes("HTTP/1.1") {
+        return HeadParse.Invalid("only HTTP/1.1 is spoken here")
+    }
+
+    // The terminator search found the *first* blank line, so the head region holds no `\r\n\r\n`
+    // and every header line between breaks is nonempty.
+    let mut headers = Headers.Nil
+    let mut cursor = line_end
+    while cursor < stop {
+        cursor = cursor + 2
+        let brk = line_break(data, cursor, stop)
+        match header_line(data, cursor, brk) {
+            Ok(h) => {
+                headers = Headers.Cons(h, headers)
+            }
+            Err(rule) => {
+                return HeadParse.Invalid(rule)
+            }
+        }
+        cursor = brk
+    }
+
+    if named(headers, "transfer-encoding") > 0 {
+        return HeadParse.Invalid("Transfer-Encoding is not supported; bodies are Content-Length")
+    }
+    let lengths = named(headers, "content-length")
+    if lengths > 1 {
+        return HeadParse.Invalid("Content-Length appears twice")
+    }
+    let mut content_length = 0
+    if lengths == 1 {
+        match lookup(headers, "content-length") {
+            Some(value) => match to_int(value) {
+                Some(n) => {
+                    if n < 0 {
+                        return HeadParse.Invalid("Content-Length is not a number")
+                    }
+                    content_length = n
+                }
+                None => {
+                    return HeadParse.Invalid("Content-Length is not a number")
+                }
+            }
+            None => ()
+        }
+    }
+
+    let req = Request(method: text_unchecked(bytes_slice(data, 0, sp1)), path: text_unchecked(bytes_slice(data, sp1 + 1, sp2)), headers: headers, content_length: content_length, leftover: bytes(""))
+    HeadParse.Complete(req, end)
+}
+
+// One `name: value` line: the name may not be empty or hold a space or tab, and is lowercased
+// at parse time so lookup is case-insensitive by construction; the value is trimmed. 58 is `:`,
+// 9 is tab.
+fn header_line(data: Bytes, from: I64, stop: I64) -> Result<Header, String> {
+    let colon = find_at(data, 58, from, stop)
+    if colon == stop {
+        return Err("a header line has no `:`")
+    }
+    if colon == from || find_at(data, 32, from, colon) != colon || find_at(data, 9, from, colon) != colon {
+        return Err("a header name is not a token")
+    }
+    let mut lo = colon + 1
+    let mut hi = stop
+    while lo < hi && whitespace(data[lo]) {
+        lo = lo + 1
+    }
+    while hi > lo && whitespace(data[hi - 1]) {
+        hi = hi - 1
+    }
+    Ok(Header(name: lower(data, from, colon), value: text_unchecked(bytes_slice(data, lo, hi))))
+}
+
+// The index just past the first `\r\n\r\n`, if it has arrived. 13 is `\r`, 10 is `\n`.
+fn terminator(data: Bytes, len: I64) -> Option<I64> {
+    let mut i = 0
+    while i + 3 < len {
+        if data[i] == 13 && data[i + 1] == 10 && data[i + 2] == 13 && data[i + 3] == 10 {
+            return Some(i + 4)
+        }
+        i = i + 1
+    }
+    None
+}
+
+// The first `\r\n` at or after `from`, or `stop` when the region's last line has no break.
+fn line_break(data: Bytes, from: I64, stop: I64) -> I64 {
+    let mut i = from
+    while i + 1 < stop {
+        if data[i] == 13 && data[i + 1] == 10 {
+            return i
+        }
+        i = i + 1
+    }
+    stop
+}
+
+// The first position of `wanted` in `data[from..stop)`, or `stop` when it does not appear.
+fn find_at(data: Bytes, wanted: I64, from: I64, stop: I64) -> I64 {
+    let mut i = from
+    while i < stop {
+        if data[i] == wanted {
+            return i
+        }
+        i = i + 1
+    }
+    stop
+}
+
+fn count_at(data: Bytes, wanted: I64, from: I64, stop: I64) -> I64 {
+    let mut n = 0
+    let mut i = from
+    while i < stop {
+        if data[i] == wanted {
+            n = n + 1
+        }
+        i = i + 1
+    }
+    n
+}
+
+// 65 through 90 is `A` through `Z` — the whole of what a method token may hold.
+fn uppercase(data: Bytes, from: I64, stop: I64) -> Bool {
+    let mut i = from
+    while i < stop {
+        if data[i] < 65 || data[i] > 90 {
+            return false
+        }
+        i = i + 1
+    }
+    true
+}
+
+// The ASCII whitespace bytes, which is what trimming a header value means on this wire.
+fn whitespace(b: I64) -> Bool {
+    b == 32 || b >= 9 && b <= 13
+}
+
+// The region as a string, upper-case letters folded down: +32 carries `A`..`Z` to `a`..`z`.
+// Byte-at-a-time building is quadratic, but a header name is short and the head is capped.
+fn lower(data: Bytes, from: I64, stop: I64) -> String {
+    let mut out = bytes("")
+    let mut i = from
+    while i < stop {
+        let mut b = data[i]
+        if b >= 65 && b <= 90 {
+            b = b + 32
+        }
+        out = bytes_concat(out, byte(b))
+        i = i + 1
+    }
+    text_unchecked(out)
+}
+
+// Walks are recursive because a cons list is: the depth is bounded by the head cap.
+fn named(headers: Headers, name: String) -> I64 {
+    match headers {
+        Headers.Nil => 0
+        Headers.Cons(h, rest) => {
+            if h.name == name {
+                1 + named(rest, name)
+            } else {
+                named(rest, name)
+            }
+        }
+    }
+}
+
+fn lookup(headers: Headers, name: String) -> Option<String> {
+    match headers {
+        Headers.Nil => None
+        Headers.Cons(h, rest) => {
+            if h.name == name {
+                Some(h.value)
+            } else {
+                lookup(rest, name)
+            }
+        }
+    }
+}
+
+// The reason phrases a v0 server can want. Anything else gets an empty phrase, which HTTP
+// permits.
+fn reason(status: I64) -> String {
+    match status {
+        200 => "OK"
+        201 => "Created"
+        204 => "No Content"
+        400 => "Bad Request"
+        404 => "Not Found"
+        405 => "Method Not Allowed"
+        500 => "Internal Server Error"
+        _ => ""
+    }
+}

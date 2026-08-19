@@ -69,12 +69,9 @@ pub enum Resource {
     Connection,
     /// A write-only sink on the filesystem, from `file_create`.
     File,
-    /// An HTTP request being served: the socket after `http_read_request` has consumed the
-    /// Connection and parsed a head on it. Responding consumes it back.
-    Request,
     /// A finite stream of bytes with demand-driven transfer. Its type is spelled `Flow<Bytes>` —
-    /// the only element type in v0. Consumed from Norn through the flow intrinsics — `std/flow`'s
-    /// `pipe` is the canonical consumer — or by `http_respond_flow`.
+    /// the only element type in v0 — and it is consumed from Norn through the flow intrinsics;
+    /// `std/flow`'s `pipe` is the canonical consumer.
     Flow,
 }
 
@@ -84,7 +81,6 @@ impl Resource {
             Resource::Listener => "Listener",
             Resource::Connection => "Connection",
             Resource::File => "File",
-            Resource::Request => "Request",
             Resource::Flow => "Flow<Bytes>",
         }
     }
@@ -724,14 +720,6 @@ pub enum Builtin {
     FlowNext,
     FlowLen,
     FlowClose,
-    HttpReadRequest,
-    RequestMethod,
-    RequestPath,
-    RequestHeader,
-    RequestBody,
-    HttpRespond,
-    HttpRespondEmpty,
-    HttpRespondFlow,
 }
 
 impl Builtin {
@@ -763,14 +751,6 @@ impl Builtin {
         Builtin::FlowNext,
         Builtin::FlowLen,
         Builtin::FlowClose,
-        Builtin::HttpReadRequest,
-        Builtin::RequestMethod,
-        Builtin::RequestPath,
-        Builtin::RequestHeader,
-        Builtin::RequestBody,
-        Builtin::HttpRespond,
-        Builtin::HttpRespondEmpty,
-        Builtin::HttpRespondFlow,
     ];
 
     pub fn from_name(name: &str) -> Option<Builtin> {
@@ -798,14 +778,6 @@ impl Builtin {
             "flow_next" => Some(Builtin::FlowNext),
             "flow_len" => Some(Builtin::FlowLen),
             "flow_close" => Some(Builtin::FlowClose),
-            "http_read_request" => Some(Builtin::HttpReadRequest),
-            "request_method" => Some(Builtin::RequestMethod),
-            "request_path" => Some(Builtin::RequestPath),
-            "request_header" => Some(Builtin::RequestHeader),
-            "request_body" => Some(Builtin::RequestBody),
-            "http_respond" => Some(Builtin::HttpRespond),
-            "http_respond_empty" => Some(Builtin::HttpRespondEmpty),
-            "http_respond_flow" => Some(Builtin::HttpRespondFlow),
             _ => None,
         }
     }
@@ -836,14 +808,6 @@ impl Builtin {
             Builtin::FlowNext => "flow_next",
             Builtin::FlowLen => "flow_len",
             Builtin::FlowClose => "flow_close",
-            Builtin::HttpReadRequest => "http_read_request",
-            Builtin::RequestMethod => "request_method",
-            Builtin::RequestPath => "request_path",
-            Builtin::RequestHeader => "request_header",
-            Builtin::RequestBody => "request_body",
-            Builtin::HttpRespond => "http_respond",
-            Builtin::HttpRespondEmpty => "http_respond_empty",
-            Builtin::HttpRespondFlow => "http_respond_flow",
         }
     }
 
@@ -863,10 +827,7 @@ impl Builtin {
             | Builtin::Byte
             | Builtin::BytesConcat
             | Builtin::BytesAt
-            | Builtin::FlowLen
-            | Builtin::RequestMethod
-            | Builtin::RequestPath
-            | Builtin::RequestHeader => true,
+            | Builtin::FlowLen => true,
             Builtin::Print
             | Builtin::Sleep
             | Builtin::TcpListen
@@ -881,14 +842,7 @@ impl Builtin {
             | Builtin::FlowNext
             | Builtin::FlowClose
             | Builtin::Send
-            | Builtin::Latest
-            | Builtin::HttpReadRequest
-            // `request_body` computes nothing, but it opens a traced resource, and a turn must
-            // not be able to make the resource table move.
-            | Builtin::RequestBody
-            | Builtin::HttpRespond
-            | Builtin::HttpRespondEmpty
-            | Builtin::HttpRespondFlow => false,
+            | Builtin::Latest => false,
         }
     }
 
@@ -917,15 +871,7 @@ impl Builtin {
             | Builtin::FileClose
             | Builtin::FlowNext
             | Builtin::FlowLen
-            | Builtin::FlowClose
-            | Builtin::RequestMethod
-            | Builtin::RequestPath
-            | Builtin::RequestHeader
-            | Builtin::RequestBody => &[],
-            Builtin::HttpReadRequest
-            | Builtin::HttpRespond
-            | Builtin::HttpRespondEmpty
-            | Builtin::HttpRespondFlow => &[Capability::NetIo],
+            | Builtin::FlowClose => &[],
             Builtin::FileCreate => &[Capability::FsWrite],
             Builtin::FlowOfFile => &[Capability::FsRead],
             Builtin::Sleep => &[Capability::Clock],
@@ -948,7 +894,6 @@ impl Builtin {
         let connection = || Ty::Resource(Resource::Connection);
         let file = || Ty::Resource(Resource::File);
         let flow = || Ty::Resource(Resource::Flow);
-        let request = || Ty::Resource(Resource::Request);
         let borrowed = |ty: Ty| Ty::Ref(Box::new(ty));
         let io_error = || Ty::Enum(EnumId::IO_ERROR);
         let task = |ty: Ty| Ty::Task(Box::new(ty));
@@ -983,19 +928,6 @@ impl Builtin {
             Builtin::FlowNext => (vec![borrowed(flow())], task(fallible(Ty::Bytes))),
             Builtin::FlowLen => (vec![borrowed(flow())], Ty::I64),
             Builtin::FlowClose => (vec![flow()], task(Ty::Unit)),
-            Builtin::HttpReadRequest => (vec![connection()], task(fallible(request()))),
-            Builtin::RequestMethod => (vec![borrowed(request())], Ty::Str),
-            Builtin::RequestPath => (vec![borrowed(request())], Ty::Str),
-            Builtin::RequestHeader => (
-                vec![borrowed(request()), Ty::Str],
-                Ty::Option(Box::new(Ty::Str)),
-            ),
-            Builtin::RequestBody => (vec![borrowed(request())], flow()),
-            Builtin::HttpRespond => (vec![request(), Ty::I64, Ty::Str], task(fallible(Ty::Unit))),
-            Builtin::HttpRespondEmpty => (vec![request(), Ty::I64], task(fallible(Ty::Unit))),
-            Builtin::HttpRespondFlow => {
-                (vec![request(), Ty::I64, flow()], task(fallible(Ty::Unit)))
-            }
         }
     }
 }

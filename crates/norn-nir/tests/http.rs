@@ -3,8 +3,8 @@
 //!
 //! The shape mirrors `tests/echo.rs`: the server runs on a worker thread with a channel-backed
 //! `Output`, the test learns the port from the first printed line, and shutdown is the timer in
-//! `main`. The connection's `open` line and the request's `close` line name the same resource —
-//! `http_read_request` converts the entry in place — which is exactly why open==close still holds.
+//! `main`. The socket is a plain connection its whole life — std/http's `read_request` borrows
+//! it and `respond` consumes and closes it — so open==close pairs on the connection itself.
 
 use std::io::{Read, Write};
 use std::net::TcpStream;

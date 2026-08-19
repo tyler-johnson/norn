@@ -917,10 +917,6 @@ impl Checker {
             "File".into(),
             TypeName::Builtin(Ty::Resource(Resource::File)),
         );
-        self.ns[self.current].types.insert(
-            "Request".into(),
-            TypeName::Builtin(Ty::Resource(Resource::Request)),
-        );
         // `Flow` is registered so that redeclaring it is an error, but `resolve_ty` intercepts the
         // name before this entry is consulted: the only writable spelling is `Flow<Bytes>`.
         self.ns[self.current].types.insert(

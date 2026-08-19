@@ -4,7 +4,7 @@
 //! The working directory is per-process here, so `Command::current_dir` does what the interpreter
 //! test needed `set_current_dir` for, and this file has no isolation constraint. The clock and
 //! the sockets are real, so the trace is compared structurally rather than byte for byte: every
-//! resource the server opened — request, flow, and file, the abandoned upload's among them — has
+//! resource the server opened — connection, flow, and file, the abandoned upload's among them — has
 //! a matching close.
 
 mod common;
@@ -110,12 +110,6 @@ fn the_native_file_server_streams_both_ways_and_cancellation_closes_everything()
         .collect();
     assert!(kinds.contains(&"file"), "no file was opened:\n{trace}");
     assert!(kinds.contains(&"flow"), "no flow was opened:\n{trace}");
-    assert!(
-        trace
-            .lines()
-            .any(|line| line.split_whitespace().nth(2) == Some("pipe")),
-        "no pipe chunk was traced:\n{trace}"
-    );
 }
 
 /// One whole HTTP exchange, bytes in and bytes out. The server closes after responding, so
