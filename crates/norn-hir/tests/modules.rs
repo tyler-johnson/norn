@@ -252,14 +252,14 @@ fn a_std_import_binds_in_memory() {
     let checked = assert_ok(&[
         (
             "main.norn",
-            "import { digits, parse_int } from \"std/fmt\"\n\nfn main() -> String {\n    match parse_int(\"41\") {\n        Some(n) => digits(n + 1)\n        None => \"?\"\n    }\n}\n",
+            "import { to_string, to_int } from \"std/fmt\"\n\nfn main() -> String {\n    match to_int(\"41\") {\n        Some(n) => to_string(n + 1)\n        None => \"?\"\n    }\n}\n",
         ),
         (
             "std/fmt",
             norn_hir::stdlib::source("std/fmt").expect("std/fmt is embedded"),
         ),
     ]);
-    assert!(checked.program.fns.iter().any(|f| f.name == "fmt.digits"));
+    assert!(checked.program.fns.iter().any(|f| f.name == "fmt.to_string"));
 }
 
 #[test]
@@ -594,7 +594,7 @@ fn rendered_load_errors(loaded: &norn_hir::Loaded) -> String {
 fn the_loader_serves_std_without_touching_the_filesystem() {
     let loaded = load_from(&[(
         "main.norn",
-        "import { digits } from \"std/fmt\"\n\nfn main() -> String {\n    digits(7)\n}\n",
+        "import { to_string } from \"std/fmt\"\n\nfn main() -> String {\n    to_string(7)\n}\n",
     )]);
     assert!(loaded.ok(), "{}", rendered_load_errors(&loaded));
     assert_eq!(loaded.modules.len(), 2);

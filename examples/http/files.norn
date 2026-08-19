@@ -13,7 +13,7 @@
 // The path is prefixed with `.` and guarded: `has_dotdot` walks the path's bytes with `data[i]`,
 // and a request that tries `..` traversal is answered 400 before the method is dispatched.
 
-import { digits } from "std/fmt"
+import { to_string } from "std/fmt"
 
 task fn upload(req: Request) -> Result<(), IoError>
     uses { net.io, fs.write }
@@ -77,7 +77,7 @@ task fn main() -> Result<(), IoError>
     uses { clock, net.listen, net.io, fs.read, fs.write }
 {
     let listener = await tcp_listen(0)?
-    print(digits(listener_port(&listener)))
+    print(to_string(listener_port(&listener)))
     scope {
         spawn accept_loop(listener)
         await sleep(500)

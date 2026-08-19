@@ -1,4 +1,4 @@
-import { digits } from "std/fmt"
+import { to_string } from "std/fmt"
 
 struct Config {
     port: I64
@@ -37,10 +37,10 @@ fn load(raw_port: I64, raw_host: String) -> Result<Config, ConfigError> {
 
 fn report(result: Result<Config, ConfigError>) -> String {
     match result {
-        Ok(config) => "listening on " + config.host + ":" + digits(config.port)
+        Ok(config) => "listening on " + config.host + ":" + to_string(config.port)
         Err(ConfigError.Missing(field)) => "missing " + field
         Err(ConfigError.OutOfRange(field: field, value: value)) => {
-            field + " is out of range: " + digits(value)
+            field + " is out of range: " + to_string(value)
         }
     }
 }

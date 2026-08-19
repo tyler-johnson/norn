@@ -1,6 +1,6 @@
 === ast ===
 (module
-  (fn digits export
+  (fn to_string export
     (params (param n I64))
     (ret String)
     (block
@@ -23,7 +23,7 @@
         (binary < (path n) (int 0))
         (block (binary + (str "-") (path out)))
         (else (block (path out))))))
-  (fn parse_int export
+  (fn to_int export
     (params (param s String))
     (ret (ty Option I64))
     (block
@@ -71,7 +71,7 @@
         (arm _ (str "?"))))))
 
 === canonical ===
-export fn digits(n: I64) -> String {
+export fn to_string(n: I64) -> String {
     let mut rest = if n < 0 {
         0 - n
     } else {
@@ -89,7 +89,7 @@ export fn digits(n: I64) -> String {
     }
 }
 
-export fn parse_int(s: String) -> Option<I64> {
+export fn to_int(s: String) -> Option<I64> {
     let data = bytes(s)
     let len = bytes_len(data)
     let mut i = 0

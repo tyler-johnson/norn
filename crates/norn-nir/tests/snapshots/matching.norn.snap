@@ -90,7 +90,7 @@ fn describe #0(_0/shape)
     _16 = _0/shape.1 eq 0
     branch _16 ? b19 : b7
   b22:
-    _17 = call fmt.digits#4(_5/radius)
+    _17 = call fmt.to_string#4(_5/radius)
     _18 = "circle of radius " concat _17
     _19 = _18 concat " at "
     _20 = call show#2(_4/centre)
@@ -174,10 +174,10 @@ fn show #2(_0/point)
     local _5
     local _6
   b0:
-    _1 = call fmt.digits#4(_0/point.0)
+    _1 = call fmt.to_string#4(_0/point.0)
     _2 = "(" concat _1
     _3 = _2 concat ", "
-    _4 = call fmt.digits#4(_0/point.1)
+    _4 = call fmt.to_string#4(_0/point.1)
     _5 = _3 concat _4
     _6 = _5 concat ")"
     return _6
@@ -264,7 +264,7 @@ fn main #3()
     _38 = builtin print(_37)
     return _38
 
-fn fmt.digits #4(_0/n)
+fn fmt.to_string #4(_0/n)
     local _1/rest
     local _2/out
     local _3
@@ -320,7 +320,7 @@ fn fmt.digits #4(_0/n)
   b9:
     return _13
 
-fn fmt.parse_int #5(_0/s)
+fn fmt.to_int #5(_0/s)
     local _1/data
     local _2/len
     local _3/i

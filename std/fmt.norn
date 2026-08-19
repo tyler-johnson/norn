@@ -1,10 +1,12 @@
 // Formatting and parsing: the int↔string pair.
 //
-// The first standard-library module. `digits` retires the hand-written copies the examples grew
-// while the language had no std to import it from; `parse_int` is its inverse, written on the
-// byte primitives — and it is HTTP's `Content-Length` parser in waiting.
+// The first standard-library module. `to_string` retires the hand-written copies the examples
+// grew while the language had no std to import it from; `to_int` is its inverse, written on the
+// byte primitives — and it is HTTP's `Content-Length` parser in waiting. The names follow the
+// std format: conversions are `to_<target>`, the source type lives in the module today and the
+// receiver tomorrow (`n.to_string()`), and fallibility lives in the type, not the name.
 
-export fn digits(n: I64) -> String {
+export fn to_string(n: I64) -> String {
     let mut rest = if n < 0 {
         0 - n
     } else {
@@ -24,7 +26,7 @@ export fn digits(n: I64) -> String {
 
 // 45 is `-`, 48 through 57 are `0` through `9`. Anything else — including an empty string or a
 // bare `-` — is `None`, never a guess.
-export fn parse_int(s: String) -> Option<I64> {
+export fn to_int(s: String) -> Option<I64> {
     let data = bytes(s)
     let len = bytes_len(data)
     let mut i = 0

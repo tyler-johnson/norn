@@ -144,11 +144,11 @@ fn main #4()
     local _58
   b0:
     _6 = call factorial#0(10)
-    _7 = call fmt.digits#6(_6)
+    _7 = call fmt.to_string#6(_6)
     _8 = "factorial(10) = " concat _7
     _9 = builtin print(_8)
     _10 = call fib#1(15)
-    _11 = call fmt.digits#6(_10)
+    _11 = call fmt.to_string#6(_10)
     _12 = "fib(15) = " concat _11
     _13 = builtin print(_12)
     _14 = neg 3
@@ -165,7 +165,7 @@ fn main #4()
     _25 = 6 div.i 2
     _26 = _24 sub.i _25
     _0/precedence = _26
-    _27 = call fmt.digits#6(_0/precedence)
+    _27 = call fmt.to_string#6(_0/precedence)
     _28 = "2 + 3 * 4 - 6 / 2 = " concat _27
     _29 = builtin print(_28)
     _30 = 2 add.i 3
@@ -173,7 +173,7 @@ fn main #4()
     _32 = _30 mul.i _31
     _33 = _32 div.i 2
     _1/grouped = _33
-    _34 = call fmt.digits#6(_1/grouped)
+    _34 = call fmt.to_string#6(_1/grouped)
     _35 = "(2 + 3) * (4 - 6) / 2 = " concat _34
     _36 = builtin print(_35)
     _37 = builtin print("short circuit &&:")
@@ -211,7 +211,7 @@ fn main #4()
     _54 = call fib#1(10)
     _55 = _5/total add.i _54
     _5/total = _55
-    _56 = call fmt.digits#6(_5/total)
+    _56 = call fmt.to_string#6(_5/total)
     _57 = "mutated total = " concat _56
     _58 = builtin print(_57)
     return _58
@@ -229,7 +229,7 @@ fn describe_bool #5(_0/value)
   b3:
     return _1
 
-fn fmt.digits #6(_0/n)
+fn fmt.to_string #6(_0/n)
     local _1/rest
     local _2/out
     local _3
@@ -285,7 +285,7 @@ fn fmt.digits #6(_0/n)
   b9:
     return _13
 
-fn fmt.parse_int #7(_0/s)
+fn fmt.to_int #7(_0/s)
     local _1/data
     local _2/len
     local _3/i

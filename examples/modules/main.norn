@@ -11,7 +11,7 @@
 import { Report, describe } from "./fmt"
 import * as fmt from "./fmt"
 import * as strings from "./util/strings"
-import { digits, parse_int } from "std/fmt"
+import { to_string, to_int } from "std/fmt"
 
 fn measure(shape: fmt.Shape) -> I64 {
     match shape {
@@ -32,9 +32,9 @@ task fn main() -> ()
     print(measure(fmt.Shape.Dot(3)))
     print(measure(fmt.Shape.Empty))
 
-    print(digits(-204))
-    match parse_int("41") {
-        Some(n) => print(digits(n + 1))
+    print(to_string(-204))
+    match to_int("41") {
+        Some(n) => print(to_string(n + 1))
         None => print("not a number")
     }
 

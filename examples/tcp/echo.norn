@@ -10,7 +10,7 @@
 // pass borrows the listener and hands its connection to a fresh child, and when accepting fails —
 // cancellation closes the listener — the loop breaks and the scope joins what it started.
 
-import { digits } from "std/fmt"
+import { to_string } from "std/fmt"
 
 task fn echo(conn: Connection) -> ()
     uses { net.io }
@@ -44,7 +44,7 @@ task fn main() -> Result<(), IoError>
     uses { clock, net.listen, net.io }
 {
     let listener = await tcp_listen(0)?
-    print(digits(listener_port(&listener)))
+    print(to_string(listener_port(&listener)))
     scope {
         spawn accept_loop(listener)
         await sleep(200)

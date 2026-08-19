@@ -121,7 +121,7 @@ fn report #3(_0/result)
   b6:
     _6 = "listening on " concat _1/config.1
     _7 = _6 concat ":"
-    _8 = call fmt.digits#9(_1/config.0)
+    _8 = call fmt.to_string#9(_1/config.0)
     _9 = _7 concat _8
     _5 = _9
     goto b1
@@ -139,7 +139,7 @@ fn report #3(_0/result)
     goto b8
   b11:
     _11 = _3/field concat " is out of range: "
-    _12 = call fmt.digits#9(_4/value)
+    _12 = call fmt.to_string#9(_4/value)
     _13 = _11 concat _12
     _5 = _13
     goto b1
@@ -298,7 +298,7 @@ fn main #8()
     _20 = Result.Err(_18.0)
     return _20
 
-fn fmt.digits #9(_0/n)
+fn fmt.to_string #9(_0/n)
     local _1/rest
     local _2/out
     local _3
@@ -354,7 +354,7 @@ fn fmt.digits #9(_0/n)
   b9:
     return _13
 
-fn fmt.parse_int #10(_0/s)
+fn fmt.to_int #10(_0/s)
     local _1/data
     local _2/len
     local _3/i

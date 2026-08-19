@@ -1,4 +1,4 @@
-import { digits } from "std/fmt"
+import { to_string } from "std/fmt"
 
 struct Point {
     x: I64
@@ -20,7 +20,7 @@ fn describe(shape: Shape) -> String {
         Shape.Segment(from, to) => "segment " + show(from) + " to " + show(to)
         Shape.Circle(radius: 0, ..) => "degenerate circle"
         Shape.Circle(centre: centre, radius: radius) => {
-            "circle of radius " + digits(radius) + " at " + show(centre)
+            "circle of radius " + to_string(radius) + " at " + show(centre)
         }
     }
 }
@@ -37,7 +37,7 @@ fn size(shape: Shape) -> String {
 }
 
 fn show(point: Point) -> String {
-    "(" + digits(point.x) + ", " + digits(point.y) + ")"
+    "(" + to_string(point.x) + ", " + to_string(point.y) + ")"
 }
 
 fn main() {

@@ -96,9 +96,9 @@ task fn main #1()
     _13 = call measure#0(_12)
     _14 = builtin print(_13)
     _15 = neg 204
-    _16 = call fmt.digits#6(_15)
+    _16 = call fmt.to_string#6(_15)
     _17 = builtin print(_16)
-    _19 = call fmt.parse_int#7("41")
+    _19 = call fmt.to_int#7("41")
     goto b2
   b1:
     scope enter
@@ -115,7 +115,7 @@ task fn main #1()
     trap "no match arm applied"
   b5:
     _20 = _1/n add.i 1
-    _21 = call fmt.digits#6(_20)
+    _21 = call fmt.to_string#6(_20)
     _22 = builtin print(_21)
     _18 = _22
     goto b1
@@ -191,7 +191,7 @@ fn strings.shout #5(_0/text)
     _1 = _0/text concat "!"
     return _1
 
-fn fmt.digits #6(_0/n)
+fn fmt.to_string #6(_0/n)
     local _1/rest
     local _2/out
     local _3
@@ -247,7 +247,7 @@ fn fmt.digits #6(_0/n)
   b9:
     return _13
 
-fn fmt.parse_int #7(_0/s)
+fn fmt.to_int #7(_0/s)
     local _1/data
     local _2/len
     local _3/i

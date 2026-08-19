@@ -8,7 +8,7 @@
 // As in the echo server, `main` prints the port the operating system chose so a client can find
 // it, and the accept loop is the same `scope { loop { … } }`.
 
-import { digits } from "std/fmt"
+import { to_string } from "std/fmt"
 
 task fn serve(conn: Connection) -> ()
     uses { net.io }
@@ -40,7 +40,7 @@ task fn main() -> Result<(), IoError>
     uses { clock, net.listen, net.io }
 {
     let listener = await tcp_listen(0)?
-    print(digits(listener_port(&listener)))
+    print(to_string(listener_port(&listener)))
     scope {
         spawn accept_loop(listener)
         await sleep(200)
