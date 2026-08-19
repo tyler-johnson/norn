@@ -77,6 +77,13 @@ fn traps_match() {
             "text-unchecked-invalid",
             "fn main() -> () {\n    print(text_unchecked(bytes_slice(bytes(\"☃\"), 0, 1)))\n}\n",
         ),
+        (
+            // NaN ordering: the one value-interpolating trap reachable from well-typed code.
+            // The interpreter's text spells `{:?}` of its Float values; the typed backend must
+            // spell the raw f64s identically.
+            "nan-order",
+            "fn main() -> () {\n    let nan = 0.0 / 0.0\n    print(nan < 1.0)\n}\n",
+        ),
     ];
     for (name, source) in programs {
         let (nir, main) = common::build_source(name, source);

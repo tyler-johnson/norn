@@ -150,12 +150,6 @@ impl<'p> Registry<'p> {
         self.program.enums.len() + index
     }
 
-    // Consumed when the backend flips onto the typed declarations.
-    #[allow(dead_code)]
-    pub fn synthetics(&self) -> &[Ty] {
-        &self.synthetics
-    }
-
     /// The renderer-name suffix, shared by every type with the same representation and rendering.
     pub fn key(&self, ty: &Ty) -> String {
         match ty {
@@ -208,17 +202,57 @@ impl<'p> Registry<'p> {
 
     /// The Rust type of a field in an aggregate — the `Rc` rule's storage position.
     pub fn field_repr(&self, ty: &Ty) -> String {
-        match ty {
-            Ty::Struct(_) | Ty::Enum(_) | Ty::Option(_) | Ty::Result(..) => {
-                format!("Rc<{}>", self.repr(ty))
-            }
-            other => self.repr(other),
+        if self.boxed(ty) {
+            format!("Rc<{}>", self.repr(ty))
+        } else {
+            self.repr(ty)
+        }
+    }
+
+    /// Whether the `Rc` rule stores this type behind a pointer in field position.
+    pub fn boxed(&self, ty: &Ty) -> bool {
+        matches!(
+            ty,
+            Ty::Struct(_) | Ty::Enum(_) | Ty::Option(_) | Ty::Result(..)
+        )
+    }
+
+    /// A value-position expression converted to what field position stores.
+    pub fn store(&self, ty: &Ty, expr: &str) -> String {
+        if self.boxed(ty) {
+            format!("Rc::new({expr})")
+        } else {
+            expr.to_string()
+        }
+    }
+
+    /// The field types of one variant of an enum type — a table lookup for a declared enum,
+    /// structural for an Option/Result instantiation.
+    pub fn variant_field_tys(&self, ty: &Ty, variant: usize) -> Vec<Ty> {
+        match ty.owned() {
+            Ty::Enum(id) => self.program.enums[id.index()].variants[variant]
+                .fields
+                .iter()
+                .map(|field| field.ty.clone())
+                .collect(),
+            Ty::Option(_) | Ty::Result(..) => synthetic_variants(ty.owned())[variant]
+                .fields
+                .iter()
+                .map(|field| field.ty.clone())
+                .collect(),
+            other => panic!("no variants on {other:?}"),
+        }
+    }
+
+    pub fn variant_count(&self, ty: &Ty) -> usize {
+        match ty.owned() {
+            Ty::Enum(id) => self.program.enums[id.index()].variants.len(),
+            Ty::Option(_) | Ty::Result(..) => 2,
+            other => panic!("no variants on {other:?}"),
         }
     }
 
     /// The type of a projected place in `function`, walking downcasts.
-    // Consumed when the backend flips onto the typed declarations.
-    #[allow(dead_code)]
     pub fn ty_of_place(&self, function: &Function, place: &Place) -> Ty {
         self.program.ty_of_place(function, place)
     }
@@ -280,19 +314,140 @@ impl<'p> Registry<'p> {
             self.enum_decl(&mut out, id, &synthetic_variants(ty));
         }
 
-        // A placeholder until the typed backend constructs tasks: enough for `Rc<TaskVal>` fields
-        // and the task renderer to compile, impossible to instantiate.
-        let _ = writeln!(out, "enum TaskVal {{}}");
-        let _ = writeln!(out);
-        let _ = writeln!(out, "fn task_name(task: &TaskVal) -> &'static str {{");
-        let _ = writeln!(out, "    match *task {{}}");
-        let _ = writeln!(out, "}}");
-        let _ = writeln!(out);
+        self.boundary(&mut out);
 
         for (key, ty) in &self.keys {
             self.renderer(&mut out, key, ty);
         }
         out
+    }
+
+    /// Every concrete aggregate id in table-then-synthetic order, as `("S3", "S3")`-style
+    /// (variant name, payload type) pairs for the boundary enum.
+    fn aggregate_names(&self) -> Vec<String> {
+        let mut names = Vec::new();
+        for (id, strukt) in self.program.structs.iter().enumerate() {
+            if !struct_inert(strukt) {
+                names.push(format!("S{id}"));
+            }
+        }
+        for (id, def) in self.program.enums.iter().enumerate() {
+            if !enum_inert(def) {
+                names.push(format!("E{id}"));
+            }
+        }
+        for index in 0..self.synthetics.len() {
+            names.push(format!("E{}", self.program.enums.len() + index));
+        }
+        names
+    }
+
+    /// The boundary enum and its wrap/unwrap pairs. `Value` is what crosses the nine runtime
+    /// boundaries (`Engine::make`, `Step::Done`, spawn/send/latest, the graph methods); it never
+    /// appears inside the call graph, where everything is typed. One variant per concrete
+    /// aggregate unconditionally — deriving the set from actual crossings could silently
+    /// under-approximate — plus the fixed scalar and handle variants.
+    fn boundary(&self, out: &mut String) {
+        let _ = writeln!(out, "#[derive(Clone)]");
+        let _ = writeln!(out, "enum Value {{");
+        let _ = writeln!(out, "    Unit,");
+        let _ = writeln!(out, "    Int(i64),");
+        let _ = writeln!(out, "    Float(f64),");
+        let _ = writeln!(out, "    Bool(bool),");
+        let _ = writeln!(out, "    Str(Rc<str>),");
+        let _ = writeln!(out, "    Bytes(Rc<[u8]>),");
+        let _ = writeln!(out, "    Task(Rc<TaskVal>),");
+        let _ = writeln!(out, "    Resource(ResourceKind, ResourceId),");
+        let _ = writeln!(out, "    Reactor(ReactorId),");
+        let _ = writeln!(out, "    Input(ReactorId, usize),");
+        let _ = writeln!(out, "    Signal(ReactorId, usize),");
+        for name in self.aggregate_names() {
+            let _ = writeln!(out, "    {name}({name}),");
+        }
+        let _ = writeln!(out, "}}");
+        let _ = writeln!(out);
+
+        let mut pair = |key: &str, repr: &str, wrap: &str, unwrap_pat: &str, unwrap_val: &str| {
+            let _ = writeln!(out, "fn wrap_{key}(v: {repr}) -> Value {{");
+            let _ = writeln!(out, "    {wrap}");
+            let _ = writeln!(out, "}}");
+            let _ = writeln!(out);
+            let _ = writeln!(out, "fn unwrap_{key}(v: Value) -> {repr} {{");
+            let _ = writeln!(out, "    match v {{");
+            let _ = writeln!(out, "        {unwrap_pat} => {unwrap_val},");
+            let _ = writeln!(
+                out,
+                "        _ => panic!(\"a {key} crossed the boundary as something else\"),"
+            );
+            let _ = writeln!(out, "    }}");
+            let _ = writeln!(out, "}}");
+            let _ = writeln!(out);
+        };
+        pair("unit", "()", "Value::Unit", "Value::Unit", "()");
+        pair("i64", "i64", "Value::Int(v)", "Value::Int(v)", "v");
+        pair("f64", "f64", "Value::Float(v)", "Value::Float(v)", "v");
+        pair("bool", "bool", "Value::Bool(v)", "Value::Bool(v)", "v");
+        pair("str", "Rc<str>", "Value::Str(v)", "Value::Str(v)", "v");
+        pair(
+            "bytes",
+            "Rc<[u8]>",
+            "Value::Bytes(v)",
+            "Value::Bytes(v)",
+            "v",
+        );
+        pair(
+            "task",
+            "Rc<TaskVal>",
+            "Value::Task(v)",
+            "Value::Task(v)",
+            "v",
+        );
+        for (key, kind) in [
+            ("res_listener", "Listener"),
+            ("res_connection", "Connection"),
+            ("res_file", "File"),
+            ("res_flow", "Flow"),
+        ] {
+            pair(
+                key,
+                "ResourceId",
+                &format!("Value::Resource(ResourceKind::{kind}, v)"),
+                // The kind is part of the static type, so unwrapping goes by the id alone.
+                "Value::Resource(_, v)",
+                "v",
+            );
+        }
+        pair(
+            "reactor",
+            "ReactorId",
+            "Value::Reactor(v)",
+            "Value::Reactor(v)",
+            "v",
+        );
+        pair(
+            "input",
+            "(ReactorId, usize)",
+            "Value::Input(v.0, v.1)",
+            "Value::Input(a, b)",
+            "(a, b)",
+        );
+        pair(
+            "signal",
+            "(ReactorId, usize)",
+            "Value::Signal(v.0, v.1)",
+            "Value::Signal(a, b)",
+            "(a, b)",
+        );
+        for name in self.aggregate_names() {
+            let key = name.to_lowercase();
+            pair(
+                &key,
+                &name,
+                &format!("Value::{name}(v)"),
+                &format!("Value::{name}(v)"),
+                "v",
+            );
+        }
     }
 
     fn enum_decl(&self, out: &mut String, id: usize, variants: &[VariantLayout]) {

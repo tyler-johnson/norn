@@ -17,27 +17,60 @@ mod generated {
         ReactorId, ResourceId, ResourceKind, Runtime, Stdout, Step, Trap, Update,
     };
 
-    // The generated contract, stubbed: one plain `main` with no locals and no reactors.
-    static STRUCTS: &[StructLayout] = &[];
-    static ENUMS: &[EnumLayout] = &[];
+    // The generated contract, stubbed: one plain `main` with no reactors, the boundary and task
+    // enums opaque, the frame enum empty.
+    #[derive(Clone)]
+    enum Value {
+        Unit,
+    }
+
+    #[derive(Clone)]
+    enum TaskVal {
+        Main,
+    }
+
+    enum Frame {}
+
     static FN_NAMES: &[&str] = &["main"];
-    static FN_LOCALS: &[usize] = &[0];
-    static FN_IS_TASK: &[bool] = &[false];
     const MAIN_FN: usize = 0;
 
-    fn step_frame(frame: &mut Frame, cx: &mut Cx<'_, '_, Value>) -> Result<Cont, Trap> {
+    fn task_name(task: &TaskVal) -> &'static str {
+        FN_NAMES[MAIN_FN]
+    }
+
+    fn step_frame(
+        frame: &mut Frame,
+        cx: &mut Cx<'_, '_, Value>,
+        resumed: Option<Value>,
+    ) -> Result<Cont, Trap> {
+        match *frame {}
+    }
+
+    fn push_frame(task: &TaskVal, frames: &mut Vec<Frame>) -> Result<(), Trap> {
         Err(Trap::new(
-            "resumed a function that is not a task",
+            "pushed a frame for a task that is not a task fn",
             "runtime",
         ))
     }
 
-    fn call_plain(
-        func: usize,
-        cx: Option<&mut Cx<'_, '_, Value>>,
-        args: Vec<Value>,
-    ) -> Result<Value, Trap> {
+    fn poll_task(cx: &mut Cx<'_, '_, Value>, task: &TaskVal) -> Result<Poll<Value>, Trap> {
+        Err(Trap::new("polled a task that is not a builtin", "runtime"))
+    }
+
+    fn call_plain(func: usize, cx: Option<&mut Cx<'_, '_, Value>>) -> Result<Value, Trap> {
         Ok(Value::Unit)
+    }
+
+    fn make_body(value: &Value) -> Result<Box<dyn Body<Value>>, Trap> {
+        Ok(Box::new(PlainBody { func: MAIN_FN }))
+    }
+
+    fn root_task() -> Value {
+        Value::Unit
+    }
+
+    fn finish(value: Value) -> ExitCode {
+        ExitCode::SUCCESS
     }
 
     struct Nodes;

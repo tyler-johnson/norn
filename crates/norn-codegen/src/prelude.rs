@@ -1,10 +1,12 @@
 // The runtime prelude of every generated program.
 //
 // This file is not a module of norn-codegen: `lib.rs` carries it as a string and `emit.rs` writes
-// it into the generated source ahead of the per-program part. It is a port of the interpreter's
-// value semantics — `norn-nir/src/interp.rs`, item for item — and the two must not drift: trap
-// messages interpolate `{:?}` of `Value`, `BinOp`, `UnOp`, and builtin names, so a renamed variant
-// on either side is a byte difference the differential oracle will catch in stderr.
+// it into the generated source ahead of the per-program part. Since the typed backend (BOOTSTRAP
+// §8 item 6a) the value semantics live in the generated code itself — bodies are fully typed, and
+// what remains here is the scaffolding that is the same for every program: the driver loop, the
+// body impls, the entry point, and the scalar helpers whose trap texts must match the
+// interpreter's byte for byte (`norn-nir/src/interp.rs` words every one of them; the differential
+// oracle catches a drifted byte in stderr).
 //
 // The restricted-Rust charter (BOOTSTRAP.md §3), as it is interpreted here: structs, enums,
 // `match`, loops, `Rc`, and calls into `norn-rt`; no `async`, no trait definitions, no generic
@@ -16,233 +18,54 @@
 // The emitted header provides the imports: `Rc`, `io`, `ExitCode`, and the `norn_rt` names. The
 // per-program part provides, and this file may name freely:
 //
-//   static STRUCTS: &[StructLayout]         one entry per struct type
-//   static ENUMS: &[EnumLayout]             one entry per enum type, seeded ones included
+//   enum Value                              the boundary enum: scalars, handles, one variant per aggregate
+//   enum TaskVal                            a built task: one variant per task fn and used task builtin
+//   enum Frame                              one variant per task fn, holding its typed locals
 //   static FN_NAMES: &[&str]                every function's name, by id
-//   static FN_LOCALS: &[usize]              every function's local count, by id
-//   static FN_IS_TASK: &[bool]              whether the function is a `task fn`, by id
 //   const MAIN_FN: usize                    the entry point
-//   fn step_frame(&mut Frame, &mut Cx) -> Result<Cont, Trap>     dispatch to a task fn's states
-//   fn call_plain(usize, Option<&mut Cx>, Vec<Value>) -> Result<Value, Trap>
+//   fn task_name(&TaskVal) -> &'static str
+//   fn step_frame(&mut Frame, &mut Cx, Option<Value>) -> Result<Cont, Trap>
+//   fn push_frame(&TaskVal, &mut Vec<Frame>) -> Result<(), Trap>
+//   fn poll_task(&mut Cx, &TaskVal) -> Result<Poll<Value>, Trap>   task builtins; the home of io mapping
+//   fn call_plain(usize, Option<&mut Cx>) -> Result<Value, Trap>   a single MAIN arm
+//   fn make_body(&Value) -> Result<Box<dyn Body<Value>>, Trap>
+//   fn root_task() -> Value                 the task main() blocks on
+//   fn finish(Value) -> ExitCode            main's result convention, typed by main's return
 //   struct Nodes + impl Graph<Value>        the reactor engine
 //   fn reactor_specs() -> Vec<ReactorSpec>  the plan, as plain data
 
-// ---------------------------------------------------------------- values
-
-#[derive(Clone, PartialEq, Debug)]
-pub enum Value {
-    Unit,
-    Int(i64),
-    Float(f64),
-    Bool(bool),
-    Str(Rc<str>),
-    Bytes(Rc<[u8]>),
-    Struct(usize, Rc<Vec<Value>>),
-    Variant(usize, usize, Rc<Vec<Value>>),
-    Task(Rc<TaskValue>),
-    Resource(ResourceKind, ResourceId),
-    Reactor(ReactorId),
-    Input(ReactorId, usize),
-    Signal(ReactorId, usize),
-}
-
-#[derive(PartialEq, Debug)]
-pub struct TaskValue {
-    pub kind: TaskKind,
-}
-
-#[derive(PartialEq, Debug)]
-pub enum TaskKind {
-    Fn(usize, Vec<Value>),
-    Builtin(Builtin, Vec<Value>),
-}
-
-// The seeded enums sit in fixed slots of the enum table; see `hir::EnumId`.
-const ENUM_OPTION: usize = 0;
-const ENUM_RESULT: usize = 1;
-const ENUM_IO_ERROR: usize = 2;
-const TAG_NONE: usize = 0;
-const TAG_SOME: usize = 1;
-const TAG_OK: usize = 0;
-const TAG_ERR: usize = 1;
-const IO_NOT_FOUND: usize = 0;
-const IO_DENIED: usize = 1;
-const IO_IN_USE: usize = 2;
-const IO_REFUSED: usize = 3;
-const IO_CLOSED: usize = 4;
-const IO_OTHER: usize = 5;
-
-pub struct StructLayout {
-    pub name: &'static str,
-    pub fields: &'static [&'static str],
-}
-
-pub struct EnumLayout {
-    pub name: &'static str,
-    pub variants: &'static [VariantLayout],
-}
-
-pub struct VariantLayout {
-    pub name: &'static str,
-    pub fields: &'static [&'static str],
-    pub positional: bool,
-}
-
-// ---------------------------------------------------------------- operators and builtins
-
-// Variant names mirror `hir::BinOp` and `hir::UnOp` exactly: trap messages print them with `{:?}`.
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub enum UnOp {
-    Neg,
-    Not,
-}
-
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub enum BinOp {
-    AddInt,
-    SubInt,
-    MulInt,
-    DivInt,
-    RemInt,
-    AddFloat,
-    SubFloat,
-    MulFloat,
-    DivFloat,
-    RemFloat,
-    Concat,
-    Eq,
-    Ne,
-    Lt,
-    Le,
-    Gt,
-    Ge,
-}
-
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub enum Builtin {
-    Print,
-    ListenerPort,
-    Sleep,
-    TcpListen,
-    TcpAccept,
-    TcpRead,
-    TcpWrite,
-    TcpClose,
-    Send,
-    Latest,
-    Bytes,
-    BytesLen,
-    BytesSlice,
-    TextUnchecked,
-    Byte,
-    BytesConcat,
-    BytesAt,
-    FileCreate,
-    FileWrite,
-    FileClose,
-    FlowOfFile,
-    FlowNext,
-    FlowLen,
-    FlowClose,
-}
-
-impl Builtin {
-    pub fn name(self) -> &'static str {
-        match self {
-            Builtin::Print => "print",
-            Builtin::ListenerPort => "listener_port",
-            Builtin::Sleep => "sleep",
-            Builtin::TcpListen => "tcp_listen",
-            Builtin::TcpAccept => "tcp_accept",
-            Builtin::TcpRead => "tcp_read",
-            Builtin::TcpWrite => "tcp_write",
-            Builtin::TcpClose => "tcp_close",
-            Builtin::Send => "send",
-            Builtin::Latest => "latest",
-            Builtin::Bytes => "bytes",
-            Builtin::BytesLen => "bytes_len",
-            Builtin::BytesSlice => "bytes_slice",
-            Builtin::TextUnchecked => "text_unchecked",
-            Builtin::Byte => "byte",
-            Builtin::BytesConcat => "bytes_concat",
-            Builtin::BytesAt => "bytes_at",
-            Builtin::FileCreate => "file_create",
-            Builtin::FileWrite => "file_write",
-            Builtin::FileClose => "file_close",
-            Builtin::FlowOfFile => "flow_of_file",
-            Builtin::FlowNext => "flow_next",
-            Builtin::FlowLen => "flow_len",
-            Builtin::FlowClose => "flow_close",
-        }
-    }
-}
-
 // ---------------------------------------------------------------- frames
 
-// A suspended task is a stack of these, innermost last, exactly the interpreter's shape. `state`
-// numbers the emitted match arms: `2*b` runs block `b` whole, `2*b + 1` re-executes only its
-// terminator, which is how waking re-asks a suspension point without re-running the instructions
-// before it.
-pub struct Frame {
-    pub func: usize,
-    pub state: usize,
-    pub locals: Vec<Value>,
-    // Where this frame's result goes in its caller.
-    pub dest: Option<(usize, &'static [usize])>,
-}
-
-// What one resumption of a frame produced. `AwaitTask` is the inline call: the caller has already
-// set its own resume state, and the driver pushes the callee.
+// A suspended task is a stack of frames, innermost last. Each task fn's frame is a generated
+// struct of its typed locals plus `state`, which numbers the emitted match arms: `2*b` runs block
+// `b` whole, `2*b + 1` re-executes only its terminator — waking re-asks a suspension point
+// without re-running the instructions before it. When an awaited callee returns, the driver hands
+// its value to the caller's next step as `resumed`; the caller's odd arm writes it typed and
+// jumps, and a `None` at the same arm means re-ask the runtime (a parked builtin).
 pub enum Cont {
     Return(Value),
     Park,
-    AwaitTask {
-        func: usize,
-        args: Vec<Value>,
-        local: usize,
-        proj: &'static [usize],
-    },
-}
-
-fn new_frame(func: usize, args: Vec<Value>, dest: Option<(usize, &'static [usize])>) -> Frame {
-    let mut locals = vec![Value::Unit; FN_LOCALS[func]];
-    for (slot, value) in locals.iter_mut().zip(args) {
-        *slot = value;
-    }
-    Frame {
-        func,
-        state: 0,
-        locals,
-        dest,
-    }
+    AwaitTask(Rc<TaskVal>),
 }
 
 // Run until the task finishes or suspends. Parking leaves every frame's state where it was, so
 // waking re-executes the same suspension point and asks the runtime again.
 fn resume_frames(frames: &mut Vec<Frame>, cx: &mut Cx<'_, '_, Value>) -> Result<Step<Value>, Trap> {
+    let mut resumed: Option<Value> = None;
     loop {
         let frame = frames
             .last_mut()
             .expect("a running task has at least one frame");
-        match step_frame(frame, cx)? {
+        match step_frame(frame, cx, resumed.take())? {
             Cont::Park => return Ok(Step::Park),
-            Cont::AwaitTask {
-                func,
-                args,
-                local,
-                proj,
-            } => {
-                frames.push(new_frame(func, args, Some((local, proj))));
-            }
+            Cont::AwaitTask(task) => push_frame(&task, frames)?,
             Cont::Return(value) => {
-                let finished = frames.pop().expect("the frame being returned from");
-                match (finished.dest, frames.last_mut()) {
-                    (Some((local, proj)), Some(caller)) => {
-                        write_place(&mut caller.locals, local, proj, value);
-                    }
+                frames.pop().expect("the frame being returned from");
+                if frames.is_empty() {
                     // The outermost frame returning is the task finishing.
-                    _ => return Ok(Step::Done(value)),
+                    return Ok(Step::Done(value));
                 }
+                resumed = Some(value);
             }
         }
     }
@@ -269,13 +92,12 @@ impl Body<Value> for FnBody {
 }
 
 pub struct BuiltinBody {
-    builtin: Builtin,
-    args: Vec<Value>,
+    task: Rc<TaskVal>,
 }
 
 impl Body<Value> for BuiltinBody {
     fn resume(&mut self, cx: &mut Cx<'_, '_, Value>) -> Step<Value> {
-        match poll_builtin(cx, self.builtin, &self.args) {
+        match poll_task(cx, &self.task) {
             Ok(Poll::Ready(value)) => Step::Done(value),
             Ok(Poll::Pending) => Step::Park,
             Err(trap) => Step::Trap(trap),
@@ -283,7 +105,7 @@ impl Body<Value> for BuiltinBody {
     }
 
     fn name(&self) -> &str {
-        self.builtin.name()
+        task_name(&self.task)
     }
 }
 
@@ -291,12 +113,11 @@ impl Body<Value> for BuiltinBody {
 // can arrive here — every other task value is built from a `task fn` or a builtin.
 pub struct PlainBody {
     func: usize,
-    args: Vec<Value>,
 }
 
 impl Body<Value> for PlainBody {
     fn resume(&mut self, cx: &mut Cx<'_, '_, Value>) -> Step<Value> {
-        match call_plain(self.func, Some(cx), std::mem::take(&mut self.args)) {
+        match call_plain(self.func, Some(cx)) {
             Ok(value) => Step::Done(value),
             Err(trap) => Step::Trap(trap),
         }
@@ -307,129 +128,7 @@ impl Body<Value> for PlainBody {
     }
 }
 
-fn make_body(value: &Value) -> Result<Box<dyn Body<Value>>, Trap> {
-    let Value::Task(task) = value else {
-        return Err(Trap::new("started something that is not a task", "runtime"));
-    };
-    Ok(match &task.kind {
-        TaskKind::Fn(id, args) => {
-            if FN_IS_TASK[*id] {
-                Box::new(FnBody {
-                    name: FN_NAMES[*id],
-                    frames: vec![new_frame(*id, args.clone(), None)],
-                })
-            } else {
-                Box::new(PlainBody {
-                    func: *id,
-                    args: args.clone(),
-                })
-            }
-        }
-        TaskKind::Builtin(builtin, args) => Box::new(BuiltinBody {
-            builtin: *builtin,
-            args: args.clone(),
-        }),
-    })
-}
-
-// ---------------------------------------------------------------- places
-
-fn read_place(locals: &[Value], local: usize, proj: &[usize]) -> Value {
-    let mut value = &locals[local];
-    for index in proj {
-        value = match value {
-            Value::Struct(_, fields) | Value::Variant(_, _, fields) => &fields[*index],
-            other => return other.clone(),
-        };
-    }
-    value.clone()
-}
-
-fn write_place(locals: &mut [Value], local: usize, proj: &[usize], value: Value) {
-    let mut slot = &mut locals[local];
-    for index in proj {
-        slot = match slot {
-            Value::Struct(_, fields) | Value::Variant(_, _, fields) => {
-                &mut Rc::make_mut(fields)[*index]
-            }
-            other => {
-                *other = value;
-                return;
-            }
-        };
-    }
-    *slot = value;
-}
-
 // ---------------------------------------------------------------- operators
-
-fn unary(op: UnOp, value: Value, func: &str) -> Result<Value, Trap> {
-    Ok(match (op, value) {
-        (UnOp::Neg, Value::Int(v)) => Value::Int(v.wrapping_neg()),
-        (UnOp::Neg, Value::Float(v)) => Value::Float(-v),
-        (UnOp::Not, Value::Bool(v)) => Value::Bool(!v),
-        (op, value) => {
-            return Err(Trap::new(
-                format!("cannot apply {op:?} to {value:?}"),
-                func,
-            ));
-        }
-    })
-}
-
-fn binary(op: BinOp, lhs: Value, rhs: Value, func: &str) -> Result<Value, Trap> {
-    use Value::{Bool, Float, Int, Str};
-    Ok(match (op, &lhs, &rhs) {
-        (BinOp::AddInt, Int(a), Int(b)) => Int(a.wrapping_add(*b)),
-        (BinOp::SubInt, Int(a), Int(b)) => Int(a.wrapping_sub(*b)),
-        (BinOp::MulInt, Int(a), Int(b)) => Int(a.wrapping_mul(*b)),
-        (BinOp::DivInt, Int(_), Int(0)) => {
-            return Err(Trap::new("divide by zero", func));
-        }
-        (BinOp::DivInt, Int(a), Int(b)) => Int(a.wrapping_div(*b)),
-        (BinOp::RemInt, Int(_), Int(0)) => {
-            return Err(Trap::new("remainder by zero", func));
-        }
-        (BinOp::RemInt, Int(a), Int(b)) => Int(a.wrapping_rem(*b)),
-        (BinOp::AddFloat, Float(a), Float(b)) => Float(a + b),
-        (BinOp::SubFloat, Float(a), Float(b)) => Float(a - b),
-        (BinOp::MulFloat, Float(a), Float(b)) => Float(a * b),
-        (BinOp::DivFloat, Float(a), Float(b)) => Float(a / b),
-        (BinOp::RemFloat, Float(a), Float(b)) => Float(a % b),
-        (BinOp::Concat, Str(a), Str(b)) => Str(format!("{a}{b}").into()),
-        (BinOp::Eq, _, _) => Bool(lhs == rhs),
-        (BinOp::Ne, _, _) => Bool(lhs != rhs),
-        (BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge, _, _) => {
-            let ordering = match (&lhs, &rhs) {
-                (Int(a), Int(b)) => a.partial_cmp(b),
-                (Float(a), Float(b)) => a.partial_cmp(b),
-                (Str(a), Str(b)) => a.partial_cmp(b),
-                (Value::Bytes(a), Value::Bytes(b)) => a.partial_cmp(b),
-                _ => None,
-            };
-            let Some(ordering) = ordering else {
-                return Err(Trap::new(
-                    format!("cannot order {lhs:?} and {rhs:?}"),
-                    func,
-                ));
-            };
-            Bool(match op {
-                BinOp::Lt => ordering.is_lt(),
-                BinOp::Le => ordering.is_le(),
-                BinOp::Gt => ordering.is_gt(),
-                _ => ordering.is_ge(),
-            })
-        }
-        (op, a, b) => {
-            return Err(Trap::new(
-                format!("cannot apply {op:?} to {a:?} and {b:?}"),
-                func,
-            ));
-        }
-    })
-}
-
-// ---------------------------------------------------------------- builtins
 
 // Purity's trap of last resort: emitted code in a turn-called function has no `Cx` to hand over,
 // so every observable operation is an arm that has to ask for one and cannot get it.
@@ -440,392 +139,99 @@ fn impure_trap(what: &str) -> Trap {
     )
 }
 
-// The builtins that produce a value immediately. The ones that produce a task are polled at the
-// `await` that runs them.
-fn eval_builtin(
-    cx: Option<&mut Cx<'_, '_, Value>>,
-    builtin: Builtin,
-    args: &[Value],
-    func: &str,
-) -> Result<Value, Trap> {
-    Ok(match builtin {
-        Builtin::Print => {
-            let text = render(&args[0]);
-            let Some(cx) = cx else {
-                return Err(impure_trap("print"));
-            };
-            cx.print(&text);
-            Value::Unit
-        }
-        Builtin::ListenerPort => {
-            let Value::Resource(_, id) = &args[0] else {
-                return Err(Trap::new(
-                    "`listener_port` of something that is not a listener",
-                    func,
-                ));
-            };
-            let Some(cx) = cx else {
-                return Err(impure_trap("listener_port"));
-            };
-            match cx.port(*id) {
-                Ok(port) => Value::Int(port),
-                Err(err) => {
-                    return Err(Trap::new(format!("`listener_port`: {}", err.kind()), func));
-                }
-            }
-        }
-        Builtin::FlowLen => {
-            let id = resource("flow_len", &args[0])?;
-            let Some(cx) = cx else {
-                return Err(impure_trap("flow_len"));
-            };
-            match cx.flow_len(id) {
-                Ok(length) => Value::Int(length),
-                Err(err) => {
-                    return Err(Trap::new(format!("`flow_len`: {}", err.kind()), func));
-                }
-            }
-        }
-        Builtin::Latest => {
-            let Value::Signal(reactor, export) = &args[0] else {
-                return Err(Trap::new("`latest` of something that is not a signal", func));
-            };
-            let (reactor, export) = (*reactor, *export);
-            let Some(cx) = cx else {
-                return Err(impure_trap("latest"));
-            };
-            match cx.latest(reactor, export) {
-                Some(value) => value,
-                None => {
-                    return Err(Trap::new("`latest` of an export that does not exist", func));
-                }
-            }
-        }
-        Builtin::Bytes => Value::Bytes(text("bytes", &args[0])?.into_bytes().into()),
-        Builtin::BytesLen => Value::Int(blob("bytes_len", &args[0])?.len() as i64),
-        Builtin::BytesSlice => {
-            let data = blob("bytes_slice", &args[0])?;
-            let start = integer("bytes_slice", &args[1])?;
-            let end = integer("bytes_slice", &args[2])?;
-            let len = data.len() as i64;
-            if start < 0 || end < start || end > len {
-                return Err(Trap::new(
-                    format!("`bytes_slice` out of range: {start}..{end} of {len}"),
-                    func,
-                ));
-            }
-            // A slice copies in v0, deliberately matching the interpreter; the cheap
-            // representation waits for typed layout.
-            Value::Bytes(data[start as usize..end as usize].into())
-        }
-        Builtin::Byte => {
-            let value = integer("byte", &args[0])?;
-            if value < 0 || value > 255 {
-                return Err(Trap::new(format!("`byte` out of range: {value}"), func));
-            }
-            Value::Bytes([value as u8].into())
-        }
-        Builtin::BytesConcat => {
-            let a = blob("bytes_concat", &args[0])?;
-            let b = blob("bytes_concat", &args[1])?;
-            // Concatenation copies in v0, deliberately matching the interpreter; the cheap
-            // representation waits for typed layout.
-            Value::Bytes([&a[..], &b[..]].concat().into())
-        }
-        Builtin::BytesAt => {
-            let data = blob("bytes_at", &args[0])?;
-            let index = integer("bytes_at", &args[1])?;
-            let len = data.len() as i64;
-            if index < 0 || index >= len {
-                return Err(Trap::new(
-                    format!("byte index out of range: {index} of {len}"),
-                    func,
-                ));
-            }
-            Value::Int(data[index as usize] as i64)
-        }
-        Builtin::TextUnchecked => match std::str::from_utf8(&blob("text_unchecked", &args[0])?) {
-            Ok(text) => Value::Str(text.into()),
-            Err(err) => {
-                return Err(Trap::new(
-                    format!(
-                        "`text_unchecked` given invalid UTF-8 at byte {}",
-                        err.valid_up_to()
-                    ),
-                    func,
-                ));
-            }
-        },
-        task => {
-            return Err(Trap::new(
-                format!("`{}` builds a task and cannot be evaluated here", task.name()),
-                func,
-            ));
-        }
-    })
+fn div_i64(a: i64, b: i64, func: &str) -> Result<i64, Trap> {
+    if b == 0 {
+        return Err(Trap::new("divide by zero", func));
+    }
+    // Wrapping: `i64::MIN / -1` does not trap, exactly like the interpreter.
+    Ok(a.wrapping_div(b))
 }
 
-// Ask the runtime for the effect of a task builtin. `Pending` means the task parks and asks again
-// when it is woken, which is why nothing here has to remember an operation in flight.
-fn poll_builtin(
-    cx: &mut Cx<'_, '_, Value>,
-    builtin: Builtin,
-    args: &[Value],
-) -> Result<Poll<Value>, Trap> {
-    let name = builtin.name();
-    Ok(match builtin {
-        Builtin::Sleep => match cx.sleep(integer(name, &args[0])?) {
-            Poll::Ready(()) => Poll::Ready(Value::Unit),
-            Poll::Pending => Poll::Pending,
-        },
-        Builtin::TcpListen => Poll::Ready(fallible(
-            cx.listen(integer(name, &args[0])?)
-                .map(|id| Value::Resource(ResourceKind::Listener, id)),
-        )),
-        Builtin::TcpAccept => match cx.accept(resource(name, &args[0])?) {
-            Poll::Ready(outcome) => Poll::Ready(fallible(
-                outcome.map(|id| Value::Resource(ResourceKind::Connection, id)),
-            )),
-            Poll::Pending => Poll::Pending,
-        },
-        Builtin::TcpRead => match cx.read(resource(name, &args[0])?) {
-            Poll::Ready(outcome) => {
-                Poll::Ready(fallible(outcome.map(|data| Value::Bytes(data.into()))))
-            }
-            Poll::Pending => Poll::Pending,
-        },
-        Builtin::TcpWrite => {
-            let connection = resource(name, &args[0])?;
-            let data = blob(name, &args[1])?;
-            match cx.write(connection, &data) {
-                Poll::Ready(outcome) => Poll::Ready(fallible(outcome.map(|()| Value::Unit))),
-                Poll::Pending => Poll::Pending,
-            }
-        }
-        Builtin::TcpClose | Builtin::FileClose | Builtin::FlowClose => {
-            cx.close(resource(name, &args[0])?);
-            Poll::Ready(Value::Unit)
-        }
-        // Creating and opening do not block, so these answer at once either way.
-        Builtin::FileCreate => Poll::Ready(fallible(
-            cx.file_create(&text(name, &args[0])?)
-                .map(|id| Value::Resource(ResourceKind::File, id)),
-        )),
-        // Neither does writing to a file: always ready, so it completes in one call.
-        Builtin::FileWrite => {
-            let file = resource(name, &args[0])?;
-            let data = blob(name, &args[1])?;
-            Poll::Ready(fallible(cx.file_write(file, &data).map(|()| Value::Unit)))
-        }
-        Builtin::FlowOfFile => Poll::Ready(fallible(
-            cx.flow_of_file(&text(name, &args[0])?)
-                .map(|id| Value::Resource(ResourceKind::Flow, id)),
-        )),
-        Builtin::FlowNext => match cx.flow_next(resource(name, &args[0])?) {
-            Poll::Ready(outcome) => {
-                Poll::Ready(fallible(outcome.map(|chunk| Value::Bytes(chunk.into()))))
-            }
-            Poll::Pending => Poll::Pending,
-        },
-        Builtin::Send => {
-            let Value::Input(reactor, input) = &args[0] else {
-                return Err(Trap::new(
-                    "`send` to something that is not an input",
-                    "runtime",
-                ));
-            };
-            match cx.send(*reactor, *input, args[1].clone()) {
-                Poll::Ready(()) => Poll::Ready(Value::Unit),
-                Poll::Pending => Poll::Pending,
-            }
-        }
-        plain => {
-            return Err(Trap::new(
-                format!("`{}` does not build a task", plain.name()),
-                "runtime",
-            ));
-        }
-    })
+fn rem_i64(a: i64, b: i64, func: &str) -> Result<i64, Trap> {
+    if b == 0 {
+        return Err(Trap::new("remainder by zero", func));
+    }
+    Ok(a.wrapping_rem(b))
 }
 
-fn integer(builtin: &str, value: &Value) -> Result<i64, Trap> {
-    match value {
-        Value::Int(value) => Ok(*value),
-        other => Err(Trap::new(
-            format!("`{builtin}` wanted a number, found {other:?}"),
-            "runtime",
+// Float ordering traps on NaN — the one value-interpolating trap reachable from well-typed code.
+// The text spells the interpreter's `{:?}` of its Float values over the raw f64s.
+fn cmp_f64(a: f64, b: f64, func: &str) -> Result<std::cmp::Ordering, Trap> {
+    match a.partial_cmp(&b) {
+        Some(ordering) => Ok(ordering),
+        None => Err(Trap::new(
+            format!("cannot order Float({a:?}) and Float({b:?})"),
+            func,
         )),
     }
 }
 
-fn text(builtin: &str, value: &Value) -> Result<String, Trap> {
-    match value {
-        Value::Str(value) => Ok(value.to_string()),
-        other => Err(Trap::new(
-            format!("`{builtin}` wanted a string, found {other:?}"),
-            "runtime",
+fn str_concat(a: Rc<str>, b: Rc<str>) -> Rc<str> {
+    format!("{a}{b}").into()
+}
+
+// ---------------------------------------------------------------- bytes
+
+fn bytes_slice(data: Rc<[u8]>, start: i64, end: i64, func: &str) -> Result<Rc<[u8]>, Trap> {
+    let len = data.len() as i64;
+    if start < 0 || end < start || end > len {
+        return Err(Trap::new(
+            format!("`bytes_slice` out of range: {start}..{end} of {len}"),
+            func,
+        ));
+    }
+    // A slice copies in v0, deliberately matching the interpreter; the cheap representation is
+    // 6b's Bytes views.
+    Ok(data[start as usize..end as usize].into())
+}
+
+fn byte(value: i64, func: &str) -> Result<Rc<[u8]>, Trap> {
+    if value < 0 || value > 255 {
+        return Err(Trap::new(format!("`byte` out of range: {value}"), func));
+    }
+    Ok([value as u8].into())
+}
+
+fn bytes_concat(a: Rc<[u8]>, b: Rc<[u8]>) -> Rc<[u8]> {
+    // Concatenation copies in v0, deliberately matching the interpreter; `+` on Bytes is 6b's.
+    [&a[..], &b[..]].concat().into()
+}
+
+fn bytes_at(data: Rc<[u8]>, index: i64, func: &str) -> Result<i64, Trap> {
+    let len = data.len() as i64;
+    if index < 0 || index >= len {
+        return Err(Trap::new(
+            format!("byte index out of range: {index} of {len}"),
+            func,
+        ));
+    }
+    Ok(data[index as usize] as i64)
+}
+
+fn text_unchecked(data: Rc<[u8]>, func: &str) -> Result<Rc<str>, Trap> {
+    match std::str::from_utf8(&data) {
+        Ok(text) => Ok(text.into()),
+        Err(err) => Err(Trap::new(
+            format!(
+                "`text_unchecked` given invalid UTF-8 at byte {}",
+                err.valid_up_to()
+            ),
+            func,
         )),
     }
-}
-
-fn resource(builtin: &str, value: &Value) -> Result<ResourceId, Trap> {
-    match value {
-        Value::Resource(_, id) => Ok(*id),
-        other => Err(Trap::new(
-            format!("`{builtin}` wanted a resource, found {other:?}"),
-            "runtime",
-        )),
-    }
-}
-
-fn blob(builtin: &str, value: &Value) -> Result<Rc<[u8]>, Trap> {
-    match value {
-        Value::Bytes(data) => Ok(data.clone()),
-        other => Err(Trap::new(
-            format!("`{builtin}` wanted bytes, found {other:?}"),
-            "runtime",
-        )),
-    }
-}
-
-// Wrap what a socket operation returned as a `Result<T, IoError>`.
-fn fallible(outcome: io::Result<Value>) -> Value {
-    let (variant, fields) = match outcome {
-        Ok(value) => (TAG_OK, vec![value]),
-        Err(err) => (TAG_ERR, vec![io_error_value(&err)]),
-    };
-    Value::Variant(ENUM_RESULT, variant, Rc::new(fields))
-}
-
-// Map a host I/O error onto the built-in `IoError`. The unknown case carries the host's own name
-// for the condition rather than its message, which varies by platform.
-fn io_error_value(err: &io::Error) -> Value {
-    use io::ErrorKind as K;
-    let (variant, fields) = match err.kind() {
-        K::NotFound => (IO_NOT_FOUND, Vec::new()),
-        K::PermissionDenied => (IO_DENIED, Vec::new()),
-        K::AddrInUse | K::AddrNotAvailable => (IO_IN_USE, Vec::new()),
-        K::ConnectionRefused => (IO_REFUSED, Vec::new()),
-        K::ConnectionReset
-        | K::ConnectionAborted
-        | K::NotConnected
-        | K::BrokenPipe
-        | K::WriteZero
-        | K::UnexpectedEof => (IO_CLOSED, Vec::new()),
-        other => (IO_OTHER, vec![Value::Str(format!("{other:?}").into())]),
-    };
-    Value::Variant(ENUM_IO_ERROR, variant, Rc::new(fields))
-}
-
-// ---------------------------------------------------------------- spawning
-
-// The resource handles a spawned task is being given. Only handles passed directly are seen; one
-// buried inside a struct stays with the parent, deliberately matching the interpreter.
-fn moved_resources(kind: &TaskKind) -> Vec<ResourceId> {
-    let args = match kind {
-        TaskKind::Fn(_, args) | TaskKind::Builtin(_, args) => args,
-    };
-    args.iter()
-        .filter_map(|arg| match arg {
-            Value::Resource(_, id) => Some(*id),
-            _ => None,
-        })
-        .collect()
-}
-
-fn spawn_task(cx: &mut Cx<'_, '_, Value>, value: Value, func: &str) -> Result<(), Trap> {
-    let Value::Task(task) = &value else {
-        return Err(Trap::new("spawned a value that is not a task", func));
-    };
-    let moved = moved_resources(&task.kind);
-    cx.spawn(value, &moved)?;
-    Ok(())
 }
 
 // ---------------------------------------------------------------- rendering
 
-// Render a value in the surface syntax that would build it. At the top level a string is its own
-// text; nested inside an aggregate it is quoted.
-fn render(value: &Value) -> String {
-    match value {
-        Value::Str(v) => v.to_string(),
-        other => render_nested(other),
-    }
-}
-
-// The float spelling, shared by the dynamic renderer and the generated per-type ones: `{}` plus
-// a `.0` suffix when nothing marks the text as non-integral. `NaN` gains the suffix too — the
-// check is for the lowercase letters of `inf`/exponents — and that quirk is part of the contract.
+// The float spelling, shared by every generated renderer: `{}` plus a `.0` suffix when nothing
+// marks the text as non-integral. `NaN` gains the suffix too — the check is for the lowercase
+// letters of `inf` and exponents — and that quirk is part of the contract.
 fn render_float(v: f64) -> String {
     let text = format!("{v}");
     if text.contains(['.', 'e', 'E', 'n', 'i']) {
         text
     } else {
         format!("{text}.0")
-    }
-}
-
-fn render_nested(value: &Value) -> String {
-    match value {
-        Value::Unit => "()".into(),
-        Value::Int(v) => v.to_string(),
-        Value::Float(v) => render_float(*v),
-        Value::Bool(v) => v.to_string(),
-        Value::Str(v) => format!("{:?}", &**v),
-        Value::Bytes(v) => format!("<bytes {}>", v.len()),
-        Value::Task(task) => {
-            let name = match &task.kind {
-                TaskKind::Fn(id, _) => FN_NAMES[*id],
-                TaskKind::Builtin(builtin, _) => builtin.name(),
-            };
-            format!("<task {name}>")
-        }
-        Value::Resource(kind, id) => format!("<{} {id}>", kind.name()),
-        Value::Reactor(id) => format!("<reactor {id}>"),
-        Value::Input(id, index) => format!("<input {index} of {id}>"),
-        Value::Signal(id, index) => format!("<signal {index} of {id}>"),
-        Value::Struct(id, fields) => {
-            let layout = &STRUCTS[*id];
-            let mut out = format!("{}(", layout.name);
-            for (index, field) in fields.iter().enumerate() {
-                if index > 0 {
-                    out.push_str(", ");
-                }
-                out.push_str(&format!(
-                    "{}: {}",
-                    layout.fields[index],
-                    render_nested(field)
-                ));
-            }
-            out.push(')');
-            out
-        }
-        Value::Variant(enum_id, tag, fields) => {
-            let layout = &ENUMS[*enum_id];
-            let variant = &layout.variants[*tag];
-            // `Option` and `Result` are written unqualified in source, so they print that way.
-            let builtin = *enum_id == ENUM_OPTION || *enum_id == ENUM_RESULT;
-            let mut out = if builtin {
-                variant.name.to_string()
-            } else {
-                format!("{}.{}", layout.name, variant.name)
-            };
-            if fields.is_empty() {
-                return out;
-            }
-            out.push('(');
-            for (index, field) in fields.iter().enumerate() {
-                if index > 0 {
-                    out.push_str(", ");
-                }
-                if !variant.positional {
-                    out.push_str(&format!("{}: ", variant.fields[index]));
-                }
-                out.push_str(&render_nested(field));
-            }
-            out.push(')');
-            out
-        }
     }
 }
 
@@ -866,31 +272,14 @@ fn main() -> ExitCode {
         reactors: reactor_specs(),
     };
     let mut runtime = Runtime::new(config, &mut out, engine);
-    let root = Value::Task(Rc::new(TaskValue {
-        kind: TaskKind::Fn(MAIN_FN, Vec::new()),
-    }));
-    let value = runtime.block_on(root);
+    let value = runtime.block_on(root_task());
     if trace {
         eprint!("{}", runtime.trace().render());
     }
     match value {
-        Ok(value) => {
-            // A `main` returning a `Result` reports rather than prints, exactly as `norn run` does.
-            let result = match &value {
-                Value::Variant(enum_id, tag, fields) if *enum_id == ENUM_RESULT => {
-                    if *tag == TAG_ERR {
-                        eprintln!("error: {}", render(&fields[0]));
-                        return ExitCode::FAILURE;
-                    }
-                    fields[0].clone()
-                }
-                value => value.clone(),
-            };
-            if !matches!(result, Value::Unit) {
-                println!("{}", render(&result));
-            }
-            ExitCode::SUCCESS
-        }
+        // A `main` returning a `Result` reports rather than prints; `finish` is generated against
+        // main's static return type, exactly as `norn run` decides by the value's shape.
+        Ok(value) => finish(value),
         Err(trap) => {
             eprintln!("norn: trapped: {trap}");
             ExitCode::FAILURE
