@@ -1,0 +1,1492 @@
+=== nir ===
+struct Post #0 (id, author, created, body)
+struct Indexed #1 (entries, count)
+enum Option #0 (None/0, Some/1)
+enum Result #1 (Ok/1, Err/1)
+enum IoError #2 (NotFound/0, Denied/0, InUse/0, Refused/0, Closed/0, Other/1)
+enum Delta #3 (Put/1, Erase/1)
+enum List #4 (Nil/0, Cons/2)
+enum List<Post> #5 (Nil/0, Cons/2)
+enum List<Delta> #6 (Nil/0, Cons/2)
+
+reactor PostPartition #0
+    node 0 index param slot 0 arg 0 <- []
+    node 1 journal state slot 1 init PostPartition.journal.init#25 <- []
+    node 2 seq state slot 2 init PostPartition.seq.init#26 <- []
+    node 3 acked state slot 3 init PostPartition.acked.init#27 <- []
+    node 4 backlog signal PostPartition.backlog#31 export <- [seq, acked]
+    node 5 history signal PostPartition.history#32 export <- [journal]
+    order [index, journal, seq, acked, backlog, history]
+    input 0 put capacity 64 overflow wait handler PostPartition.on.put#28
+        plan [journal, seq, backlog, history]
+    input 1 erase capacity 64 overflow wait handler PostPartition.on.erase#29
+        plan [journal, seq, backlog, history]
+    input 2 delivered capacity 64 overflow wait handler PostPartition.on.delivered#30
+        plan [acked, backlog]
+    exports [backlog, history]
+
+reactor ByAuthor #1
+    node 0 subscriber param slot 0 arg 0 <- []
+    node 1 rows state slot 1 init ByAuthor.rows.init#33 <- []
+    node 2 total state slot 2 init ByAuthor.total.init#34 <- []
+    node 3 revision state slot 3 init ByAuthor.revision.init#35 <- []
+    node 4 queued state slot 4 init ByAuthor.queued.init#36 <- []
+    node 5 busy state slot 5 init ByAuthor.busy.init#37 <- []
+    node 6 entries signal ByAuthor.entries#41 export <- [rows]
+    node 7 count signal ByAuthor.count#42 export <- [total]
+    node 8 version signal ByAuthor.version#43 export <- [revision]
+    order [subscriber, rows, total, revision, queued, busy, entries, count, version]
+    input 0 arrived capacity 64 overflow wait handler ByAuthor.on.arrived#38
+        plan [queued, busy]
+    input 1 applied capacity 8 overflow wait handler ByAuthor.on.applied#39
+        plan [rows, total, revision, queued, busy, entries, count, version]
+    input 2 notified capacity 8 overflow wait handler ByAuthor.on.notified#40
+        plan []
+    exports [entries, count, version]
+
+reactor Subscriber #2
+    node 0 seen_count state slot 0 init Subscriber.seen_count.init#44 <- []
+    node 1 last_version state slot 1 init Subscriber.last_version.init#45 <- []
+    node 2 seen signal Subscriber.seen#47 export <- [seen_count]
+    node 3 last signal Subscriber.last#48 export <- [last_version]
+    order [seen_count, last_version, seen, last]
+    input 0 changed capacity 64 overflow drop_oldest handler Subscriber.on.changed#46
+        plan [seen_count, last_version, seen, last]
+    exports [seen, last]
+
+task fn deliver #0(_0/delta, _1/index)
+    local _2
+    local _3
+    local _4
+  b0:
+    _2 = input 0 of _1/index
+    _3 = task builtin send(_2, _0/delta)
+    await _3 -> _4, resume b1
+  b1:
+    return _4
+
+task fn apply #1(_0/entries, _1/batch)
+    local _2/merged
+    local _3
+    local _4
+    local _5
+  b0:
+    _3 = call apply_all#2(_0/entries, _1/batch)
+    _2/merged = _3
+    _4 = call list.length<Post>#49(_2/merged)
+    _5 = Indexed(_2/merged, _4)
+    return _5
+
+fn apply_all #2(_0/entries, _1/batch)
+    local _2/delta
+    local _3/rest
+    local _4
+    local _5
+    local _6
+  b0:
+    goto b2
+  b1:
+    return _4
+  b2:
+    switch tag _1/batch [0 => b6] else b3
+  b3:
+    switch tag _1/batch [1 => b8] else b4
+  b4:
+    trap "no match arm applied"
+  b5:
+    _4 = _0/entries
+    goto b1
+  b6:
+    goto b5
+  b7:
+    _5 = call apply_all#2(_0/entries, _3/rest)
+    _6 = call apply_one#3(_5, _2/delta)
+    _4 = _6
+    goto b1
+  b8:
+    _2/delta = _1/batch.0
+    goto b9
+  b9:
+    _3/rest = _1/batch.1
+    goto b7
+
+fn apply_one #3(_0/entries, _1/delta)
+    local _2/post
+    local _3/id
+    local _4
+    local _5
+    local _6
+    local _7
+  b0:
+    goto b2
+  b1:
+    return _4
+  b2:
+    switch tag _1/delta [0 => b6] else b3
+  b3:
+    switch tag _1/delta [1 => b8] else b4
+  b4:
+    trap "no match arm applied"
+  b5:
+    _5 = call remove#5(_2/post.0, _0/entries)
+    _6 = call insert#4(_2/post, _5)
+    _4 = _6
+    goto b1
+  b6:
+    _2/post = _1/delta.0
+    goto b5
+  b7:
+    _7 = call remove#5(_3/id, _0/entries)
+    _4 = _7
+    goto b1
+  b8:
+    _3/id = _1/delta.0
+    goto b7
+
+fn insert #4(_0/post, _1/entries)
+    local _2/head
+    local _3/rest
+    local _4
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+    local _10
+    local _11
+    local _12
+    local _13
+    local _14
+    local _15
+    local _16
+  b0:
+    goto b2
+  b1:
+    return _4
+  b2:
+    switch tag _1/entries [0 => b6] else b3
+  b3:
+    switch tag _1/entries [1 => b8] else b4
+  b4:
+    trap "no match arm applied"
+  b5:
+    _5 = List<Post>.Nil()
+    _6 = List<Post>.Cons(_0/post, _5)
+    _4 = _6
+    goto b1
+  b6:
+    goto b5
+  b7:
+    _9 = _0/post.1 lt _2/head.1
+    _8 = _9
+    branch _8 ? b11 : b10
+  b8:
+    _2/head = _1/entries.0
+    goto b9
+  b9:
+    _3/rest = _1/entries.1
+    goto b7
+  b10:
+    _11 = _0/post.1 eq _2/head.1
+    _10 = _11
+    branch _10 ? b12 : b13
+  b11:
+    branch _8 ? b14 : b15
+  b12:
+    _12 = _0/post.2 ge _2/head.2
+    _10 = _12
+    goto b13
+  b13:
+    _8 = _10
+    goto b11
+  b14:
+    _13 = List<Post>.Cons(_2/head, _3/rest)
+    _14 = List<Post>.Cons(_0/post, _13)
+    _7 = _14
+    goto b16
+  b15:
+    _15 = call insert#4(_0/post, _3/rest)
+    _16 = List<Post>.Cons(_2/head, _15)
+    _7 = _16
+    goto b16
+  b16:
+    _4 = _7
+    goto b1
+
+fn remove #5(_0/id, _1/entries)
+    local _2/head
+    local _3/rest
+    local _4
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+    local _10
+  b0:
+    goto b2
+  b1:
+    return _4
+  b2:
+    switch tag _1/entries [0 => b6] else b3
+  b3:
+    switch tag _1/entries [1 => b8] else b4
+  b4:
+    trap "no match arm applied"
+  b5:
+    _5 = List<Post>.Nil()
+    _4 = _5
+    goto b1
+  b6:
+    goto b5
+  b7:
+    _7 = _2/head.0 eq _0/id
+    branch _7 ? b10 : b11
+  b8:
+    _2/head = _1/entries.0
+    goto b9
+  b9:
+    _3/rest = _1/entries.1
+    goto b7
+  b10:
+    _8 = call remove#5(_0/id, _3/rest)
+    _6 = _8
+    goto b12
+  b11:
+    _9 = call remove#5(_0/id, _3/rest)
+    _10 = List<Post>.Cons(_2/head, _9)
+    _6 = _10
+    goto b12
+  b12:
+    _4 = _6
+    goto b1
+
+task fn notify #6(_0/version, _1/subscriber)
+    local _2
+    local _3
+    local _4
+  b0:
+    _2 = input 0 of _1/subscriber
+    _3 = task builtin send(_2, _0/version)
+    await _3 -> _4, resume b1
+  b1:
+    return _4
+
+fn by_author #7(_0/author, _1/entries)
+    local _2/post
+    local _3/rest
+    local _4
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+    local _10
+  b0:
+    goto b2
+  b1:
+    return _4
+  b2:
+    switch tag _1/entries [0 => b6] else b3
+  b3:
+    switch tag _1/entries [1 => b8] else b4
+  b4:
+    trap "no match arm applied"
+  b5:
+    _5 = List<Post>.Nil()
+    _4 = _5
+    goto b1
+  b6:
+    goto b5
+  b7:
+    _7 = _2/post.1 eq _0/author
+    branch _7 ? b10 : b11
+  b8:
+    _2/post = _1/entries.0
+    goto b9
+  b9:
+    _3/rest = _1/entries.1
+    goto b7
+  b10:
+    _8 = call by_author#7(_0/author, _3/rest)
+    _9 = List<Post>.Cons(_2/post, _8)
+    _6 = _9
+    goto b12
+  b11:
+    _10 = call by_author#7(_0/author, _3/rest)
+    _6 = _10
+    goto b12
+  b12:
+    _4 = _6
+    goto b1
+
+fn find #8(_0/id, _1/journal)
+    local _2/delta
+    local _3/rest
+    local _4/post
+    local _5/gone
+    local _6
+    local _7
+    local _8
+    local _9
+    local _10
+    local _11
+    local _12
+    local _13
+    local _14
+    local _15
+    local _16
+  b0:
+    goto b2
+  b1:
+    return _6
+  b2:
+    switch tag _1/journal [0 => b6] else b3
+  b3:
+    switch tag _1/journal [1 => b8] else b4
+  b4:
+    trap "no match arm applied"
+  b5:
+    _7 = Option.None()
+    _6 = _7
+    goto b1
+  b6:
+    goto b5
+  b7:
+    goto b11
+  b8:
+    _2/delta = _1/journal.0
+    goto b9
+  b9:
+    _3/rest = _1/journal.1
+    goto b7
+  b10:
+    _6 = _8
+    goto b1
+  b11:
+    switch tag _2/delta [0 => b15] else b12
+  b12:
+    switch tag _2/delta [1 => b20] else b13
+  b13:
+    trap "no match arm applied"
+  b14:
+    _10 = _4/post.0 eq _0/id
+    branch _10 ? b16 : b17
+  b15:
+    _4/post = _2/delta.0
+    goto b14
+  b16:
+    _11 = Option.Some(_4/post)
+    _9 = _11
+    goto b18
+  b17:
+    _12 = call find#8(_0/id, _3/rest)
+    _9 = _12
+    goto b18
+  b18:
+    _8 = _9
+    goto b10
+  b19:
+    _14 = _5/gone eq _0/id
+    branch _14 ? b21 : b22
+  b20:
+    _5/gone = _2/delta.0
+    goto b19
+  b21:
+    _15 = Option.None()
+    _13 = _15
+    goto b23
+  b22:
+    _16 = call find#8(_0/id, _3/rest)
+    _13 = _16
+    goto b23
+  b23:
+    _8 = _13
+    goto b10
+
+fn render #9(_0/entries)
+    local _1/post
+    local _2/rest
+    local _3
+    local _4
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+    local _10
+    local _11
+  b0:
+    goto b2
+  b1:
+    return _3
+  b2:
+    switch tag _0/entries [0 => b6] else b3
+  b3:
+    switch tag _0/entries [1 => b8] else b4
+  b4:
+    trap "no match arm applied"
+  b5:
+    _3 = ""
+    goto b1
+  b6:
+    goto b5
+  b7:
+    _4 = _1/post.1 concat "/"
+    _5 = call fmt.to_string#11(_1/post.0)
+    _6 = _4 concat _5
+    _7 = _6 concat ": "
+    _8 = _7 concat _1/post.3
+    _9 = _8 concat "\n"
+    _10 = call render#9(_2/rest)
+    _11 = _9 concat _10
+    _3 = _11
+    goto b1
+  b8:
+    _1/post = _0/entries.0
+    goto b9
+  b9:
+    _2/rest = _0/entries.1
+    goto b7
+
+task fn main #10()
+    local _0/subscriber
+    local _1/index
+    local _2/posts
+    local _3/post
+    local _4/post
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+    local _10
+    local _11
+    local _12
+    local _13
+    local _14
+    local _15
+    local _16
+    local _17
+    local _18
+    local _19
+    local _20
+    local _21
+    local _22
+    local _23
+    local _24
+    local _25
+    local _26
+    local _27
+    local _28
+    local _29
+    local _30
+    local _31
+    local _32
+    local _33
+    local _34
+    local _35
+    local _36
+    local _37
+    local _38
+    local _39
+    local _40
+    local _41
+    local _42
+    local _43
+    local _44
+    local _45
+    local _46
+    local _47
+    local _48
+    local _49
+    local _50
+    local _51
+    local _52
+    local _53
+    local _54
+    local _55
+    local _56
+    local _57
+    local _58
+    local _59
+    local _60
+    local _61
+    local _62
+    local _63
+    local _64
+    local _65
+    local _66
+    local _67
+    local _68
+    local _69
+    local _70
+  b0:
+    scope enter
+    _6 = spawn reactor Subscriber#2()
+    _0/subscriber = _6
+    _7 = spawn reactor ByAuthor#1(_0/subscriber)
+    _1/index = _7
+    _8 = spawn reactor PostPartition#0(_1/index)
+    _2/posts = _8
+    _9 = input 0 of _2/posts
+    _10 = Post(1, "alice", 100, "first")
+    _11 = task builtin send(_9, _10)
+    await _11 -> _12, resume b1
+  b1:
+    _13 = input 0 of _2/posts
+    _14 = Post(2, "bob", 200, "hello")
+    _15 = task builtin send(_13, _14)
+    await _15 -> _16, resume b2
+  b2:
+    _17 = input 0 of _2/posts
+    _18 = Post(3, "alice", 300, "newest")
+    _19 = task builtin send(_17, _18)
+    await _19 -> _20, resume b3
+  b3:
+    _21 = input 0 of _2/posts
+    _22 = Post(1, "alice", 100, "first, edited")
+    _23 = task builtin send(_21, _22)
+    await _23 -> _24, resume b4
+  b4:
+    _25 = input 1 of _2/posts
+    _26 = task builtin send(_25, 2)
+    await _26 -> _27, resume b5
+  b5:
+    _28 = task builtin sleep(50)
+    await _28 -> _29, resume b6
+  b6:
+    _30 = builtin print("alice, newest first:")
+    _31 = export 0 of _1/index
+    _32 = builtin latest(_31)
+    _33 = call by_author#7("alice", _32)
+    _34 = call list.take<Post>#50(_33, 20)
+    _35 = call render#9(_34)
+    _36 = builtin print(_35)
+    _37 = export 1 of _1/index
+    _38 = builtin latest(_37)
+    _39 = call fmt.to_string#11(_38)
+    _40 = "indexed: " concat _39
+    _41 = builtin print(_40)
+    _42 = export 0 of _0/subscriber
+    _43 = builtin latest(_42)
+    _44 = call fmt.to_string#11(_43)
+    _45 = "watched: " concat _44
+    _46 = _45 concat " changes, at version "
+    _47 = export 1 of _0/subscriber
+    _48 = builtin latest(_47)
+    _49 = call fmt.to_string#11(_48)
+    _50 = _46 concat _49
+    _51 = builtin print(_50)
+    _53 = export 1 of _2/posts
+    _54 = builtin latest(_53)
+    _55 = call find#8(1, _54)
+    goto b8
+  b7:
+    _60 = export 1 of _2/posts
+    _61 = builtin latest(_60)
+    _62 = call find#8(2, _61)
+    goto b16
+  b8:
+    switch tag _55 [1 => b12] else b9
+  b9:
+    switch tag _55 [0 => b14] else b10
+  b10:
+    trap "no match arm applied"
+  b11:
+    _56 = "get(1): " concat _3/post.3
+    _57 = builtin print(_56)
+    _52 = _57
+    goto b7
+  b12:
+    _3/post = _55.0
+    goto b11
+  b13:
+    _58 = builtin print("get(1): gone")
+    _52 = _58
+    goto b7
+  b14:
+    goto b13
+  b15:
+    _66 = export 0 of _2/posts
+    _67 = builtin latest(_66)
+    _68 = call fmt.to_string#11(_67)
+    _69 = "partition backlog: " concat _68
+    _70 = builtin print(_69)
+    _5 = _70
+    scope exit, resume b23
+  b16:
+    switch tag _62 [1 => b20] else b17
+  b17:
+    switch tag _62 [0 => b22] else b18
+  b18:
+    trap "no match arm applied"
+  b19:
+    _63 = "get(2): " concat _4/post.3
+    _64 = builtin print(_63)
+    _59 = _64
+    goto b15
+  b20:
+    _4/post = _62.0
+    goto b19
+  b21:
+    _65 = builtin print("get(2): gone")
+    _59 = _65
+    goto b15
+  b22:
+    goto b21
+  b23:
+    return _5
+
+fn fmt.to_string #11(_0/n)
+    local _1/rest
+    local _2/out
+    local _3
+    local _4
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+    local _10
+    local _11
+    local _12
+    local _13
+    local _14
+    local _15
+  b0:
+    _4 = _0/n lt 0
+    branch _4 ? b1 : b2
+  b1:
+    _5 = 0 sub.i _0/n
+    _3 = _5
+    goto b3
+  b2:
+    _3 = _0/n
+    goto b3
+  b3:
+    _1/rest = _3
+    _6 = _1/rest rem.i 10
+    _7 = call fmt.digit#13(_6)
+    _2/out = _7
+    goto b4
+  b4:
+    _8 = _1/rest gt 9
+    branch _8 ? b6 : b5
+  b5:
+    _14 = _0/n lt 0
+    branch _14 ? b7 : b8
+  b6:
+    _9 = _1/rest div.i 10
+    _1/rest = _9
+    _10 = _1/rest rem.i 10
+    _11 = call fmt.digit#13(_10)
+    _12 = _11 concat _2/out
+    _2/out = _12
+    goto b4
+  b7:
+    _15 = "-" concat _2/out
+    _13 = _15
+    goto b9
+  b8:
+    _13 = _2/out
+    goto b9
+  b9:
+    return _13
+
+fn fmt.to_int #12(_0/s)
+    local _1/data
+    local _2/len
+    local _3/i
+    local _4/negative
+    local _5/value
+    local _6/b
+    local _7
+    local _8
+    local _9
+    local _10
+    local _11
+    local _12
+    local _13
+    local _14
+    local _15
+    local _16
+    local _17
+    local _18
+    local _19
+    local _20
+    local _21
+    local _22
+    local _23
+    local _24
+    local _25
+    local _26
+    local _27
+    local _28
+    local _29
+    local _30
+    local _31
+    local _32
+  b0:
+    _7 = builtin bytes(_0/s)
+    _1/data = _7
+    _8 = builtin bytes_len(_1/data)
+    _2/len = _8
+    _3/i = 0
+    _4/negative = false
+    _10 = _2/len eq 0
+    branch _10 ? b1 : b2
+  b1:
+    _11 = Option.None()
+    return _11
+  b2:
+    _9 = ()
+    goto b3
+  b3:
+    _13 = builtin bytes_at(_1/data, 0)
+    _14 = _13 eq 45
+    branch _14 ? b4 : b5
+  b4:
+    _4/negative = true
+    _3/i = 1
+    _12 = ()
+    goto b6
+  b5:
+    _12 = ()
+    goto b6
+  b6:
+    _16 = _3/i eq _2/len
+    branch _16 ? b7 : b8
+  b7:
+    _17 = Option.None()
+    return _17
+  b8:
+    _15 = ()
+    goto b9
+  b9:
+    _5/value = 0
+    goto b10
+  b10:
+    _18 = _3/i lt _2/len
+    branch _18 ? b12 : b11
+  b11:
+    branch _4/negative ? b18 : b19
+  b12:
+    _19 = builtin bytes_at(_1/data, _3/i)
+    _6/b = _19
+    _22 = _6/b lt 48
+    _21 = _22
+    branch _21 ? b14 : b13
+  b13:
+    _23 = _6/b gt 57
+    _21 = _23
+    goto b14
+  b14:
+    branch _21 ? b15 : b16
+  b15:
+    _24 = Option.None()
+    return _24
+  b16:
+    _20 = ()
+    goto b17
+  b17:
+    _25 = _5/value mul.i 10
+    _26 = _6/b sub.i 48
+    _27 = _25 add.i _26
+    _5/value = _27
+    _28 = _3/i add.i 1
+    _3/i = _28
+    goto b10
+  b18:
+    _30 = 0 sub.i _5/value
+    _31 = Option.Some(_30)
+    _29 = _31
+    goto b20
+  b19:
+    _32 = Option.Some(_5/value)
+    _29 = _32
+    goto b20
+  b20:
+    return _29
+
+fn fmt.digit #13(_0/n)
+    local _1
+    local _2
+    local _3
+    local _4
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+    local _10
+    local _11
+  b0:
+    goto b2
+  b1:
+    return _1
+  b2:
+    _2 = _0/n eq 0
+    branch _2 ? b13 : b3
+  b3:
+    _3 = _0/n eq 1
+    branch _3 ? b14 : b4
+  b4:
+    _4 = _0/n eq 2
+    branch _4 ? b15 : b5
+  b5:
+    _5 = _0/n eq 3
+    branch _5 ? b16 : b6
+  b6:
+    _6 = _0/n eq 4
+    branch _6 ? b17 : b7
+  b7:
+    _7 = _0/n eq 5
+    branch _7 ? b18 : b8
+  b8:
+    _8 = _0/n eq 6
+    branch _8 ? b19 : b9
+  b9:
+    _9 = _0/n eq 7
+    branch _9 ? b20 : b10
+  b10:
+    _10 = _0/n eq 8
+    branch _10 ? b21 : b11
+  b11:
+    _11 = _0/n eq 9
+    branch _11 ? b22 : b12
+  b12:
+    goto b23
+  b13:
+    _1 = "0"
+    goto b1
+  b14:
+    _1 = "1"
+    goto b1
+  b15:
+    _1 = "2"
+    goto b1
+  b16:
+    _1 = "3"
+    goto b1
+  b17:
+    _1 = "4"
+    goto b1
+  b18:
+    _1 = "5"
+    goto b1
+  b19:
+    _1 = "6"
+    goto b1
+  b20:
+    _1 = "7"
+    goto b1
+  b21:
+    _1 = "8"
+    goto b1
+  b22:
+    _1 = "9"
+    goto b1
+  b23:
+    _1 = "?"
+    goto b1
+
+fn list.length #14(_0/items)
+  b0:
+    return ()
+
+fn list.empty #15()
+  b0:
+    return ()
+
+fn list.append #16(_0/items, _1/tail)
+  b0:
+    return ()
+
+fn list.reverse #17(_0/items)
+  b0:
+    return ()
+
+fn list.walk #18(_0/items, _1/out)
+  b0:
+    return ()
+
+fn list.take #19(_0/items, _1/count)
+  b0:
+    return ()
+
+fn list.drop #20(_0/items, _1/count)
+  b0:
+    return ()
+
+fn list.nth #21(_0/items, _1/index)
+  b0:
+    return ()
+
+fn list.contains #22(_0/items, _1/wanted)
+  b0:
+    return ()
+
+fn list.join #23(_0/items, _1/separator)
+  b0:
+    return ()
+
+fn fmt.Display.to_string for I64 #24(_0/value)
+    local _1
+  b0:
+    _1 = call fmt.to_string#11(_0/value)
+    return _1
+
+fn PostPartition.journal.init #25()
+    local _0
+  b0:
+    _0 = List<Delta>.Nil()
+    return _0
+
+fn PostPartition.seq.init #26()
+  b0:
+    return 0
+
+fn PostPartition.acked.init #27()
+  b0:
+    return 0
+
+fn PostPartition.on.put #28(_0/post, _1/index, _2/journal, _3/seq, _4/acked)
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+  b0:
+    _5 = Delta.Put(_0/post)
+    _6 = List<Delta>.Cons(_5, _2/journal)
+    _2/journal = _6
+    set slot 1 = _2/journal
+    _7 = _3/seq add.i 1
+    _3/seq = _7
+    set slot 2 = _3/seq
+    _8 = Delta.Put(_0/post)
+    _9 = task deliver#0(_8, _1/index)
+    emit _9 -> input 2
+    return ()
+
+fn PostPartition.on.erase #29(_0/id, _1/index, _2/journal, _3/seq, _4/acked)
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+  b0:
+    _5 = Delta.Erase(_0/id)
+    _6 = List<Delta>.Cons(_5, _2/journal)
+    _2/journal = _6
+    set slot 1 = _2/journal
+    _7 = _3/seq add.i 1
+    _3/seq = _7
+    set slot 2 = _3/seq
+    _8 = Delta.Erase(_0/id)
+    _9 = task deliver#0(_8, _1/index)
+    emit _9 -> input 2
+    return ()
+
+fn PostPartition.on.delivered #30(_0/index, _1/journal, _2/seq, _3/acked)
+    local _4
+  b0:
+    _4 = _3/acked add.i 1
+    _3/acked = _4
+    set slot 3 = _3/acked
+    return ()
+
+fn PostPartition.backlog #31(_0/seq, _1/acked)
+    local _2
+  b0:
+    _2 = _0/seq sub.i _1/acked
+    return _2
+
+fn PostPartition.history #32(_0/journal)
+  b0:
+    return _0/journal
+
+fn ByAuthor.rows.init #33()
+    local _0
+  b0:
+    _0 = List<Post>.Nil()
+    return _0
+
+fn ByAuthor.total.init #34()
+  b0:
+    return 0
+
+fn ByAuthor.revision.init #35()
+  b0:
+    return 0
+
+fn ByAuthor.queued.init #36()
+    local _0
+  b0:
+    _0 = List<Delta>.Nil()
+    return _0
+
+fn ByAuthor.busy.init #37()
+  b0:
+    return false
+
+fn ByAuthor.on.arrived #38(_0/delta, _1/subscriber, _2/rows, _3/total, _4/revision, _5/queued, _6/busy)
+    local _7
+    local _8
+    local _9
+    local _10
+    local _11
+  b0:
+    branch _6/busy ? b1 : b2
+  b1:
+    _8 = List<Delta>.Cons(_0/delta, _5/queued)
+    _5/queued = _8
+    set slot 4 = _5/queued
+    _7 = ()
+    goto b3
+  b2:
+    _6/busy = true
+    set slot 5 = _6/busy
+    _9 = List<Delta>.Nil()
+    _10 = List<Delta>.Cons(_0/delta, _9)
+    _11 = task apply#1(_2/rows, _10)
+    emit _11 -> input 1
+    _7 = ()
+    goto b3
+  b3:
+    return _7
+
+fn ByAuthor.on.applied #39(_0/result, _1/subscriber, _2/rows, _3/total, _4/revision, _5/queued, _6/busy)
+    local _7
+    local _8
+    local _9
+    local _10
+    local _11
+  b0:
+    _2/rows = _0/result.0
+    set slot 1 = _2/rows
+    _3/total = _0/result.1
+    set slot 2 = _3/total
+    _7 = _4/revision add.i 1
+    _4/revision = _7
+    set slot 3 = _4/revision
+    _8 = task notify#6(_4/revision, _1/subscriber)
+    emit _8 -> input 2
+    goto b2
+  b1:
+    return _9
+  b2:
+    switch tag _5/queued [1 => b6] else b3
+  b3:
+    switch tag _5/queued [0 => b9] else b4
+  b4:
+    trap "no match arm applied"
+  b5:
+    _10 = task apply#1(_2/rows, _5/queued)
+    emit _10 -> input 1
+    _11 = List<Delta>.Nil()
+    _5/queued = _11
+    set slot 4 = _5/queued
+    _9 = ()
+    goto b1
+  b6:
+    goto b7
+  b7:
+    goto b5
+  b8:
+    _6/busy = false
+    set slot 5 = _6/busy
+    _9 = ()
+    goto b1
+  b9:
+    goto b8
+
+fn ByAuthor.on.notified #40(_0/subscriber, _1/rows, _2/total, _3/revision, _4/queued, _5/busy)
+  b0:
+    return ()
+
+fn ByAuthor.entries #41(_0/rows)
+  b0:
+    return _0/rows
+
+fn ByAuthor.count #42(_0/total)
+  b0:
+    return _0/total
+
+fn ByAuthor.version #43(_0/revision)
+  b0:
+    return _0/revision
+
+fn Subscriber.seen_count.init #44()
+  b0:
+    return 0
+
+fn Subscriber.last_version.init #45()
+  b0:
+    return 0
+
+fn Subscriber.on.changed #46(_0/version, _1/seen_count, _2/last_version)
+    local _3
+  b0:
+    _3 = _1/seen_count add.i 1
+    _1/seen_count = _3
+    set slot 0 = _1/seen_count
+    _2/last_version = _0/version
+    set slot 1 = _2/last_version
+    return ()
+
+fn Subscriber.seen #47(_0/seen_count)
+  b0:
+    return _0/seen_count
+
+fn Subscriber.last #48(_0/last_version)
+  b0:
+    return _0/last_version
+
+fn list.length<Post> #49(_0/items)
+    local _1/rest
+    local _2
+    local _3
+    local _4
+  b0:
+    goto b2
+  b1:
+    return _2
+  b2:
+    switch tag _0/items [0 => b6] else b3
+  b3:
+    switch tag _0/items [1 => b8] else b4
+  b4:
+    trap "no match arm applied"
+  b5:
+    _2 = 0
+    goto b1
+  b6:
+    goto b5
+  b7:
+    _3 = call list.length<Post>#49(_1/rest)
+    _4 = 1 add.i _3
+    _2 = _4
+    goto b1
+  b8:
+    goto b9
+  b9:
+    _1/rest = _0/items.1
+    goto b7
+
+fn list.take<Post> #50(_0/items, _1/count)
+    local _2/head
+    local _3/rest
+    local _4
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+    local _10
+    local _11
+  b0:
+    _5 = _1/count le 0
+    branch _5 ? b1 : b2
+  b1:
+    _6 = List<Post>.Nil()
+    _4 = _6
+    goto b3
+  b2:
+    goto b5
+  b3:
+    return _4
+  b4:
+    _4 = _7
+    goto b3
+  b5:
+    switch tag _0/items [0 => b9] else b6
+  b6:
+    switch tag _0/items [1 => b11] else b7
+  b7:
+    trap "no match arm applied"
+  b8:
+    _8 = List<Post>.Nil()
+    _7 = _8
+    goto b4
+  b9:
+    goto b8
+  b10:
+    _9 = _1/count sub.i 1
+    _10 = call list.take<Post>#50(_3/rest, _9)
+    _11 = List<Post>.Cons(_2/head, _10)
+    _7 = _11
+    goto b4
+  b11:
+    _2/head = _0/items.0
+    goto b12
+  b12:
+    _3/rest = _0/items.1
+    goto b10
+
+fn fmt.Display.to_string for T #51(_0)
+  b0:
+    return ()
+
+=== graph ===
+reactor PostPartition #0
+    node 0 index param slot 0 arg 0 <- []
+    node 1 journal state slot 1 init PostPartition.journal.init#25 <- []
+    node 2 seq state slot 2 init PostPartition.seq.init#26 <- []
+    node 3 acked state slot 3 init PostPartition.acked.init#27 <- []
+    node 4 backlog signal PostPartition.backlog#31 export <- [seq, acked]
+    node 5 history signal PostPartition.history#32 export <- [journal]
+    order [index, journal, seq, acked, backlog, history]
+    input 0 put capacity 64 overflow wait handler PostPartition.on.put#28
+        plan [journal, seq, backlog, history]
+    input 1 erase capacity 64 overflow wait handler PostPartition.on.erase#29
+        plan [journal, seq, backlog, history]
+    input 2 delivered capacity 64 overflow wait handler PostPartition.on.delivered#30
+        plan [acked, backlog]
+    exports [backlog, history]
+
+reactor ByAuthor #1
+    node 0 subscriber param slot 0 arg 0 <- []
+    node 1 rows state slot 1 init ByAuthor.rows.init#33 <- []
+    node 2 total state slot 2 init ByAuthor.total.init#34 <- []
+    node 3 revision state slot 3 init ByAuthor.revision.init#35 <- []
+    node 4 queued state slot 4 init ByAuthor.queued.init#36 <- []
+    node 5 busy state slot 5 init ByAuthor.busy.init#37 <- []
+    node 6 entries signal ByAuthor.entries#41 export <- [rows]
+    node 7 count signal ByAuthor.count#42 export <- [total]
+    node 8 version signal ByAuthor.version#43 export <- [revision]
+    order [subscriber, rows, total, revision, queued, busy, entries, count, version]
+    input 0 arrived capacity 64 overflow wait handler ByAuthor.on.arrived#38
+        plan [queued, busy]
+    input 1 applied capacity 8 overflow wait handler ByAuthor.on.applied#39
+        plan [rows, total, revision, queued, busy, entries, count, version]
+    input 2 notified capacity 8 overflow wait handler ByAuthor.on.notified#40
+        plan []
+    exports [entries, count, version]
+
+reactor Subscriber #2
+    node 0 seen_count state slot 0 init Subscriber.seen_count.init#44 <- []
+    node 1 last_version state slot 1 init Subscriber.last_version.init#45 <- []
+    node 2 seen signal Subscriber.seen#47 export <- [seen_count]
+    node 3 last signal Subscriber.last#48 export <- [last_version]
+    order [seen_count, last_version, seen, last]
+    input 0 changed capacity 64 overflow drop_oldest handler Subscriber.on.changed#46
+        plan [seen_count, last_version, seen, last]
+    exports [seen, last]
+
+=== output ===
+alice, newest first:
+alice/3: newest
+alice/1: first, edited
+
+indexed: 2
+watched: 4 changes, at version 4
+get(1): first, edited
+get(2): gone
+partition backlog: 0
+=== result ===
+()
+=== trace ===
+0ms t0 spawn main root
+0ms t0 resume
+0ms t0 scope enter 1
+0ms R0 create Subscriber in t0
+0ms R0 publish 0
+0ms R1 create ByAuthor in t0
+0ms R1 publish 0
+0ms R2 create PostPartition in t0
+0ms R2 publish 0
+0ms t0 park timer 50ms
+0ms R2 turn 0 put
+0ms R2 commit journal
+0ms R2 commit seq
+0ms R2 recompute backlog
+0ms R2 recompute history
+0ms R2 publish 1
+0ms t1 spawn deliver in t0
+0ms R2 effect deliver t1 -> delivered
+0ms t1 resume
+0ms t1 done
+0ms R2 turn 1 put
+0ms R2 commit journal
+0ms R2 commit seq
+0ms R2 recompute backlog
+0ms R2 recompute history
+0ms R2 publish 2
+0ms t2 spawn deliver in t0
+0ms R2 effect deliver t2 -> delivered
+0ms R1 turn 0 arrived
+0ms R1 commit busy
+0ms R1 publish 1
+0ms t3 spawn apply in t0
+0ms R1 effect apply t3 -> applied
+0ms t2 resume
+0ms t2 done
+0ms R2 turn 2 put
+0ms R2 commit journal
+0ms R2 commit seq
+0ms R2 recompute backlog
+0ms R2 recompute history
+0ms R2 publish 3
+0ms t4 spawn deliver in t0
+0ms R2 effect deliver t4 -> delivered
+0ms t3 resume
+0ms t3 done
+0ms R1 turn 1 arrived
+0ms R1 commit queued
+0ms R1 publish 2
+0ms t4 resume
+0ms t4 done
+0ms R2 turn 3 put
+0ms R2 commit journal
+0ms R2 commit seq
+0ms R2 recompute backlog
+0ms R2 recompute history
+0ms R2 publish 4
+0ms t5 spawn deliver in t0
+0ms R2 effect deliver t5 -> delivered
+0ms R1 turn 2 applied
+0ms R1 commit rows
+0ms R1 commit total
+0ms R1 commit revision
+0ms R1 commit queued
+0ms R1 recompute entries
+0ms R1 recompute count
+0ms R1 recompute version
+0ms R1 publish 3
+0ms t6 spawn notify in t0
+0ms R1 effect notify t6 -> notified
+0ms t7 spawn apply in t0
+0ms R1 effect apply t7 -> applied
+0ms t5 resume
+0ms t5 done
+0ms R2 turn 4 erase
+0ms R2 commit journal
+0ms R2 commit seq
+0ms R2 recompute backlog
+0ms R2 recompute history
+0ms R2 publish 5
+0ms t8 spawn deliver in t0
+0ms R2 effect deliver t8 -> delivered
+0ms t6 resume
+0ms t6 done
+0ms t7 resume
+0ms t7 done
+0ms R1 turn 3 arrived
+0ms R1 commit queued
+0ms R1 publish 4
+0ms t8 resume
+0ms t8 done
+0ms R2 turn 5 delivered
+0ms R2 commit acked
+0ms R2 recompute backlog
+0ms R2 publish 6
+0ms R0 turn 0 changed
+0ms R0 commit seen_count
+0ms R0 commit last_version
+0ms R0 recompute seen
+0ms R0 recompute last
+0ms R0 publish 1
+0ms R1 turn 4 arrived
+0ms R1 commit queued
+0ms R1 publish 5
+0ms R2 turn 6 delivered
+0ms R2 commit acked
+0ms R2 recompute backlog
+0ms R2 publish 7
+0ms R1 turn 5 notified
+0ms R1 publish 6
+0ms R2 turn 7 delivered
+0ms R2 commit acked
+0ms R2 recompute backlog
+0ms R2 publish 8
+0ms R1 turn 6 applied
+0ms R1 commit rows
+0ms R1 commit total
+0ms R1 commit revision
+0ms R1 commit queued
+0ms R1 recompute entries
+0ms R1 recompute count
+0ms R1 recompute version
+0ms R1 publish 7
+0ms t9 spawn notify in t0
+0ms R1 effect notify t9 -> notified
+0ms t10 spawn apply in t0
+0ms R1 effect apply t10 -> applied
+0ms R2 turn 8 delivered
+0ms R2 commit acked
+0ms R2 recompute backlog
+0ms R2 publish 9
+0ms t9 resume
+0ms t9 done
+0ms t10 resume
+0ms t10 done
+0ms R1 turn 7 arrived
+0ms R1 commit queued
+0ms R1 publish 8
+0ms R2 turn 9 delivered
+0ms R2 commit acked
+0ms R2 recompute backlog
+0ms R2 publish 10
+0ms R0 turn 1 changed
+0ms R0 commit seen_count
+0ms R0 commit last_version
+0ms R0 recompute seen
+0ms R0 recompute last
+0ms R0 publish 2
+0ms R1 turn 8 notified
+0ms R1 publish 9
+0ms R1 turn 9 applied
+0ms R1 commit rows
+0ms R1 commit total
+0ms R1 commit revision
+0ms R1 commit queued
+0ms R1 recompute entries
+0ms R1 recompute count
+0ms R1 recompute version
+0ms R1 publish 10
+0ms t11 spawn notify in t0
+0ms R1 effect notify t11 -> notified
+0ms t12 spawn apply in t0
+0ms R1 effect apply t12 -> applied
+0ms t11 resume
+0ms t11 done
+0ms t12 resume
+0ms t12 done
+0ms R0 turn 2 changed
+0ms R0 commit seen_count
+0ms R0 commit last_version
+0ms R0 recompute seen
+0ms R0 recompute last
+0ms R0 publish 3
+0ms R1 turn 10 notified
+0ms R1 publish 11
+0ms R1 turn 11 applied
+0ms R1 commit rows
+0ms R1 commit total
+0ms R1 commit revision
+0ms R1 commit busy
+0ms R1 recompute entries
+0ms R1 recompute count
+0ms R1 recompute version
+0ms R1 publish 12
+0ms t13 spawn notify in t0
+0ms R1 effect notify t13 -> notified
+0ms t13 resume
+0ms t13 done
+0ms R0 turn 3 changed
+0ms R0 commit seen_count
+0ms R0 commit last_version
+0ms R0 recompute seen
+0ms R0 recompute last
+0ms R0 publish 4
+0ms R1 turn 12 notified
+0ms R1 publish 13
+50ms -- clock
+50ms t0 resume
+50ms R0 stop
+50ms R1 stop
+50ms R2 stop
+50ms t0 scope exit 1
+50ms t0 done

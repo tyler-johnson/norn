@@ -28,11 +28,12 @@
 //                   reactor and in-order delivery stand in for both here.
 //   Subscriber   — the client end of a watch: at scale, a session reactor fanning deltas out over
 //                   a websocket. `.watch()` is a send away from what `changed` receives.
-//   by_author / take / find — the generated query surface. `Post.by_author(x).first(20)` exists
-//                   because the index was declared; the unindexed query is a method that was never
-//                   generated, not a runtime error.
+//   by_author / find — the generated query surface (`take` and `length` come from std/list).
+//                   `Post.by_author(x).first(20)` exists because the index was declared; the
+//                   unindexed query is a method that was never generated, not a runtime error.
 
 import { to_string } from "std/fmt"
+import { List, length, take } from "std/list"
 
 // ── What the dev writes ─────────────────────────────────────────────────────
 
@@ -43,45 +44,36 @@ struct Post {
     body: String
 }
 
-// ── Generated vocabulary: deltas, and cons-lists standing in for Table ──────
+// ── Generated vocabulary: deltas, and List<T> standing in for Table ─────────
 
 enum Delta {
     Put(Post)
     Erase(I64)
 }
 
-// Monomorphized by hand because v0 has no generics: one list of index entries, one list of
-// journalled deltas. The derive would emit exactly this pair per collection.
-enum Rows {
-    Nil
-    Cons(Post, Rows)
-}
-
-enum Deltas {
-    Nil
-    Cons(Delta, Deltas)
-}
-
+// One list of index entries, one journal of deltas — `List<Post>` and `List<Delta>`, written as
+// the instances they are now that item 7's generics exist. This pair was two hand-monomorphized
+// enums until then, and the derive would have had to emit that expansion per collection.
 struct Indexed {
-    entries: Rows
+    entries: List<Post>
     count: I64
 }
 
 // ── The partition: write authority, O(1) per turn ───────────────────────────
 
 reactor PostPartition(index: ByAuthor) {
-    state journal: Deltas = Deltas.Nil
+    state journal: List<Delta> = List.Nil
     state seq: I64 = 0
     state acked: I64 = 0
 
     on put(post: Post) [capacity: 64, overflow: wait] {
-        journal = Deltas.Cons(Delta.Put(post), journal)
+        journal = List.Cons(Delta.Put(post), journal)
         seq = seq + 1
         after deliver(Delta.Put(post), index) -> delivered
     }
 
     on erase(id: I64) [capacity: 64, overflow: wait] {
-        journal = Deltas.Cons(Delta.Erase(id), journal)
+        journal = List.Cons(Delta.Erase(id), journal)
         seq = seq + 1
         after deliver(Delta.Erase(id), index) -> delivered
     }
@@ -107,18 +99,18 @@ task fn deliver(delta: Delta, index: ByAuthor) -> () {
 // glitch-free with the data it summarizes, which is the thing hand-maintained counters get wrong.
 
 reactor ByAuthor(subscriber: Subscriber) {
-    state rows: Rows = Rows.Nil
+    state rows: List<Post> = List.Nil
     state total: I64 = 0
     state revision: I64 = 0
-    state queued: Deltas = Deltas.Nil
+    state queued: List<Delta> = List.Nil
     state busy: Bool = false
 
     on arrived(delta: Delta) [capacity: 64, overflow: wait] {
         if busy {
-            queued = Deltas.Cons(delta, queued)
+            queued = List.Cons(delta, queued)
         } else {
             busy = true
-            after apply(rows, Deltas.Cons(delta, Deltas.Nil)) -> applied
+            after apply(rows, List.Cons(delta, List.Nil)) -> applied
         }
     }
 
@@ -128,11 +120,11 @@ reactor ByAuthor(subscriber: Subscriber) {
         revision = revision + 1
         after notify(revision, subscriber) -> notified
         match queued {
-            Deltas.Cons(_, _) => {
+            List.Cons(_, _) => {
                 after apply(rows, queued) -> applied
-                queued = Deltas.Nil
+                queued = List.Nil
             }
-            Deltas.Nil => {
+            List.Nil => {
                 busy = false
             }
         }
@@ -147,56 +139,50 @@ reactor ByAuthor(subscriber: Subscriber) {
 
 // Fold the batch oldest-first onto the snapshot, then measure it. Recursion lives here, in task
 // land, where it is legal — the reactor above only ever does O(1) work per turn.
-task fn apply(entries: Rows, batch: Deltas) -> Indexed {
+task fn apply(entries: List<Post>, batch: List<Delta>) -> Indexed {
     let merged = apply_all(entries, batch)
-    Indexed(entries: merged, count: size(merged))
+    Indexed(entries: merged, count: length(merged))
 }
 
-fn apply_all(entries: Rows, batch: Deltas) -> Rows {
+fn apply_all(entries: List<Post>, batch: List<Delta>) -> List<Post> {
     match batch {
-        Deltas.Nil => entries
-        Deltas.Cons(delta, rest) => apply_one(apply_all(entries, rest), delta)
+        List.Nil => entries
+        List.Cons(delta, rest) => apply_one(apply_all(entries, rest), delta)
     }
 }
 
-fn apply_one(entries: Rows, delta: Delta) -> Rows {
+fn apply_one(entries: List<Post>, delta: Delta) -> List<Post> {
     match delta {
         Delta.Put(post) => insert(post, remove(post.id, entries))
         Delta.Erase(id) => remove(id, entries)
     }
 }
 
-// Ordered insert on the declared key: (author ascending, created descending).
-fn insert(post: Post, entries: Rows) -> Rows {
+// Ordered insert on the declared key: (author ascending, created descending). This compares an
+// element's fields, so it stays here beside `Post` rather than moving to std/list.
+fn insert(post: Post, entries: List<Post>) -> List<Post> {
     match entries {
-        Rows.Nil => Rows.Cons(post, Rows.Nil)
-        Rows.Cons(head, rest) => {
+        List.Nil => List.Cons(post, List.Nil)
+        List.Cons(head, rest) => {
             if post.author < head.author || post.author == head.author && post.created >= head.created {
-                Rows.Cons(post, Rows.Cons(head, rest))
+                List.Cons(post, List.Cons(head, rest))
             } else {
-                Rows.Cons(head, insert(post, rest))
+                List.Cons(head, insert(post, rest))
             }
         }
     }
 }
 
-fn remove(id: I64, entries: Rows) -> Rows {
+fn remove(id: I64, entries: List<Post>) -> List<Post> {
     match entries {
-        Rows.Nil => Rows.Nil
-        Rows.Cons(head, rest) => {
+        List.Nil => List.Nil
+        List.Cons(head, rest) => {
             if head.id == id {
                 remove(id, rest)
             } else {
-                Rows.Cons(head, remove(id, rest))
+                List.Cons(head, remove(id, rest))
             }
         }
-    }
-}
-
-fn size(entries: Rows) -> I64 {
-    match entries {
-        Rows.Nil => 0
-        Rows.Cons(_, rest) => 1 + size(rest)
     }
 }
 
@@ -228,12 +214,12 @@ task fn notify(version: I64, subscriber: Subscriber) -> () {
 // it in task land. This is the stale-tolerant read the design doc names, and the causal-token
 // upgrade ("wait until the index has seen seq n") slots in beside it later.
 
-fn by_author(author: String, entries: Rows) -> Rows {
+fn by_author(author: String, entries: List<Post>) -> List<Post> {
     match entries {
-        Rows.Nil => Rows.Nil
-        Rows.Cons(post, rest) => {
+        List.Nil => List.Nil
+        List.Cons(post, rest) => {
             if post.author == author {
-                Rows.Cons(post, by_author(author, rest))
+                List.Cons(post, by_author(author, rest))
             } else {
                 by_author(author, rest)
             }
@@ -241,22 +227,12 @@ fn by_author(author: String, entries: Rows) -> Rows {
     }
 }
 
-fn take(n: I64, entries: Rows) -> Rows {
-    if n <= 0 {
-        return Rows.Nil
-    }
-    match entries {
-        Rows.Nil => Rows.Nil
-        Rows.Cons(post, rest) => Rows.Cons(post, take(n - 1, rest))
-    }
-}
-
 // Point read against the journal, newest entry first: the first Put with the id wins, and a
 // newer Erase shadows anything older. Event-sourced get, with compaction done by the read.
-fn find(id: I64, journal: Deltas) -> Option<Post> {
+fn find(id: I64, journal: List<Delta>) -> Option<Post> {
     match journal {
-        Deltas.Nil => None
-        Deltas.Cons(delta, rest) => match delta {
+        List.Nil => None
+        List.Cons(delta, rest) => match delta {
             Delta.Put(post) => {
                 if post.id == id {
                     Some(post)
@@ -275,10 +251,10 @@ fn find(id: I64, journal: Deltas) -> Option<Post> {
     }
 }
 
-fn render(entries: Rows) -> String {
+fn render(entries: List<Post>) -> String {
     match entries {
-        Rows.Nil => ""
-        Rows.Cons(post, rest) => post.author + "/" + to_string(post.id) + ": " + post.body + "\n" + render(rest)
+        List.Nil => ""
+        List.Cons(post, rest) => post.author + "/" + to_string(post.id) + ": " + post.body + "\n" + render(rest)
     }
 }
 
@@ -301,7 +277,7 @@ task fn main() -> ()
         await sleep(50)
 
         print("alice, newest first:")
-        print(render(take(20, by_author("alice", latest(index.entries)))))
+        print(render(take(by_author("alice", latest(index.entries)), 20)))
         print("indexed: " + to_string(latest(index.count)))
         print("watched: " + to_string(latest(subscriber.seen)) + " changes, at version " + to_string(latest(subscriber.last)))
         match find(1, latest(posts.history)) {
