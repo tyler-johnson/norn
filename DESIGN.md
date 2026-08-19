@@ -404,7 +404,7 @@ POST "/files/{name}" => {
     let path = safe_child(Path("./data"), request.param("name"))?
     let output = await fs.create(path)?
 
-    await request.body.pipe_to(output)?
+    await request.body.pipe(output)?
     http.empty(status: 204)
 }
 
@@ -905,7 +905,7 @@ task fn handle(app: App, request: http.Request)
             )?
 
             let output = await fs.create(path)?
-            await request.body.pipe_to(output)?
+            await request.body.pipe(output)?
             http.empty(status: 204)
         }
 

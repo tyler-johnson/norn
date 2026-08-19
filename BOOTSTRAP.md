@@ -475,13 +475,12 @@ Ordered roughly by when it becomes worth doing, not by importance:
 10. **Durable state projections, supervision policy.**
 11. **The rest of HTTP, and general flows.** M6's wire is deliberately narrow, and each narrowing
     is a deferral: chunked transfer encoding and keep-alive (v0 bodies are `Content-Length` and
-    every response says `Connection: close`); an HTTP client (`http_get` — M6 is server-only);
-    route patterns with bound parameters (`files.norn` dispatches on `match request_method(&req)`
-    because there is nothing to bind a path segment to). General flow sources and sinks wait here
-    too, along with a `flow_next` for consuming a flow from Norn code — the loop construct now
-    makes that shape reasonable, and the primitive itself is what waits — in v0 a flow comes from
-    a file or a request body and is consumed only by `pipe_to` and `http_respond_flow`, wholly
-    inside the runtime. `coalesce_latest` remains a
+    every response says `Connection: close`); an HTTP client (std/http's `get` — M6 is
+    server-only); route patterns with bound parameters (`files.norn` dispatches on
+    `match req.method` because there is nothing to bind a path segment to). General flow sources
+    and sinks wait here too — `flow_next` itself has since landed with the std/http wave (item
+    12), but in v0 a flow still only ever comes from a file, and `Flow<T>` beyond `Bytes` waits
+    on item 7. `coalesce_latest` remains a
     §10 gap rather than M6 work: it is an overflow policy, not a wire feature.
 12. **Modules — landed — and the standard library that dissolves the builtins.** Earlier than its
     position suggests: modules gate the standard library, and item 7 does not — the ordering
@@ -504,8 +503,9 @@ Ordered roughly by when it becomes worth doing, not by importance:
 
     The decision this entry records, made after M6: the standard library follows Rust's model,
     not Go's. Users should think in terms of libraries, so the builtin table is scaffolding with
-    unstable spellings — 27 nameable and already churning: `bytes_text` has been deleted and
-    `text_unchecked`, the table's first `_unchecked` trust boundary, added in its place — plus
+    unstable spellings — 23 nameable and now shrinking: `bytes_text` fell first, `text_unchecked`
+    (the table's first `_unchecked` trust boundary) arriving in its place, and the std/http wave
+    then took nine more while adding the five flow/file intrinsics beneath them — plus
     the syntax-carried `bytes_at` behind `data[i]`, each implemented twice (an interpreter arm
     and its prelude mirror, trap text as ABI) and each nameable one a name no user function may
     take. Go keeps its
@@ -550,17 +550,37 @@ Ordered roughly by when it becomes worth doing, not by importance:
     delete the name, flip the users to imports, one commit, atomic by construction since
     builtins are reserved names. (One temporary wrinkle: `import * as bytes` is refused while
     `bytes` itself remains a builtin name, so `std/bytes` is imported by named items; the
-    namespace frees itself the day the `bytes` builtin dissolves.) The ordering
-    ahead: `std/http` ports `norn-rt`'s pure `parse_head` and
-    response rendering, which retypes `tcp_read` to yield `Bytes` (breaking freely: nobody is
-    using the language, and syscalls speak bytes) and dissolves the `Request` *resource* the
-    honest way — std/http reads bytes from a connection and parses the head into an ordinary
-    Norn struct, responding is writing bytes back, and the connection becomes the traced,
-    scope-closed seam — then `flow_next` with `pipe_to` in Norn, the deferred intrinsic designed
-    by its first real consumer. (`examples/tasks.norn`'s aspirational `std/fs`/`std/http`/
-    `std/json` imports stay parse-only; checked, they would now diagnose as unknown std modules,
-    and they stand until those modules exist. Its `std/time` line half-landed: `seconds` is real,
-    `mebibytes` is not time's to provide.)
+    namespace frees itself the day the `bytes` builtin dissolves.)
+    The std/http wave followed, and what was recorded as two steps — "std/http, then
+    `flow_next`" — landed as one, because the ordering was circular: dissolving `Request` kills
+    both flow endpoints at once, the `request_body` source and the request-as-sink. The wire
+    went `Bytes` first (`tcp_read` yields them, `tcp_write` takes them; breaking freely — nobody
+    is using the language, and syscalls speak bytes), and five intrinsics grew beneath the
+    absorption: `flow_next` (an empty chunk means exhausted), `flow_len`, `flow_close`,
+    `file_write`, `file_close`, every one carrying an empty capability set because the open
+    handle is the authority — `file_create` and `flow_of_file` checked theirs at the open, and
+    those two never dissolve: they are the `uses` seam. On that seam `pipe_to` became
+    `std/flow`'s `pipe` — the `_to` suffix was doing the sink argument's job — taking the golden
+    per-chunk `pipe` trace lines with it, since the transfer is user code now and the runtime
+    has nothing per-chunk to say. Then `std/http` dissolved the eight `http_*` builtins and the
+    `Request` *resource* the honest way: `read_request` borrows the Connection, gathers bytes,
+    and re-asks the pure `head` parser, so a request is an ordinary Norn struct, a malformed
+    head is `Err(IoError.Other(rule))` naming the violated rule, and the connection stays the
+    traced, scope-closed seam, with the respond family consuming it so answering and closing
+    remain one act. That commit had to be atomic beyond the usual recipe: the checker seeded the
+    type name `Request` into every namespace, so the module could not declare its struct until
+    the resource died in the same change. std/http imports `to_int` from `std/fmt` — the first
+    std→std import — and its exported `head` is what makes the wire rules testable as ordinary
+    Norn: `examples/run/http-head.norn` pins every parse rule and every deliberate delta (ASCII
+    heads, last-wins duplicate headers, any status rendering with the empty reason phrase HTTP
+    permits) under the snapshot corpus and the differential oracle, where the Rust parser's unit
+    tests used to live. The demand claim outlived the machinery it was built on: it is now the
+    one-chunk-per-iteration shape of the std loops, still observable in the abandoned-upload
+    cancellation and the multi-chunk roundtrip the live file-server tests make.
+    (`examples/tasks.norn`'s `import * as http` now names a real module but stays parse-only —
+    the client surface it sketches does not exist; its `std/fs`/`std/json` imports still
+    diagnose as unknown std modules and stand until those exist. Its `std/time` line
+    half-landed: `seconds` is real, `mebibytes` is not time's to provide.)
     The general std — collections, `Flow<T>` beyond `Bytes`, and the method spelling that turns
     `request_header(&req, h)` into `req.header(h)` — waits for item 7's generics and traits.
     What never dissolves is a small intrinsic layer at the syscall boundary, which is also where
