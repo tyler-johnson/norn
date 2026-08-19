@@ -928,9 +928,9 @@ impl Builtin {
             Builtin::Sleep => (vec![Ty::I64], task(Ty::Unit)),
             Builtin::TcpListen => (vec![Ty::I64], task(fallible(listener()))),
             Builtin::TcpAccept => (vec![borrowed(listener())], task(fallible(connection()))),
-            Builtin::TcpRead => (vec![borrowed(connection())], task(fallible(Ty::Str))),
+            Builtin::TcpRead => (vec![borrowed(connection())], task(fallible(Ty::Bytes))),
             Builtin::TcpWrite => (
-                vec![borrowed(connection()), Ty::Str],
+                vec![borrowed(connection()), Ty::Bytes],
                 task(fallible(Ty::Unit)),
             ),
             Builtin::TcpClose => (vec![connection()], task(Ty::Unit)),

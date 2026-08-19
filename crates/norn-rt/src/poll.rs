@@ -284,11 +284,10 @@ impl Readiness {
         }
     }
 
-    pub fn write(&mut self, id: ResourceId, text: &str) -> io::Result<Option<()>> {
+    pub fn write(&mut self, id: ResourceId, bytes: &[u8]) -> io::Result<Option<()>> {
         let Backing::Connection { stream, written } = &mut self.entry(id)?.backing else {
             return Err(io::Error::from(io::ErrorKind::InvalidInput));
         };
-        let bytes = text.as_bytes();
         loop {
             if *written >= bytes.len() {
                 *written = 0;

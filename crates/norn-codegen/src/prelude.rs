@@ -640,14 +640,14 @@ fn poll_builtin(
         },
         Builtin::TcpRead => match cx.read(resource(name, &args[0])?) {
             Poll::Ready(outcome) => {
-                Poll::Ready(fallible(outcome.map(|text| Value::Str(text.into()))))
+                Poll::Ready(fallible(outcome.map(|data| Value::Bytes(data.into()))))
             }
             Poll::Pending => Poll::Pending,
         },
         Builtin::TcpWrite => {
             let connection = resource(name, &args[0])?;
-            let text = text(name, &args[1])?;
-            match cx.write(connection, &text) {
+            let data = blob(name, &args[1])?;
+            match cx.write(connection, &data) {
                 Poll::Ready(outcome) => Poll::Ready(fallible(outcome.map(|()| Value::Unit))),
                 Poll::Pending => Poll::Pending,
             }
