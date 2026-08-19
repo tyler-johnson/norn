@@ -469,7 +469,9 @@ Ordered roughly by when it becomes worth doing, not by importance:
    `bytes_concat`, because a clone-everything representation cannot make sharing observable — and
    so does `+` on `Bytes`, which is only worth having once concatenation has a cost model to
    answer to.
-7. **Generics and traits.** Required before a real standard library.
+7. **Generics and traits.** Required before a real standard library, and the gate every collection
+   sits behind: without them a container cannot be written once, which is why v0's lists are
+   retyped by hand. Item 12 records what "collections" was decided to mean.
 8. **Capability inference, test handlers.** `uses { ... }` is checked but not inferred in v0.
 9. **Derives and constrained attributes.** `@derive(Json)`, `@http_api` — `DESIGN.md` §8 stage 2.
 10. **Durable state projections, supervision policy.**
@@ -583,6 +585,19 @@ Ordered roughly by when it becomes worth doing, not by importance:
     half-landed: `seconds` is real, `mebibytes` is not time's to provide.)
     The general std — collections, `Flow<T>` beyond `Bytes`, and the method spelling that turns
     `request_header(&req, h)` into `req.header(h)` — waits for item 7's generics and traits.
+    "Collections" means both sequence shapes rather than a choice between them (2026-08-19): the
+    persistent cons list that every v0 collection already is by hand — `Headers`, `Rows`, `Deltas`
+    are three copies of one list, monomorphized by retyping — and a contiguous growable sequence.
+    The two do not overlap, they trade: O(1) prepend with full tail sharing against O(1) index and
+    dense iteration, and a language whose turns are pure and whose old values must stay valid wants
+    the sharing as much as a byte-pusher wants the buffer. Maps and sets follow them; `DESIGN.md`
+    §11 wants the incremental kind, which is a propagation property and not a second type. `List<T>`
+    is the cons list's name — `DESIGN.md`'s core semantics already writes `List<EffectRequest>`, so
+    the name is load-bearing before the library exists — which leaves the contiguous one's spelling
+    the open question. That half additionally waits on item 6: a clone-everything representation
+    cannot price a buffer honestly, the same reason zero-copy `Bytes` slices wait there. Whatever
+    lands must make finiteness structural, because `for` earns its way into a turn only by being
+    bounded by the data (`DESIGN.md` §14).
     What never dissolves is a small intrinsic layer at the syscall boundary, which is also where
     `uses { … }` keeps doing its checking: the authority seam stays a closed, named table after
     every name above it has become a library.
