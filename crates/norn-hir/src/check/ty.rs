@@ -247,11 +247,44 @@ impl Checker {
         }
     }
 
-    fn no_type_args(&mut self, display: &str, span: Span) {
+    pub(super) fn no_type_args(&mut self, display: &str, span: Span) {
         self.push(
             Diagnostic::new(span, format!("`{display}` takes no type arguments"))
                 .note("its declaration has no type parameters"),
         );
+    }
+
+    /// Whether the right number of type arguments was written for a template, the mismatch
+    /// reported with the declaration quoted.
+    pub(super) fn template_arity(
+        &mut self,
+        display: &str,
+        params: &[String],
+        found: usize,
+        span: Span,
+    ) -> bool {
+        if found == params.len() {
+            return true;
+        }
+        let plural = if params.len() == 1 {
+            "argument"
+        } else {
+            "arguments"
+        };
+        self.push(
+            Diagnostic::new(
+                span,
+                format!(
+                    "`{display}` takes {} type {plural}, found {found}",
+                    params.len()
+                ),
+            )
+            .note(format!(
+                "the declaration is `{display}<{}>`",
+                params.join(", ")
+            )),
+        );
+        false
     }
 
     /// Check arity and resolve the written arguments of a template mention. An argument that is
@@ -263,26 +296,7 @@ impl Checker {
         args: &[ast::Type],
         span: Span,
     ) -> Option<Vec<Ty>> {
-        if args.len() != params.len() {
-            let plural = if params.len() == 1 {
-                "argument"
-            } else {
-                "arguments"
-            };
-            self.push(
-                Diagnostic::new(
-                    span,
-                    format!(
-                        "`{display}` takes {} type {plural}, found {}",
-                        params.len(),
-                        args.len()
-                    ),
-                )
-                .note(format!(
-                    "the declaration is `{display}<{}>`",
-                    params.join(", ")
-                )),
-            );
+        if !self.template_arity(display, params, args.len(), span) {
             return None;
         }
         let resolved: Vec<Ty> = args.iter().map(|arg| self.resolve_ty(arg)).collect();

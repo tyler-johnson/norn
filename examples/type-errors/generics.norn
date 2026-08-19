@@ -1,0 +1,39 @@
+// Generic functions: what call-site inference refuses. Each case is one diagnostic, and the
+// file parses cleanly so every snapshot line is the checker speaking.
+
+enum List<T> {
+    Nil
+    Cons(T, List<T>)
+}
+
+fn length<T>(items: List<T>) -> I64 {
+    match items {
+        List.Nil => 0
+        List.Cons(_, rest) => 1 + length(rest)
+    }
+}
+
+fn empty<T>() -> List<T> {
+    List.Nil
+}
+
+fn both<T>(a: T, b: T) -> T {
+    a
+}
+
+fn plain() -> I64 {
+    1
+}
+
+fn main() {
+    // The wrong number of explicit type arguments.
+    let a = length<I64, Bool>(List.Nil)
+    // Nothing pins `T` down: no expectation, and no argument to learn from.
+    let b = empty()
+    // Two arguments that disagree about `T`: the first one settles it.
+    let c = both(1, true)
+    // Explicit arguments on a function that declares no parameters.
+    let d = plain<I64>()
+    // The builtin constructors take their payload type from the expectation alone.
+    let e = Some<I64>(3)
+}

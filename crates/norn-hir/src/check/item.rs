@@ -313,7 +313,15 @@ impl Checker {
             // Only the entry module's `main` is an entry point; an imported `main` is an ordinary
             // function.
             if decl.name.name == "main" && self.current == 0 {
-                self.program.main = Some(id);
+                if self.program.fns[id.index()].type_params.is_empty() {
+                    self.program.main = Some(id);
+                } else {
+                    self.push(
+                        Diagnostic::new(decl.name.span, "`main` cannot be generic")
+                            .label("the entry point")
+                            .note("the runtime calls `main` directly and has no type arguments to supply"),
+                    );
+                }
             }
         }
         self.fn_of_item[self.current] = of_item;

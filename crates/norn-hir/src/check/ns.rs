@@ -175,6 +175,9 @@ impl Checker {
             self.check_reactors(input.module, graphs);
         }
         self.each(inputs, Checker::check_fns);
+        // Between bodies and the whole-program passes, so `check_turns` and `check_moves` see
+        // every generic instance as an ordinary monomorphic function.
+        self.monomorphize();
         self.check_turns();
         self.check_moves();
     }

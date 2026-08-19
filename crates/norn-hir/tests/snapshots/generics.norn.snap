@@ -1,0 +1,33 @@
+error: `length` takes 1 type argument, found 2
+  --> generics.norn:30:13
+   |
+30 |     let a = length<I64, Bool>(List.Nil)
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = note: the declaration is `length<T>`
+
+error: cannot tell what type `T` is in this call of `empty`
+  --> generics.norn:32:13
+   |
+32 |     let b = empty()
+   |             ^^^^^^^ no argument or expectation pins it down
+   = note: say it explicitly, as in `empty<I64>(…)`
+
+error: expected I64, found Bool
+  --> generics.norn:34:21
+   |
+34 |     let c = both(1, true)
+   |                     ^^^^
+
+error: `plain` takes no type arguments
+  --> generics.norn:36:13
+   |
+36 |     let d = plain<I64>()
+   |             ^^^^^^^^^^^^
+   = note: its declaration has no type parameters
+
+error: `Some` takes no type arguments
+  --> generics.norn:38:13
+   |
+38 |     let e = Some<I64>(3)
+   |             ^^^^^^^^^^^^
+   = note: its payload type comes from the expectation; annotate the binding instead

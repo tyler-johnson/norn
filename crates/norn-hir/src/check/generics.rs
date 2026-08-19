@@ -40,16 +40,37 @@ enum Fill {
     Enum(usize, usize),
 }
 
+/// One instantiation of a generic function. `symbolic` marks arguments that still mention a type
+/// parameter: such an instance stands inside another template's body as the pending-instantiation
+/// marker, is resolved per-instance during monomorphization, and is never queued or executed
+/// itself. `depth` is how many instantiations of remapping deep the request was made — the
+/// polymorphic-recursion fuse.
+pub(super) struct FnInstance {
+    pub(super) template: FnId,
+    pub(super) args: Vec<Ty>,
+    pub(super) id: FnId,
+    module: usize,
+    at: Span,
+    pub(super) symbolic: bool,
+    depth: usize,
+}
+
 /// The checker-side registry of generic instantiations.
 pub(super) struct Generics {
     struct_instances: Vec<StructInstance>,
     enum_instances: Vec<EnumInstance>,
+    fn_instances: Vec<FnInstance>,
     /// Instance id → registry index, the reverse direction of the Vecs above. Keyed lookups only.
     struct_meaning: HashMap<StructId, usize>,
     enum_meaning: HashMap<EnumId, usize>,
+    fn_meaning: HashMap<FnId, usize>,
     /// Pending fills, drained FIFO by `drain_type_fills` through `fill_cursor`.
     fill_queue: Vec<Fill>,
     fill_cursor: usize,
+    /// Concrete fn instances whose bodies still need cloning from their template, drained FIFO
+    /// by `monomorphize` through `mono_cursor`.
+    mono_worklist: Vec<FnId>,
+    mono_cursor: usize,
     /// True while `define_types` and its drain run: instances allocated then are filled by the
     /// drain rather than on the spot.
     pub(super) defining_types: bool,
@@ -62,14 +83,26 @@ impl Generics {
         Generics {
             struct_instances: Vec::new(),
             enum_instances: Vec::new(),
+            fn_instances: Vec::new(),
             struct_meaning: HashMap::new(),
             enum_meaning: HashMap::new(),
+            fn_meaning: HashMap::new(),
             fill_queue: Vec::new(),
             fill_cursor: 0,
+            mono_worklist: Vec::new(),
+            mono_cursor: 0,
             defining_types: false,
             cap_reported: false,
         }
     }
+}
+
+/// What one monomorphization carries into the clone of a template body: the instance's concrete
+/// arguments, where the instance was first asked for, and how deep the remapping chain is.
+struct MonoCx {
+    args: Vec<Ty>,
+    at: Span,
+    depth: usize,
 }
 
 /// Substitution deeper than this is reported rather than followed. A self-referential instance
@@ -577,7 +610,7 @@ impl Checker {
         let Some(order) = self.argument_order(&names, args, &display, "field", span) else {
             return self.error_expr(span);
         };
-        let checked = self.check_template_fields(&types, args, &order, &mut bindings, span);
+        let checked = self.check_inferred_args(&types, args, &order, &mut bindings, span);
         let Some(instance_args) = self.settle_bindings(bindings, &params, &display, span) else {
             return self.error_expr(span);
         };
@@ -631,7 +664,7 @@ impl Checker {
         let Some(order) = self.argument_order(&names, args, &subject, "field", span) else {
             return self.error_expr(span);
         };
-        let checked = self.check_template_fields(&types, args, &order, &mut bindings, span);
+        let checked = self.check_inferred_args(&types, args, &order, &mut bindings, span);
         let Some(instance_args) = self.settle_bindings(bindings, &params, &display, span) else {
             return self.error_expr(span);
         };
@@ -682,11 +715,12 @@ impl Checker {
         }
     }
 
-    /// Check each field of a template construction in declaration order. A field whose type is
-    /// already settled is checked bidirectionally; one still mentioning an unbound parameter is
-    /// synthesised, solved, and then re-checked against what solving settled — which is where a
-    /// disagreement between two fields reports with concrete types on both sides.
-    fn check_template_fields(
+    /// Check the value arguments of a template construction or call in declaration order. One
+    /// whose declared type is already settled is checked bidirectionally; one still mentioning
+    /// an unbound parameter is synthesised, solved, and then re-checked against what solving
+    /// settled — which is where a disagreement between two arguments reports with concrete
+    /// types on both sides.
+    fn check_inferred_args(
         &mut self,
         types: &[Ty],
         args: &[ast::Arg],
@@ -722,6 +756,585 @@ impl Checker {
             checked.push(self.expect(synth, Some(&want), at));
         }
         checked
+    }
+
+    // ---------------------------------------------------------------- generic functions
+
+    /// What a fn id means generically — `struct_base`'s shape for functions.
+    pub(super) fn fn_base(&self, id: FnId) -> Option<(FnId, Vec<Ty>)> {
+        if let Some(&at) = self.generics.fn_meaning.get(&id) {
+            let instance = &self.generics.fn_instances[at];
+            return Some((instance.template, instance.args.clone()));
+        }
+        let def = &self.program.fns[id.index()];
+        if def.type_params.is_empty() {
+            None
+        } else {
+            Some((id, Self::param_identity(&def.type_params)))
+        }
+    }
+
+    /// Whether a type mentions any type parameter at all, looking through instance arguments.
+    pub(super) fn mentions_param(&self, ty: &Ty) -> bool {
+        match ty {
+            Ty::Param { .. } => true,
+            Ty::Option(inner)
+            | Ty::Task(inner)
+            | Ty::Ref(inner)
+            | Ty::Input(inner)
+            | Ty::Signal(inner)
+            | Ty::Event(inner) => self.mentions_param(inner),
+            Ty::Result(ok, err) => self.mentions_param(ok) || self.mentions_param(err),
+            Ty::Struct(id) => self
+                .struct_base(*id)
+                .is_some_and(|(_, args)| args.iter().any(|arg| self.mentions_param(arg))),
+            Ty::Enum(id) => self
+                .enum_base(*id)
+                .is_some_and(|(_, args)| args.iter().any(|arg| self.mentions_param(arg))),
+            Ty::Unit
+            | Ty::I64
+            | Ty::F64
+            | Ty::Bool
+            | Ty::Str
+            | Ty::Bytes
+            | Ty::Resource(_)
+            | Ty::Reactor(_)
+            | Ty::Never
+            | Ty::Error => false,
+        }
+    }
+
+    /// Instantiate a generic function at `args`: dedup on `(template, args)`, else append a stub
+    /// def — program.fns, fn_owner, and signatures pushed in lockstep, the `declare_lifted`
+    /// discipline — with the substituted signature. A concrete instance queues for
+    /// monomorphization; a symbolic one (arguments still mentioning a parameter) is the
+    /// pending-instantiation marker another template's body carries, resolved when *that*
+    /// template is monomorphized.
+    pub(super) fn request_fn_instance(
+        &mut self,
+        template: FnId,
+        args: Vec<Ty>,
+        at: Span,
+        depth: usize,
+    ) -> FnId {
+        if args == Self::param_identity(&self.program.fns[template.index()].type_params) {
+            return template;
+        }
+        if let Some(found) = self
+            .generics
+            .fn_instances
+            .iter()
+            .find(|instance| instance.template == template && instance.args == args)
+        {
+            return found.id;
+        }
+        // The polymorphic-recursion fuse: a function that calls itself at an ever-growing type
+        // requests a fresh instance from inside every instance, and this chain is the one thing
+        // the worklist cannot converge on.
+        if depth > INSTANCE_DEPTH {
+            let display = self.program.fns[template.index()].name.clone();
+            self.push(
+                Diagnostic::new(
+                    at,
+                    format!("`{display}` instantiates itself at an ever-deeper type"),
+                )
+                .label(format!("more than {INSTANCE_DEPTH} instantiations deep"))
+                .note("a generic function that calls itself at a bigger type than it was given never stops instantiating; make the recursion reuse the caller's own type parameters"),
+            );
+            return template;
+        }
+        if self.generics.fn_instances.len() >= INSTANCE_CEILING {
+            if !self.generics.cap_reported {
+                self.generics.cap_reported = true;
+                self.push(
+                    Diagnostic::new(
+                        at,
+                        format!(
+                            "this program needs more than {INSTANCE_CEILING} generic instances"
+                        ),
+                    )
+                    .label("instantiation stopped here")
+                    .note("a ceiling this size is only ever reached by an instantiation that never converges"),
+                );
+            }
+            return template;
+        }
+        let (params, ret) = self.signatures[template.index()].clone();
+        let params: Vec<(String, Ty)> = params
+            .into_iter()
+            .map(|(name, ty)| {
+                let ty = self.subst(&ty, &args, at, 0);
+                (name, ty)
+            })
+            .collect();
+        let ret = self.subst(&ret, &args, at, 0);
+        let name = self.instance_name(&self.program.fns[template.index()].name.clone(), &args);
+        let (is_task, uses, span) = {
+            let def = &self.program.fns[template.index()];
+            (def.is_task, def.uses.clone(), def.span)
+        };
+        let id = FnId(self.program.fns.len() as u32);
+        // Move errors in an instance body carry the template's spans, so they render against the
+        // template's file.
+        self.fn_owner.push(self.fn_owner[template.index()]);
+        self.signatures.push((params.clone(), ret.clone()));
+        self.program.fns.push(FnDef {
+            name,
+            type_params: Vec::new(),
+            is_task,
+            uses,
+            params: params.len(),
+            locals: Vec::new(),
+            ret,
+            body: Expr {
+                kind: ExprKind::Error,
+                ty: Ty::Error,
+                span,
+            },
+            span,
+        });
+        let symbolic = args.iter().any(|arg| self.mentions_param(arg));
+        let index = self.generics.fn_instances.len();
+        self.generics.fn_instances.push(FnInstance {
+            template,
+            args,
+            id,
+            module: self.current,
+            at,
+            symbolic,
+            depth,
+        });
+        self.generics.fn_meaning.insert(id, index);
+        if !symbolic {
+            self.generics.mono_worklist.push(id);
+        }
+        id
+    }
+
+    /// A call to a generic function: settle the type arguments — written explicitly, solved from
+    /// the expectation, solved left to right from the arguments — then request the instance and
+    /// call it. Task wrapping and the capability check are `call_fn`'s, unchanged.
+    pub(super) fn call_generic_fn(
+        &mut self,
+        template: FnId,
+        display: &str,
+        explicit: Option<Vec<Ty>>,
+        args: &[ast::Arg],
+        expected: Option<&Ty>,
+        span: Span,
+    ) -> Expr {
+        let type_params = self.program.fns[template.index()].type_params.clone();
+        let is_task = self.program.fns[template.index()].is_task;
+        let (params, ret) = self.signatures[template.index()].clone();
+        let param_names: Vec<String> = params.iter().map(|(name, _)| name.clone()).collect();
+        let Some(order) = self.argument_order(&param_names, args, display, "parameter", span)
+        else {
+            return self.error_expr(span);
+        };
+
+        let mut bindings: Vec<Option<Ty>> = vec![None; type_params.len()];
+        match explicit {
+            Some(explicit) => {
+                if !self.template_arity(display, &type_params, explicit.len(), span) {
+                    return self.error_expr(span);
+                }
+                if explicit.iter().any(Ty::is_error) {
+                    return self.error_expr(span);
+                }
+                bindings = explicit.into_iter().map(Some).collect();
+            }
+            None => {
+                // The expectation solves return-position parameters before any argument is
+                // looked at, so `let x: Option<I64> = pick(items)` checks bidirectionally.
+                if let Some(expected) = expected {
+                    let effective = if is_task {
+                        Ty::Task(Box::new(ret.clone()))
+                    } else {
+                        ret.clone()
+                    };
+                    self.solve(&effective, expected, &mut bindings);
+                }
+            }
+        }
+
+        let types: Vec<Ty> = params.into_iter().map(|(_, ty)| ty).collect();
+        let checked = self.check_inferred_args(&types, args, &order, &mut bindings, span);
+
+        if let Some(unbound) = bindings
+            .iter()
+            .position(|binding| binding.is_none())
+            .map(|index| type_params[index].clone())
+        {
+            self.push(
+                Diagnostic::new(
+                    span,
+                    format!("cannot tell what type `{unbound}` is in this call of `{display}`"),
+                )
+                .label("no argument or expectation pins it down")
+                .note(format!("say it explicitly, as in `{display}<I64>(…)`")),
+            );
+            return self.error_expr(span);
+        }
+        let instance_args: Vec<Ty> = bindings.into_iter().flatten().collect();
+        // An `Error` in the settled arguments means a mismatch already reported; minting an
+        // instance of it would only cascade.
+        if instance_args.iter().any(Ty::is_error) {
+            return self.error_expr(span);
+        }
+        let instance = self.request_fn_instance(template, instance_args, span, 0);
+        let ret = self.signatures[instance.index()].1.clone();
+        let ty = if is_task {
+            let needs = self.program.fns[instance.index()].uses.clone();
+            self.require_task_authority(display, &needs, span);
+            Ty::Task(Box::new(ret))
+        } else {
+            ret
+        };
+        Expr {
+            kind: ExprKind::Call {
+                callee: instance,
+                args: checked,
+            },
+            ty,
+            span,
+        }
+    }
+
+    /// A written `Struct<…>` in call position — the explicit-argument spelling of a generic
+    /// construction. `None` means already diagnosed.
+    pub(super) fn explicit_struct_instance(
+        &mut self,
+        id: StructId,
+        args: Vec<Ty>,
+        span: Span,
+    ) -> Option<StructId> {
+        let display = self.program.structs[id.index()].name.clone();
+        let params = self.program.structs[id.index()].type_params.clone();
+        if params.is_empty() {
+            self.no_type_args(&display, span);
+            return None;
+        }
+        if !self.template_arity(&display, &params, args.len(), span) {
+            return None;
+        }
+        if args.iter().any(Ty::is_error) {
+            return None;
+        }
+        self.instantiate_struct(id, args, span, 0)
+    }
+
+    /// The enum half of `explicit_struct_instance`.
+    pub(super) fn explicit_enum_instance(
+        &mut self,
+        id: EnumId,
+        args: Vec<Ty>,
+        span: Span,
+    ) -> Option<EnumId> {
+        let display = self.program.enums[id.index()].name.clone();
+        let params = self.program.enums[id.index()].type_params.clone();
+        if params.is_empty() {
+            self.no_type_args(&display, span);
+            return None;
+        }
+        if !self.template_arity(&display, &params, args.len(), span) {
+            return None;
+        }
+        if args.iter().any(Ty::is_error) {
+            return None;
+        }
+        self.instantiate_enum(id, args, span, 0)
+    }
+
+    // ---------------------------------------------------------------- monomorphization
+
+    /// The pass between `check_fns` and `check_turns`: FIFO-drain the worklist, cloning each
+    /// concrete instance's body from its checked template with types substituted and every
+    /// generic id remapped. Remapping may enqueue — a generic calling a generic composes here —
+    /// and the drain is the fixpoint. Afterwards templates and symbolic instances are neutered:
+    /// every executable call site holds a concrete instance id, so they lower as inert dead code.
+    pub(super) fn monomorphize(&mut self) {
+        while self.generics.mono_cursor < self.generics.mono_worklist.len() {
+            let id = self.generics.mono_worklist[self.generics.mono_cursor];
+            self.generics.mono_cursor += 1;
+            self.mono_instance(id);
+        }
+        self.neuter_templates();
+    }
+
+    fn mono_instance(&mut self, id: FnId) {
+        let (template, args, module, at, depth) = {
+            let index = self.generics.fn_meaning[&id];
+            let instance = &self.generics.fn_instances[index];
+            (
+                instance.template,
+                instance.args.clone(),
+                instance.module,
+                instance.at,
+                instance.depth,
+            )
+        };
+        let outer = std::mem::replace(&mut self.current, module);
+        // The template body is moved out for the walk and restored after: `mono_expr` needs
+        // `&mut self` for substitution, and the template is read many times over.
+        let stub = Expr {
+            kind: ExprKind::Error,
+            ty: Ty::Error,
+            span: at,
+        };
+        let template_body = std::mem::replace(&mut self.program.fns[template.index()].body, stub);
+        let template_locals = std::mem::take(&mut self.program.fns[template.index()].locals);
+
+        let cx = MonoCx { args, at, depth };
+        let locals: Vec<LocalDef> = template_locals
+            .iter()
+            .map(|local| LocalDef {
+                name: local.name.clone(),
+                ty: self.subst(&local.ty, &cx.args, cx.at, 0),
+                mutable: local.mutable,
+                role: local.role,
+                span: local.span,
+            })
+            .collect();
+        let body = self.mono_expr(&template_body, &cx);
+
+        self.program.fns[template.index()].body = template_body;
+        self.program.fns[template.index()].locals = template_locals;
+        self.program.fns[id.index()].locals = locals;
+        self.program.fns[id.index()].body = body;
+        self.current = outer;
+    }
+
+    /// Remap a callee through its generic meaning: a symbolic instance carried by a template
+    /// body resolves at this instance's arguments, which is how a generic calling a generic
+    /// composes. Requests made here run one level deeper — the polymorphic-recursion fuse.
+    fn mono_callee(&mut self, callee: FnId, cx: &MonoCx) -> FnId {
+        match self.fn_base(callee) {
+            None => callee,
+            Some((template, base_args)) => {
+                let new_args: Vec<Ty> = base_args
+                    .iter()
+                    .map(|arg| self.subst(arg, &cx.args, cx.at, 0))
+                    .collect();
+                self.request_fn_instance(template, new_args, cx.at, cx.depth + 1)
+            }
+        }
+    }
+
+    fn mono_struct_id(&mut self, id: StructId, cx: &MonoCx) -> StructId {
+        match self.subst(&Ty::Struct(id), &cx.args, cx.at, 0) {
+            Ty::Struct(instance) => instance,
+            // Poisoned by a cap; the program already carries the diagnostic.
+            _ => id,
+        }
+    }
+
+    fn mono_enum_id(&mut self, id: EnumId, cx: &MonoCx) -> EnumId {
+        match self.subst(&Ty::Enum(id), &cx.args, cx.at, 0) {
+            Ty::Enum(instance) => instance,
+            _ => id,
+        }
+    }
+
+    /// Deep-clone one checked template expression at the instance's arguments. Exhaustive over
+    /// `ExprKind` with no catch-all, so a future variant breaks the build here rather than
+    /// silently copying wrong. No `check_expr` runs during this walk — the template was checked
+    /// once, and this is a substitution, not a re-check.
+    fn mono_expr(&mut self, expr: &Expr, cx: &MonoCx) -> Expr {
+        let ty = self.subst(&expr.ty, &cx.args, cx.at, 0);
+        let span = expr.span;
+        let kind = match &expr.kind {
+            ExprKind::Unit => ExprKind::Unit,
+            ExprKind::Int(value) => ExprKind::Int(*value),
+            ExprKind::Float(value) => ExprKind::Float(*value),
+            ExprKind::Str(value) => ExprKind::Str(value.clone()),
+            ExprKind::Bool(value) => ExprKind::Bool(*value),
+            ExprKind::Local(id) => ExprKind::Local(*id),
+            ExprKind::Field { base, index } => ExprKind::Field {
+                base: Box::new(self.mono_expr(base, cx)),
+                index: *index,
+            },
+            ExprKind::Unary { op, expr } => ExprKind::Unary {
+                op: *op,
+                expr: Box::new(self.mono_expr(expr, cx)),
+            },
+            ExprKind::Binary { op, lhs, rhs } => ExprKind::Binary {
+                op: *op,
+                lhs: Box::new(self.mono_expr(lhs, cx)),
+                rhs: Box::new(self.mono_expr(rhs, cx)),
+            },
+            ExprKind::ShortCircuit { and, lhs, rhs } => ExprKind::ShortCircuit {
+                and: *and,
+                lhs: Box::new(self.mono_expr(lhs, cx)),
+                rhs: Box::new(self.mono_expr(rhs, cx)),
+            },
+            ExprKind::Call { callee, args } => ExprKind::Call {
+                callee: self.mono_callee(*callee, cx),
+                args: args.iter().map(|arg| self.mono_expr(arg, cx)).collect(),
+            },
+            ExprKind::Builtin { builtin, args } => ExprKind::Builtin {
+                builtin: *builtin,
+                args: args.iter().map(|arg| self.mono_expr(arg, cx)).collect(),
+            },
+            ExprKind::Construct { ctor, args } => ExprKind::Construct {
+                ctor: match ctor {
+                    Ctor::Struct(id) => Ctor::Struct(self.mono_struct_id(*id, cx)),
+                    // Tags and field indices are instance-invariant: an instance's variants are
+                    // the template's, substituted in place.
+                    Ctor::Variant(id, variant) => {
+                        Ctor::Variant(self.mono_enum_id(*id, cx), *variant)
+                    }
+                },
+                args: args.iter().map(|arg| self.mono_expr(arg, cx)).collect(),
+            },
+            ExprKind::Match { scrutinee, arms } => ExprKind::Match {
+                scrutinee: Box::new(self.mono_expr(scrutinee, cx)),
+                arms: arms
+                    .iter()
+                    .map(|arm| Arm {
+                        pat: self.mono_pat(&arm.pat, cx),
+                        guard: arm.guard.as_ref().map(|guard| self.mono_expr(guard, cx)),
+                        body: self.mono_expr(&arm.body, cx),
+                        span: arm.span,
+                    })
+                    .collect(),
+            },
+            ExprKind::If { cond, then, els } => ExprKind::If {
+                cond: Box::new(self.mono_expr(cond, cx)),
+                then: Box::new(self.mono_expr(then, cx)),
+                els: els.as_ref().map(|els| Box::new(self.mono_expr(els, cx))),
+            },
+            ExprKind::Block { stmts, tail } => ExprKind::Block {
+                stmts: stmts.iter().map(|stmt| self.mono_stmt(stmt, cx)).collect(),
+                tail: tail.as_ref().map(|tail| Box::new(self.mono_expr(tail, cx))),
+            },
+            ExprKind::Await { expr } => ExprKind::Await {
+                expr: Box::new(self.mono_expr(expr, cx)),
+            },
+            ExprKind::Scope { body } => ExprKind::Scope {
+                body: Box::new(self.mono_expr(body, cx)),
+            },
+            ExprKind::Spawn { expr } => ExprKind::Spawn {
+                expr: Box::new(self.mono_expr(expr, cx)),
+            },
+            ExprKind::SpawnReactor { reactor, args } => ExprKind::SpawnReactor {
+                reactor: *reactor,
+                args: args.iter().map(|arg| self.mono_expr(arg, cx)).collect(),
+            },
+            ExprKind::ReactorInput { reactor, index } => ExprKind::ReactorInput {
+                reactor: Box::new(self.mono_expr(reactor, cx)),
+                index: *index,
+            },
+            ExprKind::ReactorExport { reactor, index } => ExprKind::ReactorExport {
+                reactor: Box::new(self.mono_expr(reactor, cx)),
+                index: *index,
+            },
+            // Option and Result are never templates, so the enum id copies verbatim.
+            ExprKind::Try { expr, enum_id } => ExprKind::Try {
+                expr: Box::new(self.mono_expr(expr, cx)),
+                enum_id: *enum_id,
+            },
+            ExprKind::Return { value } => ExprKind::Return {
+                value: value
+                    .as_ref()
+                    .map(|value| Box::new(self.mono_expr(value, cx))),
+            },
+            ExprKind::While { cond, body } => ExprKind::While {
+                cond: Box::new(self.mono_expr(cond, cx)),
+                body: Box::new(self.mono_expr(body, cx)),
+            },
+            ExprKind::Loop { body } => ExprKind::Loop {
+                body: Box::new(self.mono_expr(body, cx)),
+            },
+            ExprKind::Break { value } => ExprKind::Break {
+                value: value
+                    .as_ref()
+                    .map(|value| Box::new(self.mono_expr(value, cx))),
+            },
+            ExprKind::Continue => ExprKind::Continue,
+            ExprKind::Error => ExprKind::Error,
+        };
+        Expr { kind, ty, span }
+    }
+
+    fn mono_stmt(&mut self, stmt: &Stmt, cx: &MonoCx) -> Stmt {
+        let kind = match &stmt.kind {
+            StmtKind::Let { local, value } => StmtKind::Let {
+                local: *local,
+                value: self.mono_expr(value, cx),
+            },
+            StmtKind::Assign { place, value } => StmtKind::Assign {
+                place: self.mono_expr(place, cx),
+                value: self.mono_expr(value, cx),
+            },
+            StmtKind::After { task, returns } => StmtKind::After {
+                task: self.mono_expr(task, cx),
+                returns: *returns,
+            },
+            StmtKind::Expr(expr) => StmtKind::Expr(self.mono_expr(expr, cx)),
+        };
+        Stmt {
+            kind,
+            span: stmt.span,
+        }
+    }
+
+    fn mono_pat(&mut self, pat: &Pat, cx: &MonoCx) -> Pat {
+        let kind = match &pat.kind {
+            PatKind::Wild => PatKind::Wild,
+            PatKind::Bind(local) => PatKind::Bind(*local),
+            PatKind::Int(value) => PatKind::Int(*value),
+            PatKind::Str(value) => PatKind::Str(value.clone()),
+            PatKind::Bool(value) => PatKind::Bool(*value),
+            PatKind::Variant {
+                enum_id,
+                variant,
+                args,
+            } => PatKind::Variant {
+                enum_id: self.mono_enum_id(*enum_id, cx),
+                variant: *variant,
+                args: args.iter().map(|arg| self.mono_pat(arg, cx)).collect(),
+            },
+            PatKind::Struct { strukt, args } => PatKind::Struct {
+                strukt: self.mono_struct_id(*strukt, cx),
+                args: args.iter().map(|arg| self.mono_pat(arg, cx)).collect(),
+            },
+            PatKind::Or(alts) => {
+                PatKind::Or(alts.iter().map(|alt| self.mono_pat(alt, cx)).collect())
+            }
+            PatKind::Error => PatKind::Error,
+        };
+        Pat {
+            kind,
+            span: pat.span,
+        }
+    }
+
+    /// After the drain, templates and symbolic instances become inert: a `()` body, locals cut
+    /// to the parameters. Nothing executable references them — every call site was remapped —
+    /// and neutering before `check_moves` is what makes move checking per-instance: every
+    /// executable body has its concrete types by now.
+    fn neuter_templates(&mut self) {
+        let mut inert: Vec<FnId> = Vec::new();
+        for (index, def) in self.program.fns.iter().enumerate() {
+            if !def.type_params.is_empty() {
+                inert.push(FnId(index as u32));
+            }
+        }
+        for instance in &self.generics.fn_instances {
+            if instance.symbolic {
+                inert.push(instance.id);
+            }
+        }
+        for id in inert {
+            let def = &mut self.program.fns[id.index()];
+            let params = def.params;
+            def.locals.truncate(params);
+            def.body = Expr {
+                kind: ExprKind::Unit,
+                ty: Ty::Unit,
+                span: def.span,
+            };
+        }
     }
 
     /// The end of inference: every parameter must have been settled by the expectation or an

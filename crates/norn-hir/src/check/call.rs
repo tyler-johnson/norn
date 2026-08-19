@@ -9,17 +9,14 @@ impl Checker {
         expected: Option<&Ty>,
         span: Span,
     ) -> Expr {
-        if !type_args.is_empty() {
-            self.push(
-                Diagnostic::new(span, "explicit type arguments are not available yet")
-                    .note("generics arrive after M6; see BOOTSTRAP.md §8"),
-            );
-            return Expr {
-                kind: ExprKind::Error,
-                ty: Ty::Error,
-                span,
-            };
-        }
+        // `f<I64>(…)` — the explicit spelling that bypasses inference. Resolved up front, under
+        // whatever type parameters are in scope; which callees accept them is each branch's
+        // question.
+        let explicit: Option<Vec<Ty>> = if type_args.is_empty() {
+            None
+        } else {
+            Some(type_args.iter().map(|arg| self.resolve_ty(arg)).collect())
+        };
         let ast::ExprKind::Path(path) = &callee.kind else {
             self.push(
                 Diagnostic::new(callee.span, "only a named function can be called")
@@ -36,6 +33,14 @@ impl Checker {
         // The four bare constructor names first: they are unbindable, so nothing else can
         // answer for them.
         if path.segments.len() == 1 && is_builtin_variant(name) {
+            if explicit.is_some() {
+                self.push(
+                    Diagnostic::new(span, format!("`{name}` takes no type arguments")).note(
+                        "its payload type comes from the expectation; annotate the binding instead",
+                    ),
+                );
+                return self.error_expr(span);
+            }
             return match name.as_str() {
                 "None" | "Some" => self.check_option(path, args, expected, span),
                 _ => self.check_result(path, args, expected, span),
@@ -55,11 +60,27 @@ impl Checker {
             };
             // Option and Result build `Ty::Option`/`Ty::Result` values whose payload types come
             // from the expectation, so they route through the builtin checkers.
-            if id == EnumId::OPTION {
-                return self.check_option(path, args, expected, span);
+            if id == EnumId::OPTION || id == EnumId::RESULT {
+                if explicit.is_some() {
+                    let head = &path.segments[0].name;
+                    self.push(
+                        Diagnostic::new(span, format!("`{head}.{name}` takes no type arguments"))
+                            .note("its payload type comes from the expectation; annotate the binding instead"),
+                    );
+                    return self.error_expr(span);
+                }
+                return if id == EnumId::OPTION {
+                    self.check_option(path, args, expected, span)
+                } else {
+                    self.check_result(path, args, expected, span)
+                };
             }
-            if id == EnumId::RESULT {
-                return self.check_result(path, args, expected, span);
+            // `List.Cons<I64>(…)` — explicit arguments settle the instance before construction.
+            if let Some(explicit) = explicit {
+                let Some(instance) = self.explicit_enum_instance(id, explicit, span) else {
+                    return self.error_expr(span);
+                };
+                return self.construct_variant(instance, index, args, expected, span);
             }
             return self.construct_variant(id, index, args, expected, span);
         }
@@ -71,7 +92,7 @@ impl Checker {
                 .namespaces
                 .contains_key(&path.segments[0].name)
             {
-                return self.check_ns_call(path, args, expected, span);
+                return self.check_ns_call(path, explicit, args, expected, span);
             }
             self.error(path.span, format!("unknown function `{}`", path.text()));
             return Expr {
@@ -82,6 +103,13 @@ impl Checker {
         }
 
         if let Some(builtin) = Builtin::from_name(name) {
+            if explicit.is_some() {
+                self.push(
+                    Diagnostic::new(span, format!("`{name}` takes no type arguments"))
+                        .note("builtins are typed by what they are handed, never by arguments"),
+                );
+                return self.error_expr(span);
+            }
             return self.check_builtin(builtin, args, span);
         }
 
@@ -94,6 +122,13 @@ impl Checker {
                 match kind {
                     TypeName::Struct(id) => {
                         let id = *id;
+                        if let Some(explicit) = explicit {
+                            let Some(instance) = self.explicit_struct_instance(id, explicit, span)
+                            else {
+                                return self.error_expr(span);
+                            };
+                            return self.construct_struct(instance, args, expected, span);
+                        }
                         return self.construct_struct(id, args, expected, span);
                     }
                     TypeName::Enum(id) => {
@@ -115,9 +150,13 @@ impl Checker {
                     TypeName::Builtin(_) => {}
                 }
             }
+            if explicit.is_some() {
+                self.no_type_args(name, span);
+                return self.error_expr(span);
+            }
             return self.check_member_call(name, path.span, args, span);
         };
-        self.call_fn(id, &name.clone(), args, span)
+        self.call_fn(id, &name.clone(), explicit, args, expected, span)
     }
 
     /// The call itself, once the callee is a known function: argument matching, and the capability
@@ -127,18 +166,16 @@ impl Checker {
         &mut self,
         id: FnId,
         display: &str,
+        explicit: Option<Vec<Ty>>,
         args: &[ast::Arg],
+        expected: Option<&Ty>,
         span: Span,
     ) -> Expr {
-        // A temporary arm, deleted when call-site inference lands with generic functions.
         if !self.program.fns[id.index()].type_params.is_empty() {
-            self.push(
-                Diagnostic::new(
-                    span,
-                    format!("`{display}` is generic, and generic functions cannot be called yet"),
-                )
-                .note("call-site inference arrives with the rest of item 7; see BOOTSTRAP.md §8"),
-            );
+            return self.call_generic_fn(id, display, explicit, args, expected, span);
+        }
+        if explicit.is_some() {
+            self.no_type_args(display, span);
             return self.error_expr(span);
         }
         let (params, ret) = self.signatures[id.index()].clone();
@@ -176,6 +213,7 @@ impl Checker {
     pub(super) fn check_ns_call(
         &mut self,
         path: &ast::Path,
+        explicit: Option<Vec<Ty>>,
         args: &[ast::Arg],
         expected: Option<&Ty>,
         span: Span,
@@ -186,8 +224,16 @@ impl Checker {
         };
         let written = path.text();
         match (resolved, path.segments.len()) {
-            (NsItem::Fn(id), 2) => self.call_fn(id, &written, args, span),
-            (NsItem::Struct(id), 2) => self.construct_struct(id, args, expected, span),
+            (NsItem::Fn(id), 2) => self.call_fn(id, &written, explicit, args, expected, span),
+            (NsItem::Struct(id), 2) => {
+                if let Some(explicit) = explicit {
+                    let Some(instance) = self.explicit_struct_instance(id, explicit, span) else {
+                        return self.error_expr(span);
+                    };
+                    return self.construct_struct(instance, args, expected, span);
+                }
+                self.construct_struct(id, args, expected, span)
+            }
             (NsItem::Enum(id), 2) => {
                 let example = self.enum_example(id);
                 self.push(
@@ -214,6 +260,12 @@ impl Checker {
                     );
                     return self.error_expr(span);
                 };
+                if let Some(explicit) = explicit {
+                    let Some(instance) = self.explicit_enum_instance(id, explicit, span) else {
+                        return self.error_expr(span);
+                    };
+                    return self.construct_variant(instance, index, args, expected, span);
+                }
                 self.construct_variant(id, index, args, expected, span)
             }
             _ => {
