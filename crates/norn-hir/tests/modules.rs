@@ -236,15 +236,59 @@ fn an_alias_may_not_take_a_prelude_name() {
 // ---------------------------------------------------------------- specifier policy
 
 #[test]
-fn a_bare_specifier_is_the_std_lane() {
+fn a_bare_specifier_that_is_not_std_is_refused() {
+    let out = rendered(&[(
+        "main.norn",
+        "import { pad } from \"leftpad\"\n\nfn main() {}\n",
+    )]);
+    assert!(out.contains("`leftpad` does not name a module"), "{out}");
+    assert!(out.contains("packages"), "{out}");
+}
+
+#[test]
+fn a_std_import_binds_in_memory() {
+    // The checker resolves `std/fmt` through the same key table as any module: an embedder that
+    // skips the loader injects it as an input keyed by the specifier, and binding just works.
+    let checked = assert_ok(&[
+        (
+            "main.norn",
+            "import { digits, parse_int } from \"std/fmt\"\n\nfn main() -> String {\n    match parse_int(\"41\") {\n        Some(n) => digits(n + 1)\n        None => \"?\"\n    }\n}\n",
+        ),
+        (
+            "std/fmt",
+            norn_hir::stdlib::source("std/fmt").expect("std/fmt is embedded"),
+        ),
+    ]);
+    assert!(checked.program.fns.iter().any(|f| f.name == "fmt.digits"));
+}
+
+#[test]
+fn an_unknown_std_module_is_diagnosed() {
     let out = rendered(&[(
         "main.norn",
         "import { read } from \"std/fs\"\n\nfn main() {}\n",
     )]);
     assert!(
-        out.contains("`std/fs` is reserved for the standard library"),
+        out.contains("no module `std/fs` in the standard library"),
         "{out}"
     );
+    assert!(
+        out.contains("the standard library provides `std/fmt`"),
+        "{out}"
+    );
+}
+
+#[test]
+fn a_std_specifier_with_a_written_extension_is_the_extension_error() {
+    // The extension check sits ahead of the std branch: `"std/fmt.norn"` is the extension
+    // mistake, not a standard-library module that does not exist.
+    let out = rendered(&[(
+        "main.norn",
+        "import { digits } from \"std/fmt.norn\"\n\nfn main() {}\n",
+    )]);
+    assert!(out.contains("the `.norn` extension is implied"), "{out}");
+    assert!(out.contains("write `\"std/fmt\"`"), "{out}");
+    assert!(!out.contains("standard library provides"), "{out}");
 }
 
 #[test]
@@ -520,4 +564,115 @@ fn a_cross_file_loop_travels_as_a_note() {
         "{out}"
     );
     assert!(!out.contains("--> lib.norn"), "{out}");
+}
+
+// ---------------------------------------------------------------- the loader and the std lane
+
+/// Load an entry from memory through the real loader. Any key the map does not hold panics, which
+/// is what makes "std never touches the filesystem" an assertion rather than a belief.
+fn load_from(files: &[(&str, &str)]) -> norn_hir::Loaded {
+    let mut read = |key: &str| {
+        files
+            .iter()
+            .find(|(name, _)| *name == key)
+            .map(|(_, text)| text.to_string())
+            .ok_or_else(|| panic!("the loader read `{key}`, which this test did not provide"))
+    };
+    norn_hir::load(files[0].0, &mut read).expect("the entry reads")
+}
+
+fn rendered_load_errors(loaded: &norn_hir::Loaded) -> String {
+    loaded
+        .errors
+        .iter()
+        .map(|(index, diagnostic)| norn_syntax::render(&loaded.modules[*index].file, diagnostic))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn the_loader_serves_std_without_touching_the_filesystem() {
+    let loaded = load_from(&[(
+        "main.norn",
+        "import { digits } from \"std/fmt\"\n\nfn main() -> String {\n    digits(7)\n}\n",
+    )]);
+    assert!(loaded.ok(), "{}", rendered_load_errors(&loaded));
+    assert_eq!(loaded.modules.len(), 2);
+    assert_eq!(loaded.modules[1].key, "std/fmt");
+}
+
+#[test]
+fn a_relative_std_path_still_reaches_the_filesystem() {
+    // Provenance is carried, never re-inferred from key shape: a relative `./std/fs` from a
+    // root-level entry legitimately yields the *file* key `std/fs.norn`, and no `std/` sniffing
+    // may swallow that real user file.
+    let loaded = load_from(&[
+        (
+            "main.norn",
+            "import { helper } from \"./std/fs\"\n\nfn main() -> I64 {\n    helper()\n}\n",
+        ),
+        ("std/fs.norn", "export fn helper() -> I64 {\n    3\n}\n"),
+    ]);
+    assert!(loaded.ok(), "{}", rendered_load_errors(&loaded));
+    assert_eq!(loaded.modules[1].key, "std/fs.norn");
+}
+
+#[test]
+fn an_unknown_std_module_is_diagnosed_without_a_read() {
+    let loaded = load_from(&[(
+        "main.norn",
+        "import { get } from \"std/http\"\n\nfn main() {}\n",
+    )]);
+    let out = rendered_load_errors(&loaded);
+    assert!(
+        out.contains("no module `std/http` in the standard library"),
+        "{out}"
+    );
+}
+
+#[test]
+fn a_std_key_cannot_be_the_entry() {
+    let mut read = |key: &str| -> std::io::Result<String> {
+        panic!("the entry guard should refuse before any read; read `{key}`")
+    };
+    let Err(err) = norn_hir::load("std/fmt", &mut read) else {
+        panic!("a std entry should be refused");
+    };
+    assert!(err.contains("standard-library module, not a file"), "{err}");
+}
+
+/// Nothing else walks every std module — an import is what pulls one in — so this is the test
+/// that keeps a typo in a rarely-imported std file from shipping silently.
+#[test]
+fn every_std_module_loads_and_checks() {
+    for (key, _) in norn_hir::stdlib::STD {
+        let entry = format!("import * as m from \"{key}\"\n\nfn main() {{}}\n");
+        let loaded = load_from(&[("main.norn", &entry)]);
+        assert!(
+            loaded.ok(),
+            "loading `{key}` failed:\n{}",
+            rendered_load_errors(&loaded)
+        );
+        let inputs: Vec<ModuleInput> = loaded
+            .modules
+            .iter()
+            .map(|module| ModuleInput {
+                name: module.name.clone(),
+                key: module.key.clone(),
+                module: &module.module,
+            })
+            .collect();
+        let checked = check_modules(&inputs);
+        assert!(
+            checked.ok(),
+            "checking `{key}` failed:\n{}",
+            loaded
+                .modules
+                .iter()
+                .zip(&checked.errors)
+                .map(|(module, errors)| render_all(&module.file, errors))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+    }
 }

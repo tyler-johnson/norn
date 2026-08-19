@@ -17,43 +17,61 @@ fn examples_parse_and_round_trip() {
     let mut checked = 0;
     for path in norn_files(&examples_dir()) {
         let name = path.file_name().unwrap().to_string_lossy().to_string();
-        let text = std::fs::read_to_string(&path).unwrap();
-        let file = SourceFile::new(&name, text.clone());
-        let parsed = parse(&text);
-
-        assert!(
-            parsed.ok(),
-            "{name} failed to parse:\n{}",
-            render_all(&file, &parsed.errors)
-        );
-
-        let canonical = print::module(&parsed.module);
-        let reparsed = parse(&canonical);
-        let recanonical = SourceFile::new(format!("{name} (canonical)"), canonical.clone());
-        assert!(
-            reparsed.ok(),
-            "canonical form of {name} failed to parse:\n{}\n--- canonical form ---\n{canonical}",
-            render_all(&recanonical, &reparsed.errors)
-        );
-        assert_eq!(
-            canonical,
-            print::module(&reparsed.module),
-            "printing {name} is not idempotent"
-        );
-        assert_eq!(
-            dump::module(&parsed.module),
-            dump::module(&reparsed.module),
-            "the canonical form of {name} parses to a different tree"
-        );
-
-        let snapshot = format!(
-            "=== ast ===\n{}\n=== canonical ===\n{canonical}",
-            dump::module(&parsed.module)
-        );
-        check_snapshot(&name, &snapshot);
+        parses_and_round_trips(&path, &name);
         checked += 1;
     }
     assert!(checked > 0, "no examples found");
+}
+
+/// The standard-library sources are ordinary Norn files, held to the same corpus discipline as
+/// the examples. Snapshots are prefixed `std-` so a std module and an example may share a stem.
+#[test]
+fn std_modules_parse_and_round_trip() {
+    let mut checked = 0;
+    for path in norn_files(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../std")) {
+        let name = path.file_name().unwrap().to_string_lossy().to_string();
+        parses_and_round_trips(&path, &format!("std-{name}"));
+        checked += 1;
+    }
+    assert!(checked > 0, "no std modules found");
+}
+
+fn parses_and_round_trips(path: &Path, snapshot: &str) {
+    let name = path.file_name().unwrap().to_string_lossy().to_string();
+    let text = std::fs::read_to_string(path).unwrap();
+    let file = SourceFile::new(&name, text.clone());
+    let parsed = parse(&text);
+
+    assert!(
+        parsed.ok(),
+        "{name} failed to parse:\n{}",
+        render_all(&file, &parsed.errors)
+    );
+
+    let canonical = print::module(&parsed.module);
+    let reparsed = parse(&canonical);
+    let recanonical = SourceFile::new(format!("{name} (canonical)"), canonical.clone());
+    assert!(
+        reparsed.ok(),
+        "canonical form of {name} failed to parse:\n{}\n--- canonical form ---\n{canonical}",
+        render_all(&recanonical, &reparsed.errors)
+    );
+    assert_eq!(
+        canonical,
+        print::module(&reparsed.module),
+        "printing {name} is not idempotent"
+    );
+    assert_eq!(
+        dump::module(&parsed.module),
+        dump::module(&reparsed.module),
+        "the canonical form of {name} parses to a different tree"
+    );
+
+    let snap = format!(
+        "=== ast ===\n{}\n=== canonical ===\n{canonical}",
+        dump::module(&parsed.module)
+    );
+    check_snapshot(snapshot, &snap);
 }
 
 #[test]

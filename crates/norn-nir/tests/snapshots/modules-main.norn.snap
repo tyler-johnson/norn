@@ -7,10 +7,10 @@ enum Shape #3 (Empty/0, Dot/1)
 
 reactor fmt.Counter #0
     node 0 step param slot 0 arg 0 <- []
-    node 1 total state slot 1 init fmt.Counter.total.init#7 <- []
-    node 2 count signal fmt.Counter.count#8 export <- [total]
+    node 1 total state slot 1 init fmt.Counter.total.init#10 <- []
+    node 2 count signal fmt.Counter.count#11 export <- [total]
     order [step, total, count]
-    input 0 bump capacity 8 overflow reject handler fmt.Counter.on.bump#6
+    input 0 bump capacity 8 overflow reject handler fmt.Counter.on.bump#9
         plan [total, count]
     exports [count]
 
@@ -45,8 +45,8 @@ fn measure #0(_0/shape)
 
 task fn main #1()
     local _0/report
-    local _1/counter
-    local _2
+    local _1/n
+    local _2/counter
     local _3
     local _4
     local _5
@@ -71,41 +71,78 @@ task fn main #1()
     local _24
     local _25
     local _26
+    local _27
+    local _28
+    local _29
+    local _30
+    local _31
+    local _32
+    local _33
+    local _34
+    local _35
+    local _36
   b0:
-    _2 = Report("width", 12)
-    _0/report = _2
-    _3 = call fmt.describe#2(_0/report)
-    _4 = builtin print(_3)
-    _5 = builtin print(_0/report.1)
-    _6 = call strings.shout#5("modules")
-    _7 = builtin print(_6)
-    _8 = Shape.Dot(3)
-    _9 = call measure#0(_8)
-    _10 = builtin print(_9)
-    _11 = Shape.Empty()
-    _12 = call measure#0(_11)
-    _13 = builtin print(_12)
-    scope enter
-    _15 = spawn reactor fmt.Counter#0(2)
-    _1/counter = _15
-    _16 = input 0 of _1/counter
-    _17 = task builtin send(_16, ())
-    await _17 -> _18, resume b1
+    _3 = Report("width", 12)
+    _0/report = _3
+    _4 = call fmt.describe#2(_0/report)
+    _5 = builtin print(_4)
+    _6 = builtin print(_0/report.1)
+    _7 = call strings.shout#5("modules")
+    _8 = builtin print(_7)
+    _9 = Shape.Dot(3)
+    _10 = call measure#0(_9)
+    _11 = builtin print(_10)
+    _12 = Shape.Empty()
+    _13 = call measure#0(_12)
+    _14 = builtin print(_13)
+    _15 = neg 204
+    _16 = call fmt.digits#6(_15)
+    _17 = builtin print(_16)
+    _19 = call fmt.parse_int#7("41")
+    goto b2
   b1:
-    _19 = input 0 of _1/counter
-    _20 = task builtin send(_19, ())
-    await _20 -> _21, resume b2
+    scope enter
+    _25 = spawn reactor fmt.Counter#0(2)
+    _2/counter = _25
+    _26 = input 0 of _2/counter
+    _27 = task builtin send(_26, ())
+    await _27 -> _28, resume b9
   b2:
-    _22 = task builtin sleep(10)
-    await _22 -> _23, resume b3
+    switch tag _19 [1 => b6] else b3
   b3:
-    _24 = export 0 of _1/counter
-    _25 = builtin latest(_24)
-    _26 = builtin print(_25)
-    _14 = _26
-    scope exit, resume b4
+    switch tag _19 [0 => b8] else b4
   b4:
-    return _14
+    trap "no match arm applied"
+  b5:
+    _20 = _1/n add.i 1
+    _21 = call fmt.digits#6(_20)
+    _22 = builtin print(_21)
+    _18 = _22
+    goto b1
+  b6:
+    _1/n = _19.0
+    goto b5
+  b7:
+    _23 = builtin print("not a number")
+    _18 = _23
+    goto b1
+  b8:
+    goto b7
+  b9:
+    _29 = input 0 of _2/counter
+    _30 = task builtin send(_29, ())
+    await _30 -> _31, resume b10
+  b10:
+    _32 = task builtin sleep(10)
+    await _32 -> _33, resume b11
+  b11:
+    _34 = export 0 of _2/counter
+    _35 = builtin latest(_34)
+    _36 = builtin print(_35)
+    _24 = _36
+    scope exit, resume b12
+  b12:
+    return _24
 
 fn fmt.describe #2(_0/report)
     local _1
@@ -154,7 +191,260 @@ fn strings.shout #5(_0/text)
     _1 = _0/text concat "!"
     return _1
 
-fn fmt.Counter.on.bump #6(_0/step, _1/total)
+fn fmt.digits #6(_0/n)
+    local _1/rest
+    local _2/out
+    local _3
+    local _4
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+    local _10
+    local _11
+    local _12
+    local _13
+    local _14
+    local _15
+  b0:
+    _4 = _0/n lt 0
+    branch _4 ? b1 : b2
+  b1:
+    _5 = 0 sub.i _0/n
+    _3 = _5
+    goto b3
+  b2:
+    _3 = _0/n
+    goto b3
+  b3:
+    _1/rest = _3
+    _6 = _1/rest rem.i 10
+    _7 = call fmt.digit#8(_6)
+    _2/out = _7
+    goto b4
+  b4:
+    _8 = _1/rest gt 9
+    branch _8 ? b6 : b5
+  b5:
+    _14 = _0/n lt 0
+    branch _14 ? b7 : b8
+  b6:
+    _9 = _1/rest div.i 10
+    _1/rest = _9
+    _10 = _1/rest rem.i 10
+    _11 = call fmt.digit#8(_10)
+    _12 = _11 concat _2/out
+    _2/out = _12
+    goto b4
+  b7:
+    _15 = "-" concat _2/out
+    _13 = _15
+    goto b9
+  b8:
+    _13 = _2/out
+    goto b9
+  b9:
+    return _13
+
+fn fmt.parse_int #7(_0/s)
+    local _1/data
+    local _2/len
+    local _3/i
+    local _4/negative
+    local _5/value
+    local _6/b
+    local _7
+    local _8
+    local _9
+    local _10
+    local _11
+    local _12
+    local _13
+    local _14
+    local _15
+    local _16
+    local _17
+    local _18
+    local _19
+    local _20
+    local _21
+    local _22
+    local _23
+    local _24
+    local _25
+    local _26
+    local _27
+    local _28
+    local _29
+    local _30
+    local _31
+    local _32
+  b0:
+    _7 = builtin bytes(_0/s)
+    _1/data = _7
+    _8 = builtin bytes_len(_1/data)
+    _2/len = _8
+    _3/i = 0
+    _4/negative = false
+    _10 = _2/len eq 0
+    branch _10 ? b1 : b2
+  b1:
+    _11 = Option.None()
+    return _11
+  b2:
+    _9 = ()
+    goto b3
+  b3:
+    _13 = builtin bytes_at(_1/data, 0)
+    _14 = _13 eq 45
+    branch _14 ? b4 : b5
+  b4:
+    _4/negative = true
+    _3/i = 1
+    _12 = ()
+    goto b6
+  b5:
+    _12 = ()
+    goto b6
+  b6:
+    _16 = _3/i eq _2/len
+    branch _16 ? b7 : b8
+  b7:
+    _17 = Option.None()
+    return _17
+  b8:
+    _15 = ()
+    goto b9
+  b9:
+    _5/value = 0
+    goto b10
+  b10:
+    _18 = _3/i lt _2/len
+    branch _18 ? b12 : b11
+  b11:
+    branch _4/negative ? b18 : b19
+  b12:
+    _19 = builtin bytes_at(_1/data, _3/i)
+    _6/b = _19
+    _22 = _6/b lt 48
+    _21 = _22
+    branch _21 ? b14 : b13
+  b13:
+    _23 = _6/b gt 57
+    _21 = _23
+    goto b14
+  b14:
+    branch _21 ? b15 : b16
+  b15:
+    _24 = Option.None()
+    return _24
+  b16:
+    _20 = ()
+    goto b17
+  b17:
+    _25 = _5/value mul.i 10
+    _26 = _6/b sub.i 48
+    _27 = _25 add.i _26
+    _5/value = _27
+    _28 = _3/i add.i 1
+    _3/i = _28
+    goto b10
+  b18:
+    _30 = 0 sub.i _5/value
+    _31 = Option.Some(_30)
+    _29 = _31
+    goto b20
+  b19:
+    _32 = Option.Some(_5/value)
+    _29 = _32
+    goto b20
+  b20:
+    return _29
+
+fn fmt.digit #8(_0/n)
+    local _1
+    local _2
+    local _3
+    local _4
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+    local _10
+    local _11
+  b0:
+    goto b2
+  b1:
+    return _1
+  b2:
+    _2 = _0/n eq 0
+    branch _2 ? b13 : b3
+  b3:
+    _3 = _0/n eq 1
+    branch _3 ? b14 : b4
+  b4:
+    _4 = _0/n eq 2
+    branch _4 ? b15 : b5
+  b5:
+    _5 = _0/n eq 3
+    branch _5 ? b16 : b6
+  b6:
+    _6 = _0/n eq 4
+    branch _6 ? b17 : b7
+  b7:
+    _7 = _0/n eq 5
+    branch _7 ? b18 : b8
+  b8:
+    _8 = _0/n eq 6
+    branch _8 ? b19 : b9
+  b9:
+    _9 = _0/n eq 7
+    branch _9 ? b20 : b10
+  b10:
+    _10 = _0/n eq 8
+    branch _10 ? b21 : b11
+  b11:
+    _11 = _0/n eq 9
+    branch _11 ? b22 : b12
+  b12:
+    goto b23
+  b13:
+    _1 = "0"
+    goto b1
+  b14:
+    _1 = "1"
+    goto b1
+  b15:
+    _1 = "2"
+    goto b1
+  b16:
+    _1 = "3"
+    goto b1
+  b17:
+    _1 = "4"
+    goto b1
+  b18:
+    _1 = "5"
+    goto b1
+  b19:
+    _1 = "6"
+    goto b1
+  b20:
+    _1 = "7"
+    goto b1
+  b21:
+    _1 = "8"
+    goto b1
+  b22:
+    _1 = "9"
+    goto b1
+  b23:
+    _1 = "?"
+    goto b1
+
+fn fmt.Counter.on.bump #9(_0/step, _1/total)
     local _2
   b0:
     _2 = _1/total add.i _0/step
@@ -162,11 +452,11 @@ fn fmt.Counter.on.bump #6(_0/step, _1/total)
     set slot 1 = _1/total
     return ()
 
-fn fmt.Counter.total.init #7()
+fn fmt.Counter.total.init #10()
   b0:
     return 0
 
-fn fmt.Counter.count #8(_0/total)
+fn fmt.Counter.count #11(_0/total)
   b0:
     return _0/total
 
@@ -176,6 +466,8 @@ fn fmt.Counter.count #8(_0/total)
 modules!
 9
 0
+-204
+42
 4
 === result ===
 ()

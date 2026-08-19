@@ -1,0 +1,137 @@
+=== ast ===
+(module
+  (fn digits export
+    (params (param n I64))
+    (ret String)
+    (block
+      (let rest mut
+        (if
+          (binary < (path n) (int 0))
+          (block (binary - (int 0) (path n)))
+          (else (block (path n)))))
+      (let out mut (call (path digit) (arg (binary % (path rest) (int 10)))))
+      (while
+        (binary > (path rest) (int 9))
+        (block
+          (assign (path rest) (binary / (path rest) (int 10)))
+          (assign
+            (path out)
+            (binary +
+              (call (path digit) (arg (binary % (path rest) (int 10))))
+              (path out)))))
+      (if
+        (binary < (path n) (int 0))
+        (block (binary + (str "-") (path out)))
+        (else (block (path out))))))
+  (fn parse_int export
+    (params (param s String))
+    (ret (ty Option I64))
+    (block
+      (let data (call (path bytes) (arg (path s))))
+      (let len (call (path bytes_len) (arg (path data))))
+      (let i mut (int 0))
+      (let negative mut (bool false))
+      (if (binary == (path len) (int 0)) (block (return (path None))))
+      (if
+        (binary == (index (path data) (int 0)) (int 45))
+        (block (assign (path negative) (bool true)) (assign (path i) (int 1))))
+      (if (binary == (path i) (path len)) (block (return (path None))))
+      (let value mut (int 0))
+      (while
+        (binary < (path i) (path len))
+        (block
+          (let b (index (path data) (path i)))
+          (if
+            (binary || (binary < (path b) (int 48)) (binary > (path b) (int 57)))
+            (block (return (path None))))
+          (assign
+            (path value)
+            (binary + (binary * (path value) (int 10)) (binary - (path b) (int 48))))
+          (assign (path i) (binary + (path i) (int 1)))))
+      (if
+        (path negative)
+        (block (call (path Some) (arg (binary - (int 0) (path value)))))
+        (else (block (call (path Some) (arg (path value))))))))
+  (fn digit
+    (params (param n I64))
+    (ret String)
+    (block
+      (match
+        (path n)
+        (arm (int 0) (str "0"))
+        (arm (int 1) (str "1"))
+        (arm (int 2) (str "2"))
+        (arm (int 3) (str "3"))
+        (arm (int 4) (str "4"))
+        (arm (int 5) (str "5"))
+        (arm (int 6) (str "6"))
+        (arm (int 7) (str "7"))
+        (arm (int 8) (str "8"))
+        (arm (int 9) (str "9"))
+        (arm _ (str "?"))))))
+
+=== canonical ===
+export fn digits(n: I64) -> String {
+    let mut rest = if n < 0 {
+        0 - n
+    } else {
+        n
+    }
+    let mut out = digit(rest % 10)
+    while rest > 9 {
+        rest = rest / 10
+        out = digit(rest % 10) + out
+    }
+    if n < 0 {
+        "-" + out
+    } else {
+        out
+    }
+}
+
+export fn parse_int(s: String) -> Option<I64> {
+    let data = bytes(s)
+    let len = bytes_len(data)
+    let mut i = 0
+    let mut negative = false
+    if len == 0 {
+        return None
+    }
+    if data[0] == 45 {
+        negative = true
+        i = 1
+    }
+    if i == len {
+        return None
+    }
+    let mut value = 0
+    while i < len {
+        let b = data[i]
+        if b < 48 || b > 57 {
+            return None
+        }
+        value = value * 10 + (b - 48)
+        i = i + 1
+    }
+    if negative {
+        Some(0 - value)
+    } else {
+        Some(value)
+    }
+}
+
+fn digit(n: I64) -> String {
+    match n {
+        0 => "0"
+        1 => "1"
+        2 => "2"
+        3 => "3"
+        4 => "4"
+        5 => "5"
+        6 => "6"
+        7 => "7"
+        8 => "8"
+        9 => "9"
+        _ => "?"
+    }
+}

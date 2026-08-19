@@ -100,20 +100,38 @@ fn is_builtin_variant(name: &str) -> bool {
 
 /// Why an import specifier could not be resolved to a module key.
 pub enum SpecifierError {
-    /// No leading `./` or `../`: the shape reserved for the standard library and packages.
+    /// No leading `./` or `../`, and not `std/…`: the shape reserved for packages.
     Bare,
     /// The specifier wrote the `.norn`, which is implied.
     Extension,
 }
 
-/// Resolve an import specifier against the key of the importing module: dirname ⊕ specifier, with
-/// `.` and `..` folded lexically and `.norn` appended.
+/// Where a specifier resolved to. Provenance is carried rather than re-inferred from the key's
+/// shape, because the shapes can coincide: a relative `./std/fs` from a root-level entry
+/// legitimately yields the file key `std/fs.norn`. The keys themselves cannot collide — relative
+/// resolution always appends `.norn`, and a std key never has it.
+pub enum Resolved {
+    /// A relative specifier: the key names a file, `.norn` appended.
+    File(String),
+    /// A `std/…` specifier: the key is the specifier verbatim, extensionless, resolved against
+    /// the table in `crate::stdlib` rather than the filesystem.
+    Std(String),
+}
+
+/// Resolve an import specifier against the key of the importing module: `std/…` is a
+/// standard-library key, verbatim; anything else is dirname ⊕ specifier, with `.` and `..` folded
+/// lexically and `.norn` appended.
 ///
-/// Shared by the checker and the loader so the two cannot disagree about which file a specifier
+/// Shared by the checker and the loader so the two cannot disagree about which module a specifier
 /// names. Lexical means `./a/../fmt` and `./fmt` coincide; symlink aliasing is a documented v0 gap.
-pub fn resolve_specifier(importer_key: &str, specifier: &str) -> Result<String, SpecifierError> {
+pub fn resolve_specifier(importer_key: &str, specifier: &str) -> Result<Resolved, SpecifierError> {
+    // Ahead of the std branch on purpose: `"std/fmt.norn"` is the extension mistake, not a
+    // standard-library module that does not exist.
     if specifier.ends_with(".norn") {
         return Err(SpecifierError::Extension);
+    }
+    if specifier.starts_with("std/") {
+        return Ok(Resolved::Std(specifier.to_string()));
     }
     if !specifier.starts_with("./") && !specifier.starts_with("../") {
         return Err(SpecifierError::Bare);
@@ -131,7 +149,7 @@ pub fn resolve_specifier(importer_key: &str, specifier: &str) -> Result<String, 
             segment => parts.push(segment),
         }
     }
-    Ok(format!("{}.norn", parts.join("/")))
+    Ok(Resolved::File(format!("{}.norn", parts.join("/"))))
 }
 
 /// What kind of thing a file declares under a name, read straight off the AST — the exports view
@@ -537,10 +555,10 @@ impl Checker {
                     self.push(
                         Diagnostic::new(
                             span,
-                            format!("`{}` is reserved for the standard library", decl.specifier),
+                            format!("`{}` does not name a module", decl.specifier),
                         )
-                        .label("not a relative path")
-                        .note("a module is named by where its file is: `./fmt`, or `../util/strings`, relative to the importing file"),
+                        .label("not `std/…` or a relative path")
+                        .note("a module is the standard library's (`std/fmt`) or a file named by where it is (`./fmt`, `../util/strings`); packages will take this shape, but do not exist yet"),
                     );
                     None
                 }
@@ -555,26 +573,51 @@ impl Checker {
                     );
                     None
                 }
-                Ok(key) if key == self.keys[self.current] => {
-                    self.push(
-                        Diagnostic::new(span, "a file cannot import itself")
-                            .label("this is the importing file"),
-                    );
-                    None
-                }
-                Ok(key) => match self.key_index.get(&key) {
-                    Some(&index) => Some(index),
-                    None => {
+                Ok(resolved) => {
+                    let (key, std) = match resolved {
+                        Resolved::File(key) => (key, false),
+                        Resolved::Std(key) => (key, true),
+                    };
+                    if key == self.keys[self.current] {
                         self.push(
-                            Diagnostic::new(
-                                span,
-                                format!("cannot find module `{}`", decl.specifier),
-                            )
-                            .note(format!("expected a module at `{key}`")),
+                            Diagnostic::new(span, "a file cannot import itself")
+                                .label("this is the importing file"),
                         );
                         None
+                    } else {
+                        match self.key_index.get(&key) {
+                            Some(&index) => Some(index),
+                            // Same words as the loader's miss, because for an embedder that skips
+                            // the loader this arm is the same miss.
+                            None if std => {
+                                self.push(
+                                    Diagnostic::new(
+                                        span,
+                                        format!(
+                                            "no module `{}` in the standard library",
+                                            decl.specifier
+                                        ),
+                                    )
+                                    .note(format!(
+                                        "the standard library provides {}",
+                                        crate::stdlib::catalogue()
+                                    )),
+                                );
+                                None
+                            }
+                            None => {
+                                self.push(
+                                    Diagnostic::new(
+                                        span,
+                                        format!("cannot find module `{}`", decl.specifier),
+                                    )
+                                    .note(format!("expected a module at `{key}`")),
+                                );
+                                None
+                            }
+                        }
                     }
-                },
+                }
             };
             targets.push(target);
         }

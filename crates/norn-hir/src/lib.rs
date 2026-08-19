@@ -6,9 +6,11 @@
 pub mod check;
 pub mod hir;
 pub mod load;
+pub mod stdlib;
 
 pub use check::{
-    Checked, CheckedModules, ModuleInput, SpecifierError, check, check_modules, resolve_specifier,
+    Checked, CheckedModules, ModuleInput, Resolved, SpecifierError, check, check_modules,
+    resolve_specifier,
 };
 pub use hir::{Program, Ty};
 pub use load::{Loaded, LoadedModule, load};

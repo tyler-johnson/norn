@@ -4,11 +4,14 @@
 // named imports for the types it uses bare and a namespace binding for the rest, and reaches
 // `util/strings.norn` through a subdirectory specifier. The reactor is spawned through the
 // namespace, driven with `send`, and read with `latest` after a park, exactly as
-// `examples/reactors/gate.norn` does in one file.
+// `examples/reactors/gate.norn` does in one file. The `std/fmt` import is the std lane: a bare
+// specifier resolved to a module embedded in the compiler, coexisting with the user's own
+// `./fmt` — same stem, different modules.
 
 import { Report, describe } from "./fmt"
 import * as fmt from "./fmt"
 import * as strings from "./util/strings"
+import { digits, parse_int } from "std/fmt"
 
 fn measure(shape: fmt.Shape) -> I64 {
     match shape {
@@ -28,6 +31,12 @@ task fn main() -> ()
 
     print(measure(fmt.Shape.Dot(3)))
     print(measure(fmt.Shape.Empty))
+
+    print(digits(-204))
+    match parse_int("41") {
+        Some(n) => print(digits(n + 1))
+        None => print("not a number")
+    }
 
     scope {
         let counter = spawn reactor fmt.Counter(step: 2)

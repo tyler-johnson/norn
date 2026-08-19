@@ -7,7 +7,9 @@
 //! Discovery is a worklist: the entry first, then each file's imports in written order, first
 //! sighting wins — so module order, and with it every `FnId`, is a function of file contents
 //! alone. Keys are lexically normalized (`./a/../fmt` ≡ `./fmt`, shared with the checker through
-//! `resolve_specifier`); symlink aliasing is a documented v0 gap. Path *policy* — bare
+//! `resolve_specifier`); symlink aliasing is a documented v0 gap. A `std/…` specifier resolves
+//! against the table embedded in `stdlib` rather than the filesystem: a hit parses the embedded
+//! text, a miss is diagnosed here without touching `read`. Path *policy* — non-std bare
 //! specifiers, a written `.norn`, self-imports — is the checker's, so those are skipped here
 //! without comment. A file that fails to parse is reported but its import list is not walked: a
 //! recovered AST's imports are not trustworthy. Loading continues elsewhere.
@@ -17,7 +19,8 @@ use std::collections::HashMap;
 use norn_syntax::ast;
 use norn_syntax::{Diagnostic, SourceFile, parse};
 
-use crate::check::resolve_specifier;
+use crate::check::{Resolved, resolve_specifier};
+use crate::stdlib;
 
 pub struct Loaded {
     /// The entry module first, then the rest in discovery order.
@@ -49,6 +52,13 @@ pub fn load(
     read: &mut dyn FnMut(&str) -> std::io::Result<String>,
 ) -> Result<Loaded, String> {
     let entry_key = normalize(entry);
+    // A std key cannot be an entry, so the standard library cannot be shadowed from the command
+    // line by a literal extensionless file either.
+    if stdlib::source(&entry_key).is_some() {
+        return Err(format!(
+            "`{entry_key}` names a standard-library module, not a file; import it with `import {{ … }} from \"{entry_key}\"`"
+        ));
+    }
     let text = read(&entry_key).map_err(|err| format!("{entry}: {err}"))?;
 
     let mut modules: Vec<LoadedModule> = Vec::new();
@@ -96,32 +106,61 @@ pub fn load(
             let import = &modules[next].module.imports[decl];
             // Bare and extension-carrying specifiers are the checker's diagnostics; a self-import
             // resolves to a file already loaded, so it needs nothing here either.
-            let Ok(key) = resolve_specifier(&modules[next].key, &import.specifier) else {
+            let Ok(resolved) = resolve_specifier(&modules[next].key, &import.specifier) else {
                 continue;
             };
-            if index_of.contains_key(&key) {
+            let (Resolved::File(key) | Resolved::Std(key)) = &resolved;
+            if index_of.contains_key(key) {
                 continue;
             }
-            match read(&key) {
-                Ok(text) => admit(
-                    key,
-                    text,
-                    &mut modules,
-                    &mut clean,
-                    &mut errors,
-                    &mut index_of,
-                ),
-                Err(_) => {
-                    let import = &modules[next].module.imports[decl];
-                    errors.push((
-                        next,
-                        Diagnostic::new(
-                            import.specifier_span,
-                            format!("cannot find module `{}`", import.specifier),
-                        )
-                        .note(format!("expected a file at {key}")),
-                    ));
-                }
+            match resolved {
+                Resolved::File(key) => match read(&key) {
+                    Ok(text) => admit(
+                        key,
+                        text,
+                        &mut modules,
+                        &mut clean,
+                        &mut errors,
+                        &mut index_of,
+                    ),
+                    Err(_) => {
+                        let import = &modules[next].module.imports[decl];
+                        errors.push((
+                            next,
+                            Diagnostic::new(
+                                import.specifier_span,
+                                format!("cannot find module `{}`", import.specifier),
+                            )
+                            .note(format!("expected a file at {key}")),
+                        ));
+                    }
+                },
+                Resolved::Std(key) => match stdlib::source(&key) {
+                    Some(text) => admit(
+                        key,
+                        text.to_string(),
+                        &mut modules,
+                        &mut clean,
+                        &mut errors,
+                        &mut index_of,
+                    ),
+                    // Same words as the checker's miss arm; no `read` — a std key never
+                    // reaches the filesystem.
+                    None => {
+                        let import = &modules[next].module.imports[decl];
+                        errors.push((
+                            next,
+                            Diagnostic::new(
+                                import.specifier_span,
+                                format!("no module `{}` in the standard library", import.specifier),
+                            )
+                            .note(format!(
+                                "the standard library provides {}",
+                                stdlib::catalogue()
+                            )),
+                        ));
+                    }
+                },
             }
         }
         next += 1;

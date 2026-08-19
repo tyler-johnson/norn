@@ -1,0 +1,72 @@
+// Formatting and parsing: the int↔string pair.
+//
+// The first standard-library module. `digits` retires the hand-written copies the examples grew
+// while the language had no std to import it from; `parse_int` is its inverse, written on the
+// byte primitives — and it is HTTP's `Content-Length` parser in waiting.
+
+export fn digits(n: I64) -> String {
+    let mut rest = if n < 0 {
+        0 - n
+    } else {
+        n
+    }
+    let mut out = digit(rest % 10)
+    while rest > 9 {
+        rest = rest / 10
+        out = digit(rest % 10) + out
+    }
+    if n < 0 {
+        "-" + out
+    } else {
+        out
+    }
+}
+
+// 45 is `-`, 48 through 57 are `0` through `9`. Anything else — including an empty string or a
+// bare `-` — is `None`, never a guess.
+export fn parse_int(s: String) -> Option<I64> {
+    let data = bytes(s)
+    let len = bytes_len(data)
+    let mut i = 0
+    let mut negative = false
+    if len == 0 {
+        return None
+    }
+    if data[0] == 45 {
+        negative = true
+        i = 1
+    }
+    if i == len {
+        return None
+    }
+    let mut value = 0
+    while i < len {
+        let b = data[i]
+        if b < 48 || b > 57 {
+            return None
+        }
+        value = value * 10 + (b - 48)
+        i = i + 1
+    }
+    if negative {
+        Some(0 - value)
+    } else {
+        Some(value)
+    }
+}
+
+fn digit(n: I64) -> String {
+    match n {
+        0 => "0"
+        1 => "1"
+        2 => "2"
+        3 => "3"
+        4 => "4"
+        5 => "5"
+        6 => "6"
+        7 => "7"
+        8 => "8"
+        9 => "9"
+        _ => "?"
+    }
+}
