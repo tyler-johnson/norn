@@ -18,8 +18,9 @@ use std::path::PathBuf;
 use std::sync::mpsc::{Sender, channel};
 use std::time::Duration;
 
-use norn_nir::{Clock, Config, Output, execute, lower};
-use norn_syntax::{SourceFile, parse, render_all};
+use norn_nir::{Clock, Config, Output, execute};
+
+mod common;
 
 struct Channel(Sender<String>);
 
@@ -37,29 +38,14 @@ fn the_file_server_streams_both_ways_and_cancellation_closes_everything() {
 
     let (sender, printed) = channel();
     let server = std::thread::spawn(move || {
+        // The entry path is absolute, so the `set_current_dir` above cannot bend where the
+        // loader's reads resolve — `normalize` preserves the leading `/`.
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/http/files.norn");
-        let source = std::fs::read_to_string(&path).unwrap();
-        let file = SourceFile::new(path.display().to_string(), source.clone());
-
-        let parsed = parse(&source);
-        assert!(
-            parsed.ok(),
-            "the file server does not parse:\n{}",
-            render_all(&file, &parsed.errors)
-        );
-        let checked = norn_hir::check(&parsed.module);
-        assert!(
-            checked.ok(),
-            "the file server does not check:\n{}",
-            render_all(&file, &checked.errors)
-        );
-
-        let nir = lower(&checked.program);
-        let main = checked.program.main.expect("the file server has a `main`");
+        let (nir, main) = common::build(&path);
         let mut out = Channel(sender);
         let outcome = execute(
             &nir,
-            main.index(),
+            main,
             &mut out,
             Config {
                 clock: Clock::real(),

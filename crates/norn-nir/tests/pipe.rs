@@ -10,10 +10,11 @@
 //! transfer completes in a single resumption and there is no suspension point to cancel at. That
 //! claim is exercised by the HTTP file-server tests, where a request body parks the pipe.
 
+mod common;
+
 use std::path::{Path, PathBuf};
 
-use norn_nir::{Captured, Config, execute, lower};
-use norn_syntax::{SourceFile, parse, render_all};
+use norn_nir::{Captured, Config, execute};
 
 #[test]
 fn a_file_flows_into_a_file_in_chunks() {
@@ -25,24 +26,9 @@ fn a_file_flows_into_a_file_in_chunks() {
     std::fs::write(&src, &fixture).unwrap();
 
     let source = program(&src, &dst);
-    let file = SourceFile::new("pipe.norn", source.clone());
-    let parsed = parse(&source);
-    assert!(
-        parsed.ok(),
-        "the pipe program does not parse:\n{}",
-        render_all(&file, &parsed.errors)
-    );
-    let checked = norn_hir::check(&parsed.module);
-    assert!(
-        checked.ok(),
-        "the pipe program does not check:\n{}",
-        render_all(&file, &checked.errors)
-    );
-
-    let nir = lower(&checked.program);
-    let main = checked.program.main.expect("the pipe program has a `main`");
+    let (nir, main) = common::build_source("pipe.norn", &source);
     let mut out = Captured::default();
-    let outcome = execute(&nir, main.index(), &mut out, Config::deterministic());
+    let outcome = execute(&nir, main, &mut out, Config::deterministic());
     if let Err(trap) = outcome.value {
         panic!("the pipe program trapped: {trap}");
     }

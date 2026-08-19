@@ -12,8 +12,9 @@ use std::path::PathBuf;
 use std::sync::mpsc::{Sender, channel};
 use std::time::Duration;
 
-use norn_nir::{Clock, Config, Output, execute, lower};
-use norn_syntax::{SourceFile, parse, render_all};
+use norn_nir::{Clock, Config, Output, execute};
+
+mod common;
 
 /// Forwards each printed line to the test as it appears, rather than collecting them for the end.
 struct Channel(Sender<String>);
@@ -28,29 +29,11 @@ impl Output for Channel {
 fn the_hello_server_answers_and_closes_every_socket() {
     let (sender, printed) = channel();
     let server = std::thread::spawn(move || {
-        let path = hello_path();
-        let source = std::fs::read_to_string(&path).unwrap();
-        let file = SourceFile::new(path.display().to_string(), source.clone());
-
-        let parsed = parse(&source);
-        assert!(
-            parsed.ok(),
-            "the hello server does not parse:\n{}",
-            render_all(&file, &parsed.errors)
-        );
-        let checked = norn_hir::check(&parsed.module);
-        assert!(
-            checked.ok(),
-            "the hello server does not check:\n{}",
-            render_all(&file, &checked.errors)
-        );
-
-        let nir = lower(&checked.program);
-        let main = checked.program.main.expect("the hello server has a `main`");
+        let (nir, main) = common::build(&hello_path());
         let mut out = Channel(sender);
         let outcome = execute(
             &nir,
-            main.index(),
+            main,
             &mut out,
             Config {
                 clock: Clock::real(),

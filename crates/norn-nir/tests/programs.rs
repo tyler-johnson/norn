@@ -7,40 +7,22 @@
 //!
 //! Set `NORN_BLESS=1` to rewrite the snapshots, then read the diff before committing it.
 
+mod common;
+
 use std::path::{Path, PathBuf};
 
 use norn_nir::{Captured, lower, print, run};
-use norn_syntax::{SourceFile, parse, render_all};
+use norn_syntax::parse;
 
 #[test]
 fn programs_lower_and_run() {
     let mut checked = 0;
     for path in norn_files(&run_dir()) {
         let name = path.file_name().unwrap().to_string_lossy().to_string();
-        let text = std::fs::read_to_string(&path).unwrap();
-        let file = SourceFile::new(&name, text.clone());
-
-        let parsed = parse(&text);
-        assert!(
-            parsed.ok(),
-            "{name} failed to parse:\n{}",
-            render_all(&file, &parsed.errors)
-        );
-        let program = norn_hir::check(&parsed.module);
-        assert!(
-            program.ok(),
-            "{name} failed to check:\n{}",
-            render_all(&file, &program.errors)
-        );
-
-        let main = program
-            .program
-            .main
-            .unwrap_or_else(|| panic!("{name} has no `main`"));
-        let nir = lower(&program.program);
+        let (nir, main) = common::build(&path);
         let mut out = Captured::default();
-        let value = run(&nir, main.index(), &mut out)
-            .unwrap_or_else(|trap| panic!("{name} trapped: {trap}"));
+        let value =
+            run(&nir, main, &mut out).unwrap_or_else(|trap| panic!("{name} trapped: {trap}"));
 
         let mut snapshot = format!("=== nir ===\n{}", print(&nir));
         snapshot.push_str("=== output ===\n");
@@ -64,13 +46,8 @@ fn programs_lower_and_run() {
 #[test]
 fn lowering_and_execution_are_deterministic() {
     for path in norn_files(&run_dir()) {
-        let text = std::fs::read_to_string(&path).unwrap();
-        let parsed = parse(&text);
-        let program = norn_hir::check(&parsed.module).program;
-        let main = program.main.expect("a runnable example has a `main`");
-
-        let first = lower(&program);
-        let second = lower(&program);
+        let (first, main) = common::build(&path);
+        let (second, _) = common::build(&path);
         assert_eq!(
             print(&first),
             print(&second),
@@ -80,8 +57,8 @@ fn lowering_and_execution_are_deterministic() {
 
         let mut a = Captured::default();
         let mut b = Captured::default();
-        let one = run(&first, main.index(), &mut a).expect("runs");
-        let two = run(&second, main.index(), &mut b).expect("runs");
+        let one = run(&first, main, &mut a).expect("runs");
+        let two = run(&second, main, &mut b).expect("runs");
         assert_eq!(
             a.lines,
             b.lines,

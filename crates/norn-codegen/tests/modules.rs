@@ -9,13 +9,12 @@ mod common;
 use std::path::Path;
 use std::process::Command;
 
-use norn_hir::ModuleInput;
 use norn_nir::{Captured, Config, Value, execute};
-use norn_syntax::render_all;
 
 #[test]
 fn the_modules_example_matches() {
-    let (nir, main) = build();
+    let entry = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/modules/main.norn");
+    let (nir, main) = common::build(&entry);
 
     let mut out = Captured::default();
     let outcome = execute(&nir, main, &mut out, Config::deterministic());
@@ -47,34 +46,4 @@ fn the_modules_example_matches() {
         "stderr differs between the engines"
     );
     assert_eq!(got.status.code(), Some(0), "exit code differs");
-}
-
-fn build() -> (norn_nir::Program, usize) {
-    let entry = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/modules/main.norn");
-    let mut read = |key: &str| std::fs::read_to_string(key);
-    let loaded = norn_hir::load(&entry.display().to_string(), &mut read).expect("entry reads");
-    assert!(loaded.ok(), "loading the modules example failed");
-    let inputs: Vec<ModuleInput> = loaded
-        .modules
-        .iter()
-        .map(|module| ModuleInput {
-            name: module.name.clone(),
-            key: module.key.clone(),
-            module: &module.module,
-        })
-        .collect();
-    let checked = norn_hir::check_modules(&inputs);
-    assert!(
-        checked.ok(),
-        "checking failed:\n{}",
-        loaded
-            .modules
-            .iter()
-            .zip(&checked.errors)
-            .map(|(module, errors)| render_all(&module.file, errors))
-            .collect::<Vec<_>>()
-            .join("\n")
-    );
-    let main = checked.program.main.expect("the entry module has a `main`");
-    (norn_nir::lower(&checked.program), main.index())
 }

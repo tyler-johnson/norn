@@ -9,11 +9,12 @@
 //!
 //! Set `NORN_BLESS=1` to rewrite the snapshots, then read the diff before committing it.
 
+mod common;
+
 use std::path::{Path, PathBuf};
 
 use norn_nir::nir::NodeKind;
-use norn_nir::{Captured, Config, Program, execute, lower, print, print_graph};
-use norn_syntax::{SourceFile, parse, render_all};
+use norn_nir::{Captured, Config, execute, print, print_graph};
 
 /// Driven by a real socket, so it is checked and lowered here but run in `server.rs`.
 const LIVE: &[&str] = &["server.norn"];
@@ -23,7 +24,7 @@ fn reactors_run_and_trace() {
     let mut checked = 0;
     for path in golden_files() {
         let name = path.file_name().unwrap().to_string_lossy().to_string();
-        let (nir, main) = build(&path);
+        let (nir, main) = common::build(&path);
 
         let mut out = Captured::default();
         let outcome = execute(&nir, main, &mut out, Config::deterministic());
@@ -54,7 +55,7 @@ fn reactors_run_and_trace() {
 #[test]
 fn traces_are_reproducible() {
     for path in golden_files() {
-        let (nir, main) = build(&path);
+        let (nir, main) = common::build(&path);
         let mut first_out = Captured::default();
         let first = execute(&nir, main, &mut first_out, Config::deterministic());
         let mut second_out = Captured::default();
@@ -84,7 +85,7 @@ fn traces_are_reproducible() {
 fn a_turn_updates_each_node_once_and_publishes_once() {
     for path in golden_files() {
         let name = path.file_name().unwrap().to_string_lossy().to_string();
-        let (nir, main) = build(&path);
+        let (nir, main) = common::build(&path);
         let mut out = Captured::default();
         let outcome = execute(&nir, main, &mut out, Config::deterministic());
 
@@ -139,7 +140,7 @@ fn a_turn_updates_each_node_once_and_publishes_once() {
 fn effects_start_after_the_publish_of_their_turn() {
     for path in golden_files() {
         let name = path.file_name().unwrap().to_string_lossy().to_string();
-        let (nir, main) = build(&path);
+        let (nir, main) = common::build(&path);
         let mut out = Captured::default();
         let outcome = execute(&nir, main, &mut out, Config::deterministic());
 
@@ -170,7 +171,7 @@ fn effects_start_after_the_publish_of_their_turn() {
 fn the_plan_is_well_formed() {
     for path in all_files() {
         let name = path.file_name().unwrap().to_string_lossy().to_string();
-        let (nir, _) = build(&path);
+        let (nir, _) = common::build(&path);
         for reactor in &nir.reactors {
             let mut placed = vec![usize::MAX; reactor.nodes.len()];
             for (position, &node) in reactor.order.iter().enumerate() {
@@ -216,7 +217,7 @@ fn the_plan_is_well_formed() {
 fn slots_are_numbered_in_source_order() {
     for path in all_files() {
         let name = path.file_name().unwrap().to_string_lossy().to_string();
-        let (nir, _) = build(&path);
+        let (nir, _) = common::build(&path);
         for reactor in &nir.reactors {
             let mut previous = None;
             for (slot, &node) in reactor.slots.iter().enumerate() {
@@ -247,7 +248,7 @@ fn slots_are_numbered_in_source_order() {
 #[test]
 fn every_node_body_is_pure() {
     for path in all_files() {
-        let (nir, _) = build(&path);
+        let (nir, _) = common::build(&path);
         for reactor in &nir.reactors {
             for node in &reactor.nodes {
                 if let NodeKind::Signal { body } = node.kind {
@@ -264,30 +265,6 @@ fn every_node_body_is_pure() {
 fn is_subsequence(plan: &[usize], order: &[usize]) -> bool {
     let mut cursor = order.iter();
     plan.iter().all(|node| cursor.any(|next| next == node))
-}
-
-fn build(path: &Path) -> (Program, usize) {
-    let name = path.file_name().unwrap().to_string_lossy().to_string();
-    let text = std::fs::read_to_string(path).unwrap();
-    let file = SourceFile::new(&name, text.clone());
-
-    let parsed = parse(&text);
-    assert!(
-        parsed.ok(),
-        "{name} failed to parse:\n{}",
-        render_all(&file, &parsed.errors)
-    );
-    let checked = norn_hir::check(&parsed.module);
-    assert!(
-        checked.ok(),
-        "{name} failed to check:\n{}",
-        render_all(&file, &checked.errors)
-    );
-    let main = checked
-        .program
-        .main
-        .unwrap_or_else(|| panic!("{name} has no `main`"));
-    (lower(&checked.program), main.index())
 }
 
 fn reactors_dir() -> PathBuf {

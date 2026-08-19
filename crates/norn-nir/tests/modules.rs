@@ -4,11 +4,11 @@
 //! subdirectory module — and this test is what pins that the whole graph lowers to one program
 //! whose output is deterministic. Set `NORN_BLESS=1` to rewrite the snapshot, then read the diff.
 
+mod common;
+
 use std::path::{Path, PathBuf};
 
-use norn_hir::ModuleInput;
-use norn_nir::{Captured, Config, execute, lower, print};
-use norn_syntax::render_all;
+use norn_nir::{Captured, Config, execute, print};
 
 #[test]
 fn the_modules_example_loads_lowers_and_runs() {
@@ -42,44 +42,7 @@ fn loading_is_deterministic() {
 
 fn build() -> (norn_nir::Program, usize) {
     let entry = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/modules/main.norn");
-    let mut read = |key: &str| std::fs::read_to_string(key);
-    let loaded = norn_hir::load(&entry.display().to_string(), &mut read).expect("entry reads");
-    assert!(
-        loaded.ok(),
-        "loading failed:\n{}",
-        loaded
-            .errors
-            .iter()
-            .map(|(index, diagnostic)| norn_syntax::render(
-                &loaded.modules[*index].file,
-                diagnostic
-            ))
-            .collect::<Vec<_>>()
-            .join("\n")
-    );
-    let inputs: Vec<ModuleInput> = loaded
-        .modules
-        .iter()
-        .map(|module| ModuleInput {
-            name: module.name.clone(),
-            key: module.key.clone(),
-            module: &module.module,
-        })
-        .collect();
-    let checked = norn_hir::check_modules(&inputs);
-    assert!(
-        checked.ok(),
-        "checking failed:\n{}",
-        loaded
-            .modules
-            .iter()
-            .zip(&checked.errors)
-            .map(|(module, errors)| render_all(&module.file, errors))
-            .collect::<Vec<_>>()
-            .join("\n")
-    );
-    let main = checked.program.main.expect("the entry module has a `main`");
-    (lower(&checked.program), main.index())
+    common::build(&entry)
 }
 
 fn check_snapshot(name: &str, actual: &str) {

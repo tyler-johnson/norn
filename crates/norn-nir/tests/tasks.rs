@@ -7,6 +7,8 @@
 //!
 //! Set `NORN_BLESS=1` to rewrite the snapshots, then read the diff before committing it.
 
+mod common;
+
 use std::path::{Path, PathBuf};
 
 use norn_nir::{Captured, Config, execute, lower, print};
@@ -17,7 +19,7 @@ fn tasks_run_and_trace() {
     let mut checked = 0;
     for path in norn_files(&tasks_dir()) {
         let name = path.file_name().unwrap().to_string_lossy().to_string();
-        let (nir, main) = build(&path);
+        let (nir, main) = common::build(&path);
 
         let mut out = Captured::default();
         let outcome = execute(&nir, main, &mut out, Config::deterministic());
@@ -46,7 +48,7 @@ fn tasks_run_and_trace() {
 #[test]
 fn traces_are_reproducible() {
     for path in norn_files(&tasks_dir()) {
-        let (nir, main) = build(&path);
+        let (nir, main) = common::build(&path);
         let mut first_out = Captured::default();
         let first = execute(&nir, main, &mut first_out, Config::deterministic());
         let mut second_out = Captured::default();
@@ -110,30 +112,6 @@ task fn main() -> ()
         "the child should have been cancelled:\n{}",
         outcome.trace
     );
-}
-
-fn build(path: &Path) -> (norn_nir::Program, usize) {
-    let name = path.file_name().unwrap().to_string_lossy().to_string();
-    let text = std::fs::read_to_string(path).unwrap();
-    let file = SourceFile::new(&name, text.clone());
-
-    let parsed = parse(&text);
-    assert!(
-        parsed.ok(),
-        "{name} failed to parse:\n{}",
-        render_all(&file, &parsed.errors)
-    );
-    let checked = norn_hir::check(&parsed.module);
-    assert!(
-        checked.ok(),
-        "{name} failed to check:\n{}",
-        render_all(&file, &checked.errors)
-    );
-    let main = checked
-        .program
-        .main
-        .unwrap_or_else(|| panic!("{name} has no `main`"));
-    (lower(&checked.program), main.index())
 }
 
 fn tasks_dir() -> PathBuf {
