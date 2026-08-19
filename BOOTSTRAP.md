@@ -522,7 +522,14 @@ Ordered roughly by when it becomes worth doing, not by importance:
     traps, like `bytes_slice`) and `byte` with `bytes_concat` for building. Every proto-std gate
     is met and the lane is live: `std/fmt` (`digits`, `parse_int`) is the first embedded module,
     one implementation executed by both engines with the differential oracle covering it for
-    free, and the six hand-written `digits` copies the examples grew are gone. The ordering
+    free, and the six hand-written `digits` copies the examples grew are gone. `std/time` joined
+    it: `wait(ms)` is `sleep` wrapped in a task fn — the named clock effect `after` requires,
+    since `after` takes only named task fns to keep a reactor's effect vocabulary explicit — and
+    `seconds`/`minutes` are plain multiplications until the `2.seconds` method spelling exists
+    (`delay` stays reserved for the FRP signal operator, which is why the name is `wait`).
+    Recorded absences: `timeout` waits for a race/select primitive that does not exist — scopes
+    join everything — until a real consumer, likely the std/http client, drives it; `now()` is
+    deliberately absent, absolute-time reads breaking virtual-clock determinism. The ordering
     ahead: `bytes_text` dissolves next — the first builtin deleted from the table and
     reimplemented in Norn, establishing the delete-and-import migration, atomic by construction
     since builtins are reserved names — then `std/http` ports `norn-rt`'s pure `parse_head` and
@@ -532,8 +539,9 @@ Ordered roughly by when it becomes worth doing, not by importance:
     Norn struct, responding is writing bytes back, and the connection becomes the traced,
     scope-closed seam — then `flow_next` with `pipe_to` in Norn, the deferred intrinsic designed
     by its first real consumer. (`examples/tasks.norn`'s aspirational `std/fs`/`std/http`/
-    `std/json`/`std/time` imports stay parse-only; checked, they would now diagnose as unknown
-    std modules, and they stand until those modules exist.)
+    `std/json` imports stay parse-only; checked, they would now diagnose as unknown std modules,
+    and they stand until those modules exist. Its `std/time` line half-landed: `seconds` is real,
+    `mebibytes` is not time's to provide.)
     The general std — collections, `Flow<T>` beyond `Bytes`, and the method spelling that turns
     `request_header(&req, h)` into `req.header(h)` — waits for item 7's generics and traits.
     What never dissolves is a small intrinsic layer at the syscall boundary, which is also where
