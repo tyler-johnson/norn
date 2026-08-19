@@ -504,9 +504,11 @@ Ordered roughly by when it becomes worth doing, not by importance:
 
     The decision this entry records, made after M6: the standard library follows Rust's model,
     not Go's. Users should think in terms of libraries, so the builtin table is scaffolding with
-    unstable spellings — 27 nameable as of the byte primitives, plus the syntax-carried `bytes_at`
-    behind `data[i]`, each implemented twice (an interpreter arm and its
-    prelude mirror, trap text as ABI) and each nameable one a name no user function may take. Go keeps its
+    unstable spellings — 27 nameable and already churning: `bytes_text` has been deleted and
+    `text_unchecked`, the table's first `_unchecked` trust boundary, added in its place — plus
+    the syntax-carried `bytes_at` behind `data[i]`, each implemented twice (an interpreter arm
+    and its prelude mirror, trap text as ABI) and each nameable one a name no user function may
+    take. Go keeps its
     builtins forever and affords short names by keeping the set near fifteen and shadowable;
     Norn's set is bigger, growing, and reserved, so staying on that road means either squatting
     on `read`/`open`/`close` or weakening the closed vocabulary that `uses` checking leans on.
@@ -540,10 +542,16 @@ Ordered roughly by when it becomes worth doing, not by importance:
     (`seconds(2)` reads as "2 seconds", later the literal-like `2.seconds`); effects stay bare
     imperative verbs (`wait`, `send`), which is what makes a reactor's `after` list read as a
     list of verbs; fallibility lives in the type, never the name (`to_int(s) -> Option<I64>`, no
-    `try_`), with `_unchecked` reserved for the intrinsic layer underneath. The ordering
-    ahead: `bytes_text` dissolves next — the first builtin deleted from the table and
-    reimplemented in Norn, establishing the delete-and-import migration, atomic by construction
-    since builtins are reserved names — then `std/http` ports `norn-rt`'s pure `parse_head` and
+    `try_`), with `_unchecked` reserved for the intrinsic layer underneath.
+    The first dissolution is done: `bytes_text` was deleted from the table and reimplemented as
+    `std/bytes`'s `to_string(Bytes) -> Option<String>` — a UTF-8 validator written in Norn over
+    the trusting `text_unchecked` intrinsic, which traps on invalid input like `data[i]` out of
+    range. That established the delete-and-import migration every later dissolution follows:
+    delete the name, flip the users to imports, one commit, atomic by construction since
+    builtins are reserved names. (One temporary wrinkle: `import * as bytes` is refused while
+    `bytes` itself remains a builtin name, so `std/bytes` is imported by named items; the
+    namespace frees itself the day the `bytes` builtin dissolves.) The ordering
+    ahead: `std/http` ports `norn-rt`'s pure `parse_head` and
     response rendering, which retypes `tcp_read` to yield `Bytes` (breaking freely: nobody is
     using the language, and syscalls speak bytes) and dissolves the `Request` *resource* the
     honest way — std/http reads bytes from a connection and parses the head into an ordinary
