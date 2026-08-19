@@ -1,0 +1,47 @@
+error: `T` cannot declare a bound here
+  --> traits.norn:22:16
+   |
+22 | struct Wrapper<T: Eq> {
+   |                ^^^^^ bounds live on functions
+   = note: a type holds values of any shape; the function that operates on them is where `T: Eq` belongs
+
+error: unknown trait `Prettify`
+  --> traits.norn:27:12
+   |
+27 | fn show<T: Prettify>(value: T) -> String {
+   |            ^^^^^^^^
+
+error: none of `T`'s bounds provides `label`
+  --> traits.norn:33:11
+   |
+33 |     value.label()
+   |           ^^^^^ not in the bounds
+   = note: a method on `T` must come from a declared bound; here that is `Display`
+
+error: `Eq` cannot be implemented by hand
+  --> traits.norn:37:6
+   |
+37 | impl Eq for Post {}
+   |      ^^ compiler-defined
+   = note: exactly `I64`, `F64`, `Bool`, `String`, and `Bytes` are `Eq`; derived equality for your own types arrives with BOOTSTRAP.md §8 item 9
+
+error: `Display` is already implemented for `Post`
+  --> traits.norn:46:1
+   |
+46 | impl Display for Post {
+   | ^^^^^^^^^^^^^^^^^^^^^^^ second impl
+   = note: one impl per trait and type, program-wide; the other is earlier in this file
+
+error: `impl Label for Post` does not implement `label`
+  --> traits.norn:53:1
+   |
+53 | impl Label for Post {}
+   | ^^^^^^^^^^^^^^^^^^^^^^ incomplete impl
+   = note: a type implements all of a trait or none of it
+
+error: `contains` requires `T: Eq`, and `Post` is not `Eq`
+  --> traits.norn:56:13
+   |
+56 |     let a = contains(Post(id: 1), Post(id: 1))
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `T` is `Post` here
+   = note: `Eq` is compiler-defined: exactly `I64`, `F64`, `Bool`, `String`, and `Bytes` satisfy it until derived equality lands (BOOTSTRAP.md §8 item 9)

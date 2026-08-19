@@ -18,6 +18,10 @@ use super::*;
 pub(super) struct TraitId(pub(super) u32);
 
 impl TraitId {
+    /// The seeded marker trait: method-less, compiler-defined, satisfied by exactly the scalar
+    /// types until derived equality lands with item 9.
+    pub(super) const EQ: TraitId = TraitId(0);
+
     pub(super) fn index(self) -> usize {
         self.0 as usize
     }
@@ -178,6 +182,14 @@ impl Checker {
             let Some(trait_id) = self.resolve_trait(&decl.trait_path) else {
                 continue;
             };
+            if trait_id == TraitId::EQ {
+                self.push(
+                    Diagnostic::new(decl.trait_path.span, "`Eq` cannot be implemented by hand")
+                        .label("compiler-defined")
+                        .note("exactly `I64`, `F64`, `Bool`, `String`, and `Bytes` are `Eq`; derived equality for your own types arrives with BOOTSTRAP.md §8 item 9"),
+                );
+                continue;
+            }
             let receiver = self.resolve_ty(&decl.receiver);
             if receiver.is_error() {
                 continue;
@@ -353,6 +365,7 @@ impl Checker {
                 }
                 let id = FnId(self.program.fns.len() as u32);
                 self.fn_owner.push(self.current);
+                self.fn_bounds.push(Vec::new());
                 self.signatures.push((params.clone(), ret.clone()));
                 self.program.fns.push(FnDef {
                     name: format!("{trait_name}.{name} for {receiver_name}"),
@@ -435,8 +448,8 @@ impl Checker {
             match what {
                 Some(what) => self.push(
                     Diagnostic::new(head.span, format!("`{}` is {what}, not a trait", head.name))
-                        .label("a type cannot be implemented")
-                        .note("`impl` names the trait first and the type after `for`"),
+                        .label("a type cannot stand here")
+                        .note("a bound (`T: Display`) and an `impl` header both name a trait; a type is what implements one"),
                 ),
                 None => self.error(head.span, format!("unknown trait `{}`", head.name)),
             }
@@ -531,12 +544,79 @@ impl Checker {
             }
             return self.error_expr(span);
         }
-        if let Ty::Param { name, .. } = receiver.ty.owned() {
-            let diagnostic = Diagnostic::new(span, format!("a bare `{name}` has no methods"))
-                .label(format!("`{}` called on a type parameter", method.name));
-            let diagnostic = self.with_opaque_note(diagnostic, &receiver.ty);
-            self.push(diagnostic);
-            return self.error_expr(span);
+        // A type parameter's methods come from its declared bounds — propagation by declaration,
+        // never a search of the impls, because inside the template nothing concrete exists to
+        // search. The call becomes a symbolic stub in the fn-instance registry; monomorphization
+        // resolves it per instance through `find_impl_method`.
+        if let Ty::Param { index, name } = &receiver.ty {
+            let bounds = self
+                .bounds_in_scope
+                .get(*index as usize)
+                .cloned()
+                .unwrap_or_default();
+            if bounds.is_empty() {
+                let name = name.clone();
+                let diagnostic = Diagnostic::new(span, format!("a bare `{name}` has no methods"))
+                    .label(format!("`{}` called on a type parameter", method.name));
+                let diagnostic = self.with_opaque_note(diagnostic, &receiver.ty);
+                self.push(diagnostic);
+                return self.error_expr(span);
+            }
+            let name = name.clone();
+            let candidates: Vec<TraitId> = bounds
+                .iter()
+                .copied()
+                .filter(|id| {
+                    self.traits[id.index()]
+                        .methods
+                        .iter()
+                        .any(|m| m.name == method.name)
+                })
+                .collect();
+            return match candidates.as_slice() {
+                [] => {
+                    let roster: Vec<String> = bounds
+                        .iter()
+                        .map(|id| format!("`{}`", self.traits[id.index()].name))
+                        .collect();
+                    self.push(
+                        Diagnostic::new(
+                            method.span,
+                            format!("none of `{name}`'s bounds provides `{}`", method.name),
+                        )
+                        .label("not in the bounds")
+                        .note(format!(
+                            "a method on `{name}` must come from a declared bound; here that is {}",
+                            roster.join(", ")
+                        )),
+                    );
+                    self.error_expr(span)
+                }
+                [trait_id] => {
+                    let stub =
+                        self.request_trait_call(*trait_id, &method.name, receiver.ty.clone(), span);
+                    let display = format!("{name}.{}", method.name);
+                    self.call_method(stub, &display, receiver, args, span)
+                }
+                _ => {
+                    let mut diagnostic = Diagnostic::new(
+                        method.span,
+                        format!(
+                            "more than one of `{name}`'s bounds provides `{}`",
+                            method.name
+                        ),
+                    )
+                    .label("ambiguous method");
+                    for trait_id in &candidates {
+                        diagnostic = diagnostic.note(format!(
+                            "`{}` provides one",
+                            self.traits[trait_id.index()].name
+                        ));
+                    }
+                    self.push(diagnostic);
+                    self.error_expr(span)
+                }
+            };
         }
 
         // The scan: every impl in the program, declaration order, keyed by the receiver's type.
@@ -606,6 +686,25 @@ impl Checker {
                 self.error_expr(span)
             }
         }
+    }
+
+    /// The impl-provided function behind (trait, method, receiver), if the pairing exists —
+    /// what a symbolic trait call resolves to once monomorphization makes its receiver concrete.
+    pub(super) fn find_impl_method(
+        &self,
+        trait_id: TraitId,
+        method: &str,
+        receiver: &Ty,
+    ) -> Option<FnId> {
+        self.impls
+            .iter()
+            .filter(|imp| imp.trait_id == trait_id && imp.receiver == *receiver)
+            .find_map(|imp| {
+                imp.methods
+                    .iter()
+                    .find_map(|(name, id)| (name == method).then_some(*id))
+                    .flatten()
+            })
     }
 
     /// The rewrite that makes a method a plain call: the receiver becomes the first argument,

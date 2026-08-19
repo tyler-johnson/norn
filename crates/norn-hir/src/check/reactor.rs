@@ -660,6 +660,7 @@ impl Checker {
         self.loops = Vec::new();
         // Reactors declare no type parameters, so nothing generic is ever in scope here.
         self.type_params_in_scope.clear();
+        self.bounds_in_scope.clear();
         self.reactor = Some(id);
         self.in_handler = handler;
         // A node body sees only what it depends on; a handler sees state but never a signal. Both

@@ -261,6 +261,50 @@ reactor Journal() {
     );
 }
 
+/// Bounds open capabilities on an opaque `T`: `==` through the seeded `Eq`, a method through a
+/// declared trait, and both together — including the propagation rule, where a template
+/// satisfies a callee's bound by declaring it rather than by anything concrete.
+#[test]
+fn bounds_open_capabilities() {
+    accepted(
+        "Eq and Display bounds compose, and propagate by declaration",
+        "\
+trait Display {
+    fn to_string(value: Self) -> String
+}
+
+impl Display for I64 {
+    fn to_string(value: Self) -> String {
+        \"int\"
+    }
+}
+
+impl Display for Bool {
+    fn to_string(value: Self) -> String {
+        \"bool\"
+    }
+}
+
+fn describe<T: Eq + Display>(value: T, fallback: T) -> String {
+    if value == fallback {
+        \"fallback\"
+    } else {
+        value.to_string()
+    }
+}
+
+fn shout<T: Eq + Display>(value: T, fallback: T) -> String {
+    describe(value, fallback) + \"!\"
+}
+
+fn main() {
+    print(describe(7, 0))
+    print(shout(true, false))
+}
+",
+    );
+}
+
 /// Traits land mid-wave, ahead of std/list's `join<T: Display>` dogfood, so the acceptance side
 /// is pinned here: both call spellings, conformance through `Self`, and a method beside a free
 /// function of the same name.

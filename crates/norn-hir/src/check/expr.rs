@@ -837,6 +837,17 @@ impl Checker {
                 Ty::I64 | Ty::F64 | Ty::Bool | Ty::Str | Ty::Bytes => {
                     Some((if op == A::Eq { BinOp::Eq } else { BinOp::Ne }, Ty::Bool))
                 }
+                // `T: Eq` opens `==` inside the template. Both engines already compare values
+                // structurally, and only the scalar types satisfy `Eq`, so the instances this
+                // monomorphizes into are exactly the arms above.
+                Ty::Param { index, .. }
+                    if self
+                        .bounds_in_scope
+                        .get(*index as usize)
+                        .is_some_and(|bounds| bounds.contains(&TraitId::EQ)) =>
+                {
+                    Some((if op == A::Eq { BinOp::Eq } else { BinOp::Ne }, Ty::Bool))
+                }
                 _ => None,
             },
             A::Lt | A::Le | A::Gt | A::Ge => match operand {

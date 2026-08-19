@@ -1,0 +1,57 @@
+// Traits and bounds: what conformance, coherence, and the instantiation gate refuse. The
+// resolver's refusals live in methods.norn; these are the declaration-side rules.
+
+trait Display {
+    fn to_string(value: Self) -> String
+}
+
+trait Label {
+    fn label(value: Self) -> String
+}
+
+struct Post {
+    id: I64
+}
+
+// The gate's flagship: `Post` does not satisfy the bound the call needs.
+fn contains<T: Eq>(items: T, wanted: T) -> Bool {
+    items == wanted
+}
+
+// Bounds live on functions alone: a type holds anything, operations need capabilities.
+struct Wrapper<T: Eq> {
+    value: T
+}
+
+// A bound names a trait, and no trait by this name exists.
+fn show<T: Prettify>(value: T) -> String {
+    "?"
+}
+
+// The declared bounds do not provide the method that was called.
+fn speak<T: Display>(value: T) -> String {
+    value.label()
+}
+
+// The seeded marker cannot be implemented by hand.
+impl Eq for Post {}
+
+impl Display for Post {
+    fn to_string(value: Self) -> String {
+        "post"
+    }
+}
+
+// One impl per trait and type, program-wide.
+impl Display for Post {
+    fn to_string(value: Self) -> String {
+        "again"
+    }
+}
+
+// An impl provides all of the trait or none of it.
+impl Label for Post {}
+
+fn main() {
+    let a = contains(Post(id: 1), Post(id: 1))
+}

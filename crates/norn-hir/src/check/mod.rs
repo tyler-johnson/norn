@@ -361,6 +361,14 @@ struct Checker {
     /// What `Self` names where the current signature or body sits: the reserved parameter slot
     /// inside a trait declaration, the receiver type inside an impl, nothing anywhere else.
     self_ty: Option<Ty>,
+    /// Per function, per type parameter, the bounds it declared — parallel to `program.fns`,
+    /// pushed in lockstep at every site that appends a function. Only declared functions carry
+    /// any: instances were gated at instantiation, and nothing else can spell a bound.
+    fn_bounds: Vec<Vec<Vec<TraitId>>>,
+    /// The declared bounds of `type_params_in_scope`, parallel to it — what a bound on a `T`
+    /// argument is satisfied *by* inside a template body: propagation by declaration, never
+    /// search.
+    bounds_in_scope: Vec<Vec<TraitId>>,
     /// The module that declared each struct and enum, parallel to the program tables — what the
     /// orphan rule consults. Seeded enums and instances of another module's template carry their
     /// owner's index; the seeded three have no module and carry `usize::MAX`.

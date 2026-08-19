@@ -50,6 +50,11 @@ impl Checker {
         self.ns[self.current]
             .types
             .insert("Result".into(), TypeName::Enum(EnumId::RESULT));
+        // The seeded marker trait, nameable in every module without an import the way the
+        // builtin types are — and shadowable by nothing, because declaring an `Eq` collides here.
+        self.ns[self.current]
+            .traits
+            .insert("Eq".into(), TraitId::EQ);
 
         for item in &module.items {
             let (name, span) = match item {
@@ -101,6 +106,7 @@ impl Checker {
                 ast::Item::Struct(decl) => {
                     let id = StructId(self.program.structs.len() as u32);
                     let type_params = self.type_param_names(&decl.type_params);
+                    self.refuse_type_param_bounds(&decl.type_params);
                     self.struct_owner.push(self.current);
                     self.program.structs.push(StructDef {
                         name: decl.name.name.clone(),
@@ -113,6 +119,7 @@ impl Checker {
                 ast::Item::Enum(decl) => {
                     let id = EnumId(self.program.enums.len() as u32);
                     let type_params = self.type_param_names(&decl.type_params);
+                    self.refuse_type_param_bounds(&decl.type_params);
                     self.enum_owner.push(self.current);
                     self.program.enums.push(EnumDef {
                         name: decl.name.name.clone(),
@@ -151,11 +158,12 @@ impl Checker {
         }
     }
 
-    /// The declared type parameter names, duplicates refused: two `T`s would be one hole with
-    /// two spellings.
-    fn type_param_names(&mut self, params: &[ast::TypeParam]) -> Vec<String> {
-        let mut names: Vec<String> = Vec::new();
-        for param in params {
+    /// The declared type parameters that survive the duplicate and `Self` refusals — indices
+    /// into the written list, so a caller can read names and bounds off the same survivors.
+    /// Two `T`s would be one hole with two spellings; a `Self` would shadow the reserved name.
+    fn kept_type_params(&mut self, params: &[ast::TypeParam]) -> Vec<usize> {
+        let mut kept: Vec<usize> = Vec::new();
+        for (index, param) in params.iter().enumerate() {
             if param.name.name == "Self" {
                 self.push(
                     Diagnostic::new(param.name.span, "`Self` cannot be a type parameter")
@@ -164,7 +172,10 @@ impl Checker {
                 );
                 continue;
             }
-            if names.contains(&param.name.name) {
+            if kept
+                .iter()
+                .any(|&at| params[at].name.name == param.name.name)
+            {
                 self.push(
                     Diagnostic::new(
                         param.name.span,
@@ -174,9 +185,34 @@ impl Checker {
                 );
                 continue;
             }
-            names.push(param.name.name.clone());
+            kept.push(index);
         }
-        names
+        kept
+    }
+
+    fn type_param_names(&mut self, params: &[ast::TypeParam]) -> Vec<String> {
+        self.kept_type_params(params)
+            .into_iter()
+            .map(|at| params[at].name.name.clone())
+            .collect()
+    }
+
+    /// Bounds are meaningful on a function's parameters alone: a type stores anything you can
+    /// name, and it is operations that need capabilities, so a struct or enum refuses them here.
+    fn refuse_type_param_bounds(&mut self, params: &[ast::TypeParam]) {
+        for param in params {
+            if param.bounds.is_empty() {
+                continue;
+            }
+            self.push(
+                Diagnostic::new(
+                    param.span,
+                    format!("`{}` cannot declare a bound here", param.name.name),
+                )
+                .label("bounds live on functions")
+                .note("a type holds values of any shape; the function that operates on them is where `T: Eq` belongs"),
+            );
+        }
     }
 
     /// Pass two: fill in field and payload types, each declaration's own type parameters in
@@ -322,7 +358,27 @@ impl Checker {
                 );
                 continue;
             }
-            let type_params = self.type_param_names(&decl.type_params);
+            let kept = self.kept_type_params(&decl.type_params);
+            let type_params: Vec<String> = kept
+                .iter()
+                .map(|&at| decl.type_params[at].name.name.clone())
+                .collect();
+            // The declared bounds, resolved beside the names they constrain. A written duplicate
+            // (`T: Eq + Eq`) folds silently, the way a duplicate capability does.
+            let bounds: Vec<Vec<TraitId>> = kept
+                .iter()
+                .map(|&at| {
+                    let mut resolved: Vec<TraitId> = Vec::new();
+                    for path in &decl.type_params[at].bounds {
+                        if let Some(id) = self.resolve_trait(path)
+                            && !resolved.contains(&id)
+                        {
+                            resolved.push(id);
+                        }
+                    }
+                    resolved
+                })
+                .collect();
             self.type_params_in_scope = type_params.clone();
             let params: Vec<(String, Ty)> = decl
                 .params
@@ -335,6 +391,7 @@ impl Checker {
             let id = FnId(self.program.fns.len() as u32);
             of_item[index] = Some(id);
             self.fn_owner.push(self.current);
+            self.fn_bounds.push(bounds);
             self.ns[self.current].fns.insert(decl.name.name.clone(), id);
             self.signatures.push((params.clone(), ret.clone()));
             self.program.fns.push(FnDef {
@@ -460,13 +517,16 @@ impl Checker {
         self.scope_depth = 0;
         self.loops = Vec::new();
         // A template body is checked exactly once, its parameters opaque: this scope is what
-        // lets a `let` annotation inside it spell `List<T>`.
+        // lets a `let` annotation inside it spell `List<T>`, and the bounds beside it are what
+        // a `T: Eq` argument or a method on `T: Display` is satisfied by.
         self.type_params_in_scope = self.program.fns[id.index()].type_params.clone();
+        self.bounds_in_scope = self.fn_bounds[id.index()].clone();
         for ((name, ty), param) in params.iter().zip(&decl.params) {
             self.declare_param(name.clone(), ty.clone(), param.name.span);
         }
         let body = self.check_block(&decl.body, Some(&ret), decl.body.span);
         self.type_params_in_scope.clear();
+        self.bounds_in_scope.clear();
         let locals = std::mem::take(&mut self.locals);
         self.program.fns[id.index()].locals = locals;
         self.program.fns[id.index()].body = body;
@@ -507,6 +567,7 @@ impl Checker {
     pub(super) fn declare_lifted(&mut self, name: String, span: Span) -> FnId {
         let id = FnId(self.program.fns.len() as u32);
         self.fn_owner.push(self.current);
+        self.fn_bounds.push(Vec::new());
         self.signatures.push((Vec::new(), Ty::Error));
         self.program.fns.push(FnDef {
             name,

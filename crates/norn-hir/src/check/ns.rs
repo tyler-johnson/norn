@@ -114,9 +114,18 @@ impl Checker {
             loops: Vec::new(),
             generics: Generics::new(),
             type_params_in_scope: Vec::new(),
-            traits: Vec::new(),
+            // `Eq` is seeded the way Option and Result are: a compiler-defined marker with no
+            // methods, satisfied by exactly the scalar types, so `==` on a bounded `T` costs
+            // the runtime nothing it was not already doing.
+            traits: vec![TraitDef {
+                name: "Eq".into(),
+                module: usize::MAX,
+                methods: Vec::new(),
+            }],
             impls: Vec::new(),
             self_ty: None,
+            fn_bounds: Vec::new(),
+            bounds_in_scope: Vec::new(),
             struct_owner: Vec::new(),
             // Parallel to the three seeded enums, which no module declared.
             enum_owner: vec![usize::MAX; 3],
@@ -443,6 +452,11 @@ impl Checker {
         }
         if self.ns[self.current].types.contains_key(local) {
             return Some("a built-in type");
+        }
+        // Declared traits are caught by the decls check above; what this guards is the seeded
+        // `Eq`, which no file declares.
+        if self.ns[self.current].traits.contains_key(local) {
+            return Some("a built-in trait");
         }
         None
     }

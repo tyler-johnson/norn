@@ -55,15 +55,29 @@ pub(super) struct FnInstance {
     depth: usize,
 }
 
+/// A method call on a bounded type parameter: `value.to_string()` where `value: T` and
+/// `T: Display`. The stub is a symbolic function — a real id every call site can hold, never
+/// executed itself — and monomorphization resolves it to the impl's function once the receiver
+/// is concrete. Neutered with the templates.
+pub(super) struct TraitCallStub {
+    trait_id: TraitId,
+    method: String,
+    /// Always mentions a type parameter: a concrete receiver resolves at the call site instead.
+    receiver: Ty,
+    pub(super) id: FnId,
+}
+
 /// The checker-side registry of generic instantiations.
 pub(super) struct Generics {
     struct_instances: Vec<StructInstance>,
     enum_instances: Vec<EnumInstance>,
     fn_instances: Vec<FnInstance>,
+    trait_calls: Vec<TraitCallStub>,
     /// Instance id → registry index, the reverse direction of the Vecs above. Keyed lookups only.
     struct_meaning: HashMap<StructId, usize>,
     enum_meaning: HashMap<EnumId, usize>,
     fn_meaning: HashMap<FnId, usize>,
+    trait_call_meaning: HashMap<FnId, usize>,
     /// Pending fills, drained FIFO by `drain_type_fills` through `fill_cursor`.
     fill_queue: Vec<Fill>,
     fill_cursor: usize,
@@ -84,9 +98,11 @@ impl Generics {
             struct_instances: Vec::new(),
             enum_instances: Vec::new(),
             fn_instances: Vec::new(),
+            trait_calls: Vec::new(),
             struct_meaning: HashMap::new(),
             enum_meaning: HashMap::new(),
             fn_meaning: HashMap::new(),
+            trait_call_meaning: HashMap::new(),
             fill_queue: Vec::new(),
             fill_cursor: 0,
             mono_worklist: Vec::new(),
@@ -775,12 +791,131 @@ impl Checker {
         }
     }
 
-    /// The instantiation gate: asked before a generic function's settled arguments mint an
-    /// instance. A no-op until bounds land with traits — the seam sits here so the caller does
-    /// not change again. Bounds live on functions alone (struct and enum parameters may not
-    /// declare them), which is why type instantiation has no twin of this.
-    #[allow(unused_variables, clippy::unused_self)]
-    pub(super) fn check_type_param_bounds(&mut self, template: FnId, args: &[Ty], at: Span) {}
+    /// The instantiation gate: asked once a generic function's arguments settle, before the
+    /// instance is minted. Bounds live on functions alone (struct and enum parameters may not
+    /// declare them), which is why type instantiation has no twin of this. Monomorphization asks
+    /// nothing either: a symbolic request inside a template was gated here at the template's own
+    /// parameters, and the concrete arguments that later substitute them passed their own gate.
+    pub(super) fn check_type_param_bounds(&mut self, template: FnId, args: &[Ty], at: Span) {
+        let bounds = self.fn_bounds[template.index()].clone();
+        if bounds.iter().all(Vec::is_empty) {
+            return;
+        }
+        let display = self.program.fns[template.index()].name.clone();
+        let params = self.program.fns[template.index()].type_params.clone();
+        for (index, arg) in args.iter().enumerate() {
+            for &bound in bounds.get(index).into_iter().flatten() {
+                if self.trait_satisfied(bound, arg) {
+                    continue;
+                }
+                let trait_name = self.traits[bound.index()].name.clone();
+                let ty = self.program.ty_name(arg);
+                let param = &params[index];
+                let diagnostic = Diagnostic::new(
+                    at,
+                    format!(
+                        "`{display}` requires `{param}: {trait_name}`, and `{ty}` is not `{trait_name}`"
+                    ),
+                )
+                .label(format!("`{param}` is `{ty}` here"));
+                let diagnostic = if bound == TraitId::EQ {
+                    diagnostic.note("`Eq` is compiler-defined: exactly `I64`, `F64`, `Bool`, `String`, and `Bytes` satisfy it until derived equality lands (BOOTSTRAP.md §8 item 9)")
+                } else {
+                    diagnostic.note(format!(
+                        "write `impl {trait_name} for {ty} {{ … }}` in the trait's module or the type's"
+                    ))
+                };
+                self.push(diagnostic);
+            }
+        }
+    }
+
+    /// Whether a type satisfies a bound. A parameter satisfies it by declaring it — propagation
+    /// by declaration, never search — `Eq` by membership in the closed scalar set, and anything
+    /// else by an impl existing somewhere; receiver-keyed, so no import is consulted.
+    fn trait_satisfied(&self, bound: TraitId, ty: &Ty) -> bool {
+        match ty {
+            Ty::Error => true,
+            Ty::Param { index, .. } => self
+                .bounds_in_scope
+                .get(*index as usize)
+                .is_some_and(|declared| declared.contains(&bound)),
+            _ if bound == TraitId::EQ => {
+                matches!(ty, Ty::I64 | Ty::F64 | Ty::Bool | Ty::Str | Ty::Bytes)
+            }
+            _ => self
+                .impls
+                .iter()
+                .any(|imp| imp.trait_id == bound && imp.receiver == *ty),
+        }
+    }
+
+    /// The stub a method call on a bounded `T` compiles to: a symbolic function with the trait
+    /// method's signature under `Self := T`, deduplicated on (trait, method, receiver) so every
+    /// such call in every template shares one id. Resolved per instance by `mono_callee`.
+    pub(super) fn request_trait_call(
+        &mut self,
+        trait_id: TraitId,
+        method: &str,
+        receiver: Ty,
+        at: Span,
+    ) -> FnId {
+        if let Some(found) = self.generics.trait_calls.iter().find(|stub| {
+            stub.trait_id == trait_id && stub.method == method && stub.receiver == receiver
+        }) {
+            return found.id;
+        }
+        let position = self.traits[trait_id.index()]
+            .methods
+            .iter()
+            .position(|m| m.name == method)
+            .expect("the caller found the method in this trait");
+        let (method_params, method_ret) = {
+            let m = &self.traits[trait_id.index()].methods[position];
+            (m.params.clone(), m.ret.clone())
+        };
+        let params: Vec<(String, Ty)> = method_params
+            .into_iter()
+            .map(|(name, ty)| {
+                let ty = self.subst(&ty, std::slice::from_ref(&receiver), at, 0);
+                (name, ty)
+            })
+            .collect();
+        let ret = self.subst(&method_ret, std::slice::from_ref(&receiver), at, 0);
+        let name = format!(
+            "{}.{method} for {}",
+            self.traits[trait_id.index()].name,
+            self.program.ty_name(&receiver)
+        );
+        let id = FnId(self.program.fns.len() as u32);
+        self.fn_owner.push(self.current);
+        self.fn_bounds.push(Vec::new());
+        self.signatures.push((params.clone(), ret.clone()));
+        self.program.fns.push(FnDef {
+            name,
+            type_params: Vec::new(),
+            is_task: false,
+            uses: Vec::new(),
+            params: params.len(),
+            locals: Vec::new(),
+            ret,
+            body: Expr {
+                kind: ExprKind::Error,
+                ty: Ty::Error,
+                span: at,
+            },
+            span: at,
+        });
+        let index = self.generics.trait_calls.len();
+        self.generics.trait_calls.push(TraitCallStub {
+            trait_id,
+            method: method.to_string(),
+            receiver,
+            id,
+        });
+        self.generics.trait_call_meaning.insert(id, index);
+        id
+    }
 
     // ---------------------------------------------------------------- generic functions
 
@@ -899,8 +1034,10 @@ impl Checker {
         };
         let id = FnId(self.program.fns.len() as u32);
         // Move errors in an instance body carry the template's spans, so they render against the
-        // template's file.
+        // template's file. An instance carries no bounds of its own: they were checked when the
+        // arguments settled.
         self.fn_owner.push(self.fn_owner[template.index()]);
+        self.fn_bounds.push(Vec::new());
         self.signatures.push((params.clone(), ret.clone()));
         self.program.fns.push(FnDef {
             name,
@@ -1133,6 +1270,19 @@ impl Checker {
     /// body resolves at this instance's arguments, which is how a generic calling a generic
     /// composes. Requests made here run one level deeper — the polymorphic-recursion fuse.
     fn mono_callee(&mut self, callee: FnId, cx: &MonoCx) -> FnId {
+        // A trait-call stub resolves through the impls once its receiver is concrete. The gate
+        // proved the bound when this instance's arguments settled, so the impl exists; a miss
+        // can only follow an already-reported failure, and the neutered stub is inert to keep.
+        if let Some(&index) = self.generics.trait_call_meaning.get(&callee) {
+            let (trait_id, method, receiver) = {
+                let stub = &self.generics.trait_calls[index];
+                (stub.trait_id, stub.method.clone(), stub.receiver.clone())
+            };
+            let receiver = self.subst(&receiver, &cx.args, cx.at, 0);
+            return self
+                .find_impl_method(trait_id, &method, &receiver)
+                .unwrap_or(callee);
+        }
         match self.fn_base(callee) {
             None => callee,
             Some((template, base_args)) => {
@@ -1349,6 +1499,11 @@ impl Checker {
             if instance.symbolic {
                 inert.push(instance.id);
             }
+        }
+        // Trait-call stubs are symbolic by construction: every executable call site was remapped
+        // to an impl's function during the drain.
+        for stub in &self.generics.trait_calls {
+            inert.push(stub.id);
         }
         for id in inert {
             let def = &mut self.program.fns[id.index()];
