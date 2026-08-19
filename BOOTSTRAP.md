@@ -332,7 +332,11 @@ Generated code keeps the interpreter's value representation: one dynamically tag
 aggregates behind `Rc` with copy-on-write. NIR carries no types — nothing after HIR ever did — so a
 typed layout would have meant threading `hir::Ty` through lowering first, and the done-when asks
 for byte-identical traces, which the shared representation delivers by construction. Typed layout
-is now the entry fee for §8's item 6 rather than a side effect of this milestone.
+is now the entry fee for §8's item 6 rather than a side effect of this milestone. (The fee was
+paid 2026-08-19, as item 6a: NIR is typed end to end and the backend generates typed values, this
+milestone's dynamic representation surviving only as the boundary enum at the runtime seams — and
+the traces stayed byte-identical by comparison, the differential oracle refereeing, rather than by
+construction.)
 
 The backend is a printer with a prelude. `norn-codegen` emits a prelude ported from the
 interpreter item for item — trap text included, because trap messages interpolate `{:?}` of the
@@ -467,13 +471,45 @@ Ordered roughly by when it becomes worth doing, not by importance:
    Partial moves wait here too: M4 rejects moving out of a field rather than tracking it, because a
    half-moved struct has no name in this language and `match` already takes one apart.
 6. **Move checking for ordinary values, and `Shared<T>`.** Both wait on a typed value
-   representation. M5's backend deliberately kept the interpreter's dynamically tagged, `Rc`-shared
-   values, so copying still costs a reference-count bump; the backend that gives values layout is
-   where the cost first becomes measurable, and where these two stop being inert. Zero-copy `Bytes`
-   slices wait here too — M6's `bytes_slice` copies, and so does the proto-std gate's
-   `bytes_concat`, because a clone-everything representation cannot make sharing observable — and
-   so does `+` on `Bytes`, which is only worth having once concatenation has a cost model to
-   answer to.
+   representation — and the representation landed first, as its own wave: **6a, typed NIR and a
+   typed backend (2026-08-19), zero surface change.** The item decomposes as 6a (landed), 6b
+   (`Shared<T>`, `Bytes` views, `+` on `Bytes`), and 6c (ordinary-value moves, taking item 5's
+   read half with them).
+
+   What 6a did. NIR carries `hir::Ty` end to end — `Function.tys` in lockstep with `locals`, plus
+   `ret` and an `inert` flag for the generics drain's neutered defs; typed layouts; typed reactor
+   params, nodes, and inputs — and `Place` projections gained `Proj::Downcast { variant, field }`,
+   because field 0 of an enum has a different type per variant and every site that projects into a
+   payload sits under control flow that already proved the tag (MIR's `PlaceElem::Downcast`, for
+   the same reason; writes never traverse enums, so downcasts are read-path only). The NIR printer
+   shows all of it — `local _5: Option<I64>`, `_4.0@Some` — and that text is the review artifact
+   the backend was written against.
+
+   The representation rule: generated aggregates are flat Rust types, one `S{id}`/`E{id}` per
+   concrete table entry, with Option/Result instantiations interned as synthetic enum-table
+   entries by a deterministic no-hash walk; any field whose type is a named aggregate or an
+   Option/Result is stored behind `Rc`, scalars and handles inline, `Rc<str>`/`Rc<[u8]>` for
+   text and bytes. Copying is a memcpy plus refcount bumps, never a deep copy; recursive types are
+   legal automatically; full flattening waits for 6c's moves, which are what make it sound.
+   Bodies are fully typed — the operator dispatch, the coercions, and every value-shape trap died
+   as types — and the dynamic `Value` survives only as a generated boundary enum at the nine
+   runtime seams, wrapped and unwrapped by static type, never inside the call graph. One `TaskVal`
+   enum types built tasks, `poll_task` is the single home of io mapping, and frames are
+   per-task-fn structs of typed locals. The interpreter is untouched and stays the reference
+   implementation; `norn-rt` never changed. The differential oracle therefore flipped from
+   by-construction to by-comparison: stdout, stderr, and exit code byte-identical while the
+   representation diverges — the render contract down to `NaN.0`, the NaN-ordering trap's
+   `Float({v:?})` spelling, and the shallow `moved_resources` scan all pinned by it.
+
+   The item's stated purpose was that the cost first becomes measurable, and it is: a copy-heavy
+   scratch program (a 1000-cons list folded 3000 times, plus two million projected struct-field
+   writes) runs in ~0.96s under M5's dynamic backend and ~0.073s under the typed one — 13× —
+   with identical output.
+
+   Still waiting here, now 6b's: zero-copy `Bytes` views — M6's `bytes_slice` copies, and so does
+   the proto-std gate's `bytes_concat`, because a clone-everything representation cannot make
+   sharing observable — and `+` on `Bytes`, which is only worth having once concatenation has a
+   cost model to answer to. The model now exists. 6c is the move checking itself.
 7. **Generics and traits — landed.** The gate on the general standard library, shipped as one
    wave (2026-08-19) because each half is the other's first consumer: bounds need traits to
    name, and a trait's worth shows first on a type parameter. Item 12 records what "collections"
