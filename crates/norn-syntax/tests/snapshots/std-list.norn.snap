@@ -1,0 +1,235 @@
+=== ast ===
+(module
+  (import "std/fmt" (item Display))
+  (enum List export
+    (type-params T)
+    (variant Nil)
+    (variant Cons (tuple T (ty List T))))
+  (fn length export
+    (type-params T)
+    (params (param items (ty List T)))
+    (ret I64)
+    (block
+      (match
+        (path items)
+        (arm (construct List.Nil) (int 0))
+        (arm
+          (construct List.Cons (arg _) (arg (bind rest)))
+          (binary + (int 1) (call (path length) (arg (path rest))))))))
+  (fn empty export
+    (type-params T)
+    (params)
+    (ret (ty List T))
+    (block (path List.Nil)))
+  (fn append export
+    (type-params T)
+    (params (param items (ty List T)) (param tail (ty List T)))
+    (ret (ty List T))
+    (block
+      (match
+        (path items)
+        (arm (construct List.Nil) (path tail))
+        (arm
+          (construct List.Cons (arg (bind head)) (arg (bind rest)))
+          (call
+            (path List.Cons)
+            (arg (path head))
+            (arg (call (path append) (arg (path rest)) (arg (path tail)))))))))
+  (fn reverse export
+    (type-params T)
+    (params (param items (ty List T)))
+    (ret (ty List T))
+    (block (call (path walk) (arg (path items)) (arg (path List.Nil)))))
+  (fn walk
+    (type-params T)
+    (params (param items (ty List T)) (param out (ty List T)))
+    (ret (ty List T))
+    (block
+      (match
+        (path items)
+        (arm (construct List.Nil) (path out))
+        (arm
+          (construct List.Cons (arg (bind head)) (arg (bind rest)))
+          (call
+            (path walk)
+            (arg (path rest))
+            (arg (call (path List.Cons) (arg (path head)) (arg (path out)))))))))
+  (fn take export
+    (type-params T)
+    (params (param items (ty List T)) (param count I64))
+    (ret (ty List T))
+    (block
+      (if
+        (binary <= (path count) (int 0))
+        (block (path List.Nil))
+        (else
+          (block
+            (match
+              (path items)
+              (arm (construct List.Nil) (path List.Nil))
+              (arm
+                (construct List.Cons (arg (bind head)) (arg (bind rest)))
+                (call
+                  (path List.Cons)
+                  (arg (path head))
+                  (arg
+                    (call
+                      (path take)
+                      (arg (path rest))
+                      (arg (binary - (path count) (int 1)))))))))))))
+  (fn drop export
+    (type-params T)
+    (params (param items (ty List T)) (param count I64))
+    (ret (ty List T))
+    (block
+      (if
+        (binary <= (path count) (int 0))
+        (block (path items))
+        (else
+          (block
+            (match
+              (path items)
+              (arm (construct List.Nil) (path List.Nil))
+              (arm
+                (construct List.Cons (arg _) (arg (bind rest)))
+                (call
+                  (path drop)
+                  (arg (path rest))
+                  (arg (binary - (path count) (int 1)))))))))))
+  (fn nth export
+    (type-params T)
+    (params (param items (ty List T)) (param index I64))
+    (ret (ty Option T))
+    (block
+      (match
+        (path items)
+        (arm (construct List.Nil) (path None))
+        (arm
+          (construct List.Cons (arg (bind head)) (arg (bind rest)))
+          (if
+            (binary == (path index) (int 0))
+            (block (call (path Some) (arg (path head))))
+            (else
+              (block
+                (call
+                  (path nth)
+                  (arg (path rest))
+                  (arg (binary - (path index) (int 1)))))))))))
+  (fn contains export
+    (type-params (bound T Eq))
+    (params (param items (ty List T)) (param wanted T))
+    (ret Bool)
+    (block
+      (match
+        (path items)
+        (arm (construct List.Nil) (bool false))
+        (arm
+          (construct List.Cons (arg (bind head)) (arg (bind rest)))
+          (binary ||
+            (binary == (path head) (path wanted))
+            (call (path contains) (arg (path rest)) (arg (path wanted))))))))
+  (fn join export
+    (type-params (bound T Display))
+    (params (param items (ty List T)) (param separator String))
+    (ret String)
+    (block
+      (match
+        (path items)
+        (arm (construct List.Nil) (str ""))
+        (arm
+          (construct List.Cons (arg (bind head)) (arg (bind rest)))
+          (match
+            (path rest)
+            (arm (construct List.Nil) (call (path head.to_string)))
+            (arm
+              (construct List.Cons (arg _) (arg _))
+              (binary +
+                (binary + (call (path head.to_string)) (path separator))
+                (call (path join) (arg (path rest)) (arg (path separator)))))))))))
+
+=== canonical ===
+import { Display } from "std/fmt"
+
+export enum List<T> {
+    Nil
+    Cons(T, List<T>)
+}
+
+export fn length<T>(items: List<T>) -> I64 {
+    match items {
+        List.Nil => 0
+        List.Cons(_, rest) => 1 + length(rest)
+    }
+}
+
+export fn empty<T>() -> List<T> {
+    List.Nil
+}
+
+export fn append<T>(items: List<T>, tail: List<T>) -> List<T> {
+    match items {
+        List.Nil => tail
+        List.Cons(head, rest) => List.Cons(head, append(rest, tail))
+    }
+}
+
+export fn reverse<T>(items: List<T>) -> List<T> {
+    walk(items, List.Nil)
+}
+
+fn walk<T>(items: List<T>, out: List<T>) -> List<T> {
+    match items {
+        List.Nil => out
+        List.Cons(head, rest) => walk(rest, List.Cons(head, out))
+    }
+}
+
+export fn take<T>(items: List<T>, count: I64) -> List<T> {
+    if count <= 0 {
+        List.Nil
+    } else {
+        match items {
+            List.Nil => List.Nil
+            List.Cons(head, rest) => List.Cons(head, take(rest, count - 1))
+        }
+    }
+}
+
+export fn drop<T>(items: List<T>, count: I64) -> List<T> {
+    if count <= 0 {
+        items
+    } else {
+        match items {
+            List.Nil => List.Nil
+            List.Cons(_, rest) => drop(rest, count - 1)
+        }
+    }
+}
+
+export fn nth<T>(items: List<T>, index: I64) -> Option<T> {
+    match items {
+        List.Nil => None
+        List.Cons(head, rest) => if index == 0 {
+            Some(head)
+        } else {
+            nth(rest, index - 1)
+        }
+    }
+}
+
+export fn contains<T: Eq>(items: List<T>, wanted: T) -> Bool {
+    match items {
+        List.Nil => false
+        List.Cons(head, rest) => head == wanted || contains(rest, wanted)
+    }
+}
+
+export fn join<T: Display>(items: List<T>, separator: String) -> String {
+    match items {
+        List.Nil => ""
+        List.Cons(head, rest) => match rest {
+            List.Nil => head.to_string()
+            List.Cons(_, _) => head.to_string() + separator + join(rest, separator)
+        }
+    }
+}

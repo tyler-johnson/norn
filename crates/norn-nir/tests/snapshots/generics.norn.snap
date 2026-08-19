@@ -1,0 +1,805 @@
+=== nir ===
+struct Pair #0 (first, second)
+struct Pair<B, A> #1 (first, second)
+struct Pair<I64, String> #2 (first, second)
+struct Pair<String, I64> #3 (first, second)
+enum Option #0 (None/0, Some/1)
+enum Result #1 (Ok/1, Err/1)
+enum IoError #2 (NotFound/0, Denied/0, InUse/0, Refused/0, Closed/0, Other/1)
+enum Color #3 (Red/0, Blue/0)
+enum List #4 (Nil/0, Cons/2)
+enum List<I64> #5 (Nil/0, Cons/2)
+enum List<Color> #6 (Nil/0, Cons/2)
+
+fn swap #0(_0/pair)
+  b0:
+    return ()
+
+fn describe #1(_0/value, _1/fallback)
+  b0:
+    return ()
+
+fn main #2()
+    local _0/numbers
+    local _1/value
+    local _2/colors
+    local _3/pair
+    local _4
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+    local _10
+    local _11
+    local _12
+    local _13
+    local _14
+    local _15
+    local _16
+    local _17
+    local _18
+    local _19
+    local _20
+    local _21
+    local _22
+    local _23
+    local _24
+    local _25
+    local _26
+    local _27
+    local _28
+    local _29
+    local _30
+    local _31
+    local _32
+    local _33
+    local _34
+    local _35
+  b0:
+    _4 = List<I64>.Nil()
+    _5 = List<I64>.Cons(3, _4)
+    _6 = List<I64>.Cons(2, _5)
+    _7 = List<I64>.Cons(1, _6)
+    _0/numbers = _7
+    _8 = call list.length<I64>#19(_0/numbers)
+    _9 = builtin print(_8)
+    _10 = call list.reverse<I64>#20(_0/numbers)
+    _11 = call list.join<I64>#21(_10, ", ")
+    _12 = builtin print(_11)
+    _13 = call list.take<I64>#22(_0/numbers, 2)
+    _14 = call list.join<I64>#21(_13, "-")
+    _15 = builtin print(_14)
+    _16 = call list.contains<I64>#23(_0/numbers, 3)
+    _17 = builtin print(_16)
+    _19 = call list.nth<I64>#24(_0/numbers, 1)
+    goto b2
+  b1:
+    _22 = Color.Red()
+    _23 = Color.Blue()
+    _24 = List<Color>.Nil()
+    _25 = List<Color>.Cons(_23, _24)
+    _26 = List<Color>.Cons(_22, _25)
+    _2/colors = _26
+    _27 = call list.join<Color>#25(_2/colors, "/")
+    _28 = builtin print(_27)
+    _29 = Pair<I64, String>(7, "seven")
+    _3/pair = _29
+    _30 = call swap<I64, String>#26(_3/pair)
+    _31 = builtin print(_30.0)
+    _32 = call describe<I64>#27(7, 0)
+    _33 = builtin print(_32)
+    _34 = call describe<I64>#27(3, 3)
+    _35 = builtin print(_34)
+    return _35
+  b2:
+    switch tag _19 [1 => b6] else b3
+  b3:
+    switch tag _19 [0 => b8] else b4
+  b4:
+    trap "no match arm applied"
+  b5:
+    _20 = builtin print(_1/value)
+    _18 = _20
+    goto b1
+  b6:
+    _1/value = _19.0
+    goto b5
+  b7:
+    _21 = builtin print("missing")
+    _18 = _21
+    goto b1
+  b8:
+    goto b7
+
+fn list.length #3(_0/items)
+  b0:
+    return ()
+
+fn list.empty #4()
+  b0:
+    return ()
+
+fn list.append #5(_0/items, _1/tail)
+  b0:
+    return ()
+
+fn list.reverse #6(_0/items)
+  b0:
+    return ()
+
+fn list.walk #7(_0/items, _1/out)
+  b0:
+    return ()
+
+fn list.take #8(_0/items, _1/count)
+  b0:
+    return ()
+
+fn list.drop #9(_0/items, _1/count)
+  b0:
+    return ()
+
+fn list.nth #10(_0/items, _1/index)
+  b0:
+    return ()
+
+fn list.contains #11(_0/items, _1/wanted)
+  b0:
+    return ()
+
+fn list.join #12(_0/items, _1/separator)
+  b0:
+    return ()
+
+fn fmt.to_string #13(_0/n)
+    local _1/rest
+    local _2/out
+    local _3
+    local _4
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+    local _10
+    local _11
+    local _12
+    local _13
+    local _14
+    local _15
+  b0:
+    _4 = _0/n lt 0
+    branch _4 ? b1 : b2
+  b1:
+    _5 = 0 sub.i _0/n
+    _3 = _5
+    goto b3
+  b2:
+    _3 = _0/n
+    goto b3
+  b3:
+    _1/rest = _3
+    _6 = _1/rest rem.i 10
+    _7 = call fmt.digit#15(_6)
+    _2/out = _7
+    goto b4
+  b4:
+    _8 = _1/rest gt 9
+    branch _8 ? b6 : b5
+  b5:
+    _14 = _0/n lt 0
+    branch _14 ? b7 : b8
+  b6:
+    _9 = _1/rest div.i 10
+    _1/rest = _9
+    _10 = _1/rest rem.i 10
+    _11 = call fmt.digit#15(_10)
+    _12 = _11 concat _2/out
+    _2/out = _12
+    goto b4
+  b7:
+    _15 = "-" concat _2/out
+    _13 = _15
+    goto b9
+  b8:
+    _13 = _2/out
+    goto b9
+  b9:
+    return _13
+
+fn fmt.to_int #14(_0/s)
+    local _1/data
+    local _2/len
+    local _3/i
+    local _4/negative
+    local _5/value
+    local _6/b
+    local _7
+    local _8
+    local _9
+    local _10
+    local _11
+    local _12
+    local _13
+    local _14
+    local _15
+    local _16
+    local _17
+    local _18
+    local _19
+    local _20
+    local _21
+    local _22
+    local _23
+    local _24
+    local _25
+    local _26
+    local _27
+    local _28
+    local _29
+    local _30
+    local _31
+    local _32
+  b0:
+    _7 = builtin bytes(_0/s)
+    _1/data = _7
+    _8 = builtin bytes_len(_1/data)
+    _2/len = _8
+    _3/i = 0
+    _4/negative = false
+    _10 = _2/len eq 0
+    branch _10 ? b1 : b2
+  b1:
+    _11 = Option.None()
+    return _11
+  b2:
+    _9 = ()
+    goto b3
+  b3:
+    _13 = builtin bytes_at(_1/data, 0)
+    _14 = _13 eq 45
+    branch _14 ? b4 : b5
+  b4:
+    _4/negative = true
+    _3/i = 1
+    _12 = ()
+    goto b6
+  b5:
+    _12 = ()
+    goto b6
+  b6:
+    _16 = _3/i eq _2/len
+    branch _16 ? b7 : b8
+  b7:
+    _17 = Option.None()
+    return _17
+  b8:
+    _15 = ()
+    goto b9
+  b9:
+    _5/value = 0
+    goto b10
+  b10:
+    _18 = _3/i lt _2/len
+    branch _18 ? b12 : b11
+  b11:
+    branch _4/negative ? b18 : b19
+  b12:
+    _19 = builtin bytes_at(_1/data, _3/i)
+    _6/b = _19
+    _22 = _6/b lt 48
+    _21 = _22
+    branch _21 ? b14 : b13
+  b13:
+    _23 = _6/b gt 57
+    _21 = _23
+    goto b14
+  b14:
+    branch _21 ? b15 : b16
+  b15:
+    _24 = Option.None()
+    return _24
+  b16:
+    _20 = ()
+    goto b17
+  b17:
+    _25 = _5/value mul.i 10
+    _26 = _6/b sub.i 48
+    _27 = _25 add.i _26
+    _5/value = _27
+    _28 = _3/i add.i 1
+    _3/i = _28
+    goto b10
+  b18:
+    _30 = 0 sub.i _5/value
+    _31 = Option.Some(_30)
+    _29 = _31
+    goto b20
+  b19:
+    _32 = Option.Some(_5/value)
+    _29 = _32
+    goto b20
+  b20:
+    return _29
+
+fn fmt.digit #15(_0/n)
+    local _1
+    local _2
+    local _3
+    local _4
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+    local _10
+    local _11
+  b0:
+    goto b2
+  b1:
+    return _1
+  b2:
+    _2 = _0/n eq 0
+    branch _2 ? b13 : b3
+  b3:
+    _3 = _0/n eq 1
+    branch _3 ? b14 : b4
+  b4:
+    _4 = _0/n eq 2
+    branch _4 ? b15 : b5
+  b5:
+    _5 = _0/n eq 3
+    branch _5 ? b16 : b6
+  b6:
+    _6 = _0/n eq 4
+    branch _6 ? b17 : b7
+  b7:
+    _7 = _0/n eq 5
+    branch _7 ? b18 : b8
+  b8:
+    _8 = _0/n eq 6
+    branch _8 ? b19 : b9
+  b9:
+    _9 = _0/n eq 7
+    branch _9 ? b20 : b10
+  b10:
+    _10 = _0/n eq 8
+    branch _10 ? b21 : b11
+  b11:
+    _11 = _0/n eq 9
+    branch _11 ? b22 : b12
+  b12:
+    goto b23
+  b13:
+    _1 = "0"
+    goto b1
+  b14:
+    _1 = "1"
+    goto b1
+  b15:
+    _1 = "2"
+    goto b1
+  b16:
+    _1 = "3"
+    goto b1
+  b17:
+    _1 = "4"
+    goto b1
+  b18:
+    _1 = "5"
+    goto b1
+  b19:
+    _1 = "6"
+    goto b1
+  b20:
+    _1 = "7"
+    goto b1
+  b21:
+    _1 = "8"
+    goto b1
+  b22:
+    _1 = "9"
+    goto b1
+  b23:
+    _1 = "?"
+    goto b1
+
+fn fmt.Display.to_string for Color #16(_0/value)
+    local _1
+  b0:
+    goto b2
+  b1:
+    return _1
+  b2:
+    switch tag _0/value [0 => b6] else b3
+  b3:
+    switch tag _0/value [1 => b8] else b4
+  b4:
+    trap "no match arm applied"
+  b5:
+    _1 = "red"
+    goto b1
+  b6:
+    goto b5
+  b7:
+    _1 = "blue"
+    goto b1
+  b8:
+    goto b7
+
+fn fmt.Display.to_string for I64 #17(_0/value)
+    local _1
+  b0:
+    _1 = call fmt.to_string#13(_0/value)
+    return _1
+
+fn fmt.Display.to_string for T #18(_0)
+  b0:
+    return ()
+
+fn list.length<I64> #19(_0/items)
+    local _1/rest
+    local _2
+    local _3
+    local _4
+  b0:
+    goto b2
+  b1:
+    return _2
+  b2:
+    switch tag _0/items [0 => b6] else b3
+  b3:
+    switch tag _0/items [1 => b8] else b4
+  b4:
+    trap "no match arm applied"
+  b5:
+    _2 = 0
+    goto b1
+  b6:
+    goto b5
+  b7:
+    _3 = call list.length<I64>#19(_1/rest)
+    _4 = 1 add.i _3
+    _2 = _4
+    goto b1
+  b8:
+    goto b9
+  b9:
+    _1/rest = _0/items.1
+    goto b7
+
+fn list.reverse<I64> #20(_0/items)
+    local _1
+    local _2
+  b0:
+    _1 = List<I64>.Nil()
+    _2 = call list.walk<I64>#28(_0/items, _1)
+    return _2
+
+fn list.join<I64> #21(_0/items, _1/separator)
+    local _2/head
+    local _3/rest
+    local _4
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+    local _10
+  b0:
+    goto b2
+  b1:
+    return _4
+  b2:
+    switch tag _0/items [0 => b6] else b3
+  b3:
+    switch tag _0/items [1 => b8] else b4
+  b4:
+    trap "no match arm applied"
+  b5:
+    _4 = ""
+    goto b1
+  b6:
+    goto b5
+  b7:
+    goto b11
+  b8:
+    _2/head = _0/items.0
+    goto b9
+  b9:
+    _3/rest = _0/items.1
+    goto b7
+  b10:
+    _4 = _5
+    goto b1
+  b11:
+    switch tag _3/rest [0 => b15] else b12
+  b12:
+    switch tag _3/rest [1 => b17] else b13
+  b13:
+    trap "no match arm applied"
+  b14:
+    _6 = call fmt.Display.to_string for I64#17(_2/head)
+    _5 = _6
+    goto b10
+  b15:
+    goto b14
+  b16:
+    _7 = call fmt.Display.to_string for I64#17(_2/head)
+    _8 = _7 concat _1/separator
+    _9 = call list.join<I64>#21(_3/rest, _1/separator)
+    _10 = _8 concat _9
+    _5 = _10
+    goto b10
+  b17:
+    goto b18
+  b18:
+    goto b16
+
+fn list.take<I64> #22(_0/items, _1/count)
+    local _2/head
+    local _3/rest
+    local _4
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+    local _10
+    local _11
+  b0:
+    _5 = _1/count le 0
+    branch _5 ? b1 : b2
+  b1:
+    _6 = List<I64>.Nil()
+    _4 = _6
+    goto b3
+  b2:
+    goto b5
+  b3:
+    return _4
+  b4:
+    _4 = _7
+    goto b3
+  b5:
+    switch tag _0/items [0 => b9] else b6
+  b6:
+    switch tag _0/items [1 => b11] else b7
+  b7:
+    trap "no match arm applied"
+  b8:
+    _8 = List<I64>.Nil()
+    _7 = _8
+    goto b4
+  b9:
+    goto b8
+  b10:
+    _9 = _1/count sub.i 1
+    _10 = call list.take<I64>#22(_3/rest, _9)
+    _11 = List<I64>.Cons(_2/head, _10)
+    _7 = _11
+    goto b4
+  b11:
+    _2/head = _0/items.0
+    goto b12
+  b12:
+    _3/rest = _0/items.1
+    goto b10
+
+fn list.contains<I64> #23(_0/items, _1/wanted)
+    local _2/head
+    local _3/rest
+    local _4
+    local _5
+    local _6
+    local _7
+  b0:
+    goto b2
+  b1:
+    return _4
+  b2:
+    switch tag _0/items [0 => b6] else b3
+  b3:
+    switch tag _0/items [1 => b8] else b4
+  b4:
+    trap "no match arm applied"
+  b5:
+    _4 = false
+    goto b1
+  b6:
+    goto b5
+  b7:
+    _6 = _2/head eq _1/wanted
+    _5 = _6
+    branch _5 ? b11 : b10
+  b8:
+    _2/head = _0/items.0
+    goto b9
+  b9:
+    _3/rest = _0/items.1
+    goto b7
+  b10:
+    _7 = call list.contains<I64>#23(_3/rest, _1/wanted)
+    _5 = _7
+    goto b11
+  b11:
+    _4 = _5
+    goto b1
+
+fn list.nth<I64> #24(_0/items, _1/index)
+    local _2/head
+    local _3/rest
+    local _4
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+    local _10
+  b0:
+    goto b2
+  b1:
+    return _4
+  b2:
+    switch tag _0/items [0 => b6] else b3
+  b3:
+    switch tag _0/items [1 => b8] else b4
+  b4:
+    trap "no match arm applied"
+  b5:
+    _5 = Option.None()
+    _4 = _5
+    goto b1
+  b6:
+    goto b5
+  b7:
+    _7 = _1/index eq 0
+    branch _7 ? b10 : b11
+  b8:
+    _2/head = _0/items.0
+    goto b9
+  b9:
+    _3/rest = _0/items.1
+    goto b7
+  b10:
+    _8 = Option.Some(_2/head)
+    _6 = _8
+    goto b12
+  b11:
+    _9 = _1/index sub.i 1
+    _10 = call list.nth<I64>#24(_3/rest, _9)
+    _6 = _10
+    goto b12
+  b12:
+    _4 = _6
+    goto b1
+
+fn list.join<Color> #25(_0/items, _1/separator)
+    local _2/head
+    local _3/rest
+    local _4
+    local _5
+    local _6
+    local _7
+    local _8
+    local _9
+    local _10
+  b0:
+    goto b2
+  b1:
+    return _4
+  b2:
+    switch tag _0/items [0 => b6] else b3
+  b3:
+    switch tag _0/items [1 => b8] else b4
+  b4:
+    trap "no match arm applied"
+  b5:
+    _4 = ""
+    goto b1
+  b6:
+    goto b5
+  b7:
+    goto b11
+  b8:
+    _2/head = _0/items.0
+    goto b9
+  b9:
+    _3/rest = _0/items.1
+    goto b7
+  b10:
+    _4 = _5
+    goto b1
+  b11:
+    switch tag _3/rest [0 => b15] else b12
+  b12:
+    switch tag _3/rest [1 => b17] else b13
+  b13:
+    trap "no match arm applied"
+  b14:
+    _6 = call fmt.Display.to_string for Color#16(_2/head)
+    _5 = _6
+    goto b10
+  b15:
+    goto b14
+  b16:
+    _7 = call fmt.Display.to_string for Color#16(_2/head)
+    _8 = _7 concat _1/separator
+    _9 = call list.join<Color>#25(_3/rest, _1/separator)
+    _10 = _8 concat _9
+    _5 = _10
+    goto b10
+  b17:
+    goto b18
+  b18:
+    goto b16
+
+fn swap<I64, String> #26(_0/pair)
+    local _1
+  b0:
+    _1 = Pair<String, I64>(_0/pair.1, _0/pair.0)
+    return _1
+
+fn describe<I64> #27(_0/value, _1/fallback)
+    local _2
+    local _3
+    local _4
+  b0:
+    _3 = _0/value eq _1/fallback
+    branch _3 ? b1 : b2
+  b1:
+    _2 = "fallback"
+    goto b3
+  b2:
+    _4 = call fmt.Display.to_string for I64#17(_0/value)
+    _2 = _4
+    goto b3
+  b3:
+    return _2
+
+fn list.walk<I64> #28(_0/items, _1/out)
+    local _2/head
+    local _3/rest
+    local _4
+    local _5
+    local _6
+  b0:
+    goto b2
+  b1:
+    return _4
+  b2:
+    switch tag _0/items [0 => b6] else b3
+  b3:
+    switch tag _0/items [1 => b8] else b4
+  b4:
+    trap "no match arm applied"
+  b5:
+    _4 = _1/out
+    goto b1
+  b6:
+    goto b5
+  b7:
+    _5 = List<I64>.Cons(_2/head, _1/out)
+    _6 = call list.walk<I64>#28(_3/rest, _5)
+    _4 = _6
+    goto b1
+  b8:
+    _2/head = _0/items.0
+    goto b9
+  b9:
+    _3/rest = _0/items.1
+    goto b7
+
+=== output ===
+3
+3, 2, 1
+1-2
+true
+2
+red/blue
+seven
+7
+fallback
+=== result ===
+()

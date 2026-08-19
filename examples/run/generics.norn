@@ -1,0 +1,61 @@
+// Generics executing end to end: std/list instances, two-parameter inference, explicit type
+// arguments, and a trait method resolving to a different impl per instantiation. The blessed
+// program dump doubles as the review of instance naming — `List<I64>`, `list.join<Color>`,
+// `swap<I64, String>` — every name a table row an ordinary monomorphic function could have.
+
+import { List, length, take, reverse, join, contains, nth } from "std/list"
+import { Display } from "std/fmt"
+
+struct Pair<A, B> {
+    first: A
+    second: B
+}
+
+fn swap<A, B>(pair: Pair<A, B>) -> Pair<B, A> {
+    Pair(first: pair.second, second: pair.first)
+}
+
+enum Color {
+    Red
+    Blue
+}
+
+// A second Display impl beside std/fmt's own for I64: `join<Color>` resolves here, and
+// `join<I64>` resolves there, from the same call in the same std function.
+impl Display for Color {
+    fn to_string(value: Self) -> String {
+        match value {
+            Color.Red => "red"
+            Color.Blue => "blue"
+        }
+    }
+}
+
+fn describe<T: Eq + Display>(value: T, fallback: T) -> String {
+    if value == fallback {
+        "fallback"
+    } else {
+        value.to_string()
+    }
+}
+
+fn main() {
+    let numbers = List.Cons(1, List.Cons(2, List.Cons(3, List.Nil)))
+    print(length(numbers))
+    print(join(reverse(numbers), ", "))
+    print(join(take(numbers, 2), "-"))
+    print(contains(numbers, 3))
+    match nth(numbers, 1) {
+        Some(value) => print(value)
+        None => print("missing")
+    }
+
+    let colors = List.Cons(Color.Red, List.Cons(Color.Blue, List.Nil))
+    print(join(colors, "/"))
+
+    let pair = Pair(first: 7, second: "seven")
+    print(swap(pair).first)
+
+    print(describe<I64>(7, 0))
+    print(describe(3, 3))
+}

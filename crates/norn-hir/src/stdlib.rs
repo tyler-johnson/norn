@@ -11,6 +11,7 @@
 /// resolution always appends `.norn`.
 pub const STD: &[(&str, &str)] = &[
     ("std/fmt", include_str!("../../../std/fmt.norn")),
+    ("std/list", include_str!("../../../std/list.norn")),
     ("std/time", include_str!("../../../std/time.norn")),
     ("std/bytes", include_str!("../../../std/bytes.norn")),
     ("std/flow", include_str!("../../../std/flow.norn")),

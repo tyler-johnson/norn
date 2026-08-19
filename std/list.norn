@@ -1,0 +1,95 @@
+// The cons list, written once.
+//
+// This is the structure-only surface: what a linked list is and how it is walked. The functions
+// that take *behaviour* — map, filter, fold — wait for M7's closures, and functions that compare
+// an element's fields stay beside the fields they read, in the module that declares the element.
+// Arguments are subject-first — `take(items, 3)`, never `take(3, items)` — so a pipeline reads
+// in the order it runs.
+
+import { Display } from "std/fmt"
+
+export enum List<T> {
+    Nil
+    Cons(T, List<T>)
+}
+
+export fn length<T>(items: List<T>) -> I64 {
+    match items {
+        List.Nil => 0
+        List.Cons(_, rest) => 1 + length(rest)
+    }
+}
+
+// The expectation is what settles `T` here: `let out: List<I64> = empty()`.
+export fn empty<T>() -> List<T> {
+    List.Nil
+}
+
+export fn append<T>(items: List<T>, tail: List<T>) -> List<T> {
+    match items {
+        List.Nil => tail
+        List.Cons(head, rest) => List.Cons(head, append(rest, tail))
+    }
+}
+
+export fn reverse<T>(items: List<T>) -> List<T> {
+    walk(items, List.Nil)
+}
+
+// The accumulator spelling, private: `reverse` is the name the intent has.
+fn walk<T>(items: List<T>, out: List<T>) -> List<T> {
+    match items {
+        List.Nil => out
+        List.Cons(head, rest) => walk(rest, List.Cons(head, out))
+    }
+}
+
+export fn take<T>(items: List<T>, count: I64) -> List<T> {
+    if count <= 0 {
+        List.Nil
+    } else {
+        match items {
+            List.Nil => List.Nil
+            List.Cons(head, rest) => List.Cons(head, take(rest, count - 1))
+        }
+    }
+}
+
+export fn drop<T>(items: List<T>, count: I64) -> List<T> {
+    if count <= 0 {
+        items
+    } else {
+        match items {
+            List.Nil => List.Nil
+            List.Cons(_, rest) => drop(rest, count - 1)
+        }
+    }
+}
+
+export fn nth<T>(items: List<T>, index: I64) -> Option<T> {
+    match items {
+        List.Nil => None
+        List.Cons(head, rest) => if index == 0 {
+            Some(head)
+        } else {
+            nth(rest, index - 1)
+        }
+    }
+}
+
+export fn contains<T: Eq>(items: List<T>, wanted: T) -> Bool {
+    match items {
+        List.Nil => false
+        List.Cons(head, rest) => head == wanted || contains(rest, wanted)
+    }
+}
+
+export fn join<T: Display>(items: List<T>, separator: String) -> String {
+    match items {
+        List.Nil => ""
+        List.Cons(head, rest) => match rest {
+            List.Nil => head.to_string()
+            List.Cons(_, _) => head.to_string() + separator + join(rest, separator)
+        }
+    }
+}
