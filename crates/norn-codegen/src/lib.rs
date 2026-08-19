@@ -9,6 +9,7 @@
 mod emit;
 mod rt_sources;
 mod rustc;
+mod types;
 
 pub use emit::generate;
 pub use rustc::BuildOptions;

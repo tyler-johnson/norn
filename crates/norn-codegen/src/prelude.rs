@@ -753,18 +753,23 @@ fn render(value: &Value) -> String {
     }
 }
 
+// The float spelling, shared by the dynamic renderer and the generated per-type ones: `{}` plus
+// a `.0` suffix when nothing marks the text as non-integral. `NaN` gains the suffix too — the
+// check is for the lowercase letters of `inf`/exponents — and that quirk is part of the contract.
+fn render_float(v: f64) -> String {
+    let text = format!("{v}");
+    if text.contains(['.', 'e', 'E', 'n', 'i']) {
+        text
+    } else {
+        format!("{text}.0")
+    }
+}
+
 fn render_nested(value: &Value) -> String {
     match value {
         Value::Unit => "()".into(),
         Value::Int(v) => v.to_string(),
-        Value::Float(v) => {
-            let text = format!("{v}");
-            if text.contains(['.', 'e', 'E', 'n', 'i']) {
-                text
-            } else {
-                format!("{text}.0")
-            }
-        }
+        Value::Float(v) => render_float(*v),
         Value::Bool(v) => v.to_string(),
         Value::Str(v) => format!("{:?}", &**v),
         Value::Bytes(v) => format!("<bytes {}>", v.len()),

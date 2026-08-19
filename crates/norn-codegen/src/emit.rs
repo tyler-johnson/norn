@@ -119,6 +119,11 @@ impl Emitter<'_> {
         push(out, 0, "");
         out.push_str(crate::PRELUDE);
         push(out, 0, "");
+        // The typed declarations are dormant this wave: `#![allow(warnings)]` keeps unused
+        // generated items free, and every differential run compiles them — recursion, unit
+        // payloads, and the naming surface are exercised before the backend flips onto them.
+        out.push_str(&crate::types::Registry::build(self.program).decls());
+        push(out, 0, "");
         self.tables(out, main);
         for id in 0..self.program.fns.len() {
             self.function(out, id);

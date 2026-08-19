@@ -84,6 +84,23 @@ fn traps_match() {
     }
 }
 
+/// Generation must be a function of the NIR alone — the type registry's interning and synthetic
+/// ids included. Two generations of the same program must print the same source, byte for byte.
+#[test]
+fn generated_source_is_deterministic() {
+    for dir in ["run", "tasks", "reactors"] {
+        for path in common::examples(dir) {
+            let (nir, main) = common::build(&path);
+            assert_eq!(
+                norn_codegen::generate(&nir, main),
+                norn_codegen::generate(&nir, main),
+                "{} generated differently",
+                path.display()
+            );
+        }
+    }
+}
+
 fn corpus(dir: &str, live: &[&str]) {
     let mut checked = 0;
     for path in common::examples(dir) {
