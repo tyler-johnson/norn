@@ -155,7 +155,8 @@ Alternatives considered:
   struct is now the predicted compile error, and `print(&p)` is the spelling that looks twice.
   Reversed by decision the same day: the mode doctrine — `DESIGN.md` §7, §8 item 5 — returns
   ordinary values to copying; moves confine to the affine tier plus inferred `sink`, and the 6c
-  machinery becomes that checker.)
+  machinery becomes that checker. The modes wave landed 2026-08-20: `print(p); print(p)` is legal
+  again — reads are unmarked — and what consumes is a `sink` position.)
 
   `Shared<T>` is deferred for the same reason: with ordinary values copyable it is a representation
   choice with no observable effect, and an inert type in the language is worse than an absent one.
@@ -167,23 +168,21 @@ Alternatives considered:
 
 ### Excluded, deliberately
 
-Generics; traits; a borrow checker (`&T` is permitted only as a non-escaping parameter, enforced
-syntactically — and the exclusion is now permanent: the mode decision, §8 item 5, replaces `&`
-with parameter modes rather than ever growing the checker); dynamic subgraphs (`switch`); macros and derives; a multi-threaded work-stealing
-scheduler; capability *inference*. Modules were on this list — "beyond a single file" — until the
+Generics; traits; a borrow checker (permanently: the mode decision, §8 item 5, replaced `&` with
+parameter modes — since its modes wave landed, `&` is not part of the language at all, refused
+with teaching diagnostics that name the spelling that replaced it); dynamic subgraphs (`switch`);
+macros and derives; a multi-threaded work-stealing scheduler; capability *inference*. Modules were on this list — "beyond a single file" — until the
 post-M6 module work landed them: a program is now a graph of files, subdirectories included, and
 §8 item 12 records the surface that settled.
 
-"Enforced syntactically" turned out to mean something sharper than a rule: `resolve_ty` produces a
-reference type only in parameter position and `declare_local` refuses to name one, so there is no
-field, return, payload, `let`, or reactor member that could hold a borrow. The one value in v0 that
-outlives the expression building it is a `Task<T>`, so `spawn` and `after` reject a borrowed
-argument and that is the whole of the escape analysis. `await f(&x)` is exempt because the awaiting
-task is parked for the duration and ownership is unique: it cannot invalidate the borrow itself, and
-nobody else holds the value. `&mut` is left with a diagnostic rather than a meaning, since one
-exclusive-borrow rule is a borrow checker. That positional discipline turned out to be the
-destination rather than a stopgap: the mode decision (§8 item 5) keeps "no borrow can be named or
-stored" as a permanent fact of the language and removes the `&` spelling itself.
+The borrow-era discipline — a reference writable only in parameter position, nowhere to store
+one, `spawn`/`after` refusing borrowed arguments as the whole escape analysis — turned out to be
+the destination rather than a stopgap, and the modes wave finished the thought: there are no
+reference types anywhere, parameters carry modes instead (`T` reads, `sink T` consumes, `mut T`
+next), and the task-escape rule survives as its modes-era successor — work started by `spawn` or
+`after` must own its affine arguments, so the callee's parameter must be Sink. A direct
+`await f(x)` follows the modes alone, because the awaiting task is parked for the duration.
+`&mut` still gets a diagnostic rather than a meaning, now naming `mut T` as what is coming.
 
 The cut worth defending is **static reactor graphs**. Dynamic switching is where graph arenas,
 region reclamation, and subscription lifetimes all become load-bearing — it is the majority of
@@ -328,9 +327,10 @@ descriptor cannot be written down and restored, and an input declared `overflow:
 leak a socket every time its mailbox filled. `Shared<T>` and ordinary-value moves were deferred to
 M5; see §4 — both since landed by §8 item 6, whose 6c wave extends this milestone's done-when to
 ordinary values: use-after-move on a struct is now the same compile error it always was on a
-Connection. The mode decision (§8 item 5) withdraws that extension: ordinary values return to
-copying, and the milestone's obligation settles back on the affine set — where consumption becomes
-part of the signature, inferred as `sink`.
+Connection. The mode decision (§8 item 5) withdrew that extension, and its modes wave (landed
+2026-08-20) made the withdrawal real: ordinary values copy again, the milestone's obligation
+settles on the affine set, and consumption is part of the signature — inferred as `sink`, written
+as the assertion.
 
 *Done when:* use-after-move and double-close are compile errors, and a cancelled request is
 observably leak-free.
@@ -490,20 +490,59 @@ Ordered roughly by when it becomes worth doing, not by importance:
    characters, the compiler and LSP surface the information. `mut` stays declared on purpose — a
    writeback changes the caller's value, and stating that up front is kept deliberately.
 
-   The read half that landed with item 6c survives in full as the unmarked mode's plumbing; what
-   this item now carries is the migration, in three waves. **The modes wave** (purely static):
-   un-flip copy-default (moves.rs scopes back to the affine tier; its 6c machinery is retained as
-   the affine/sink checker), sink inference plus the assertive-`sink` check, receiver modes
-   (`Self` reads by default), `&` removed with teaching diagnostics, mode moved off `Ty::Ref` onto
-   the parameter (types are always owned — the `owned()`/`is_ref()` peels dissolve), and the
-   corpus re-migrated (std/list's `&`s come back out; std/http's `respond` family keeps its
-   consumption contract, now inferred). **The `mut` wave** (the one that touches NIR and both
-   engines): writeback pairs in the call encoding, interp copy-in/copy-out via the existing
-   caller-dest mechanism, codegen real `&mut` — semantically copy-in/copy-out, representationally
-   in place, sound because argument-list exclusivity refuses the same root twice when one use
-   writes; `mut` refused on `task fn`s until writebacks meet the resumed-await protocol. **The
-   sequence wave** (what was 5b): the contiguous COW-copyable sequence, first `mut` consumer
-   `push(mut buf, x)`, and the in-place-vs-threaded-clone measurement. Partial-move tracking stays
+   **The modes wave landed 2026-08-20** — reads are unmarked, and `&` is gone. Purely static, as
+   planned: no NIR shape, interp, or codegen semantics moved, and the differential oracle refereed
+   the whole migration with every output and trace byte-identical. The surface as landed:
+   `fn watch(conn: Connection)` reads — the caller keeps the socket and closes it after the call —
+   `fn redeem(token: sink Token)` consumes, and `tcp_read(conn)` is the everyday spelling the
+   whole wave exists for.
+
+   The mechanics. A checker-internal `Mode { Read, Sink }` sits on parameters — `param_modes` in
+   lockstep with the signature table, pushed at all five fn-append sites, with `Builtin::signature`
+   carrying the builtins' column (the three closers are Sink; every other resource param reads).
+   Inference is a fixpoint pass between monomorphization and move checking: per concrete non-inert
+   fn, per affine unpinned Read param, flip to Sink when the body consumes it — Sink-position
+   arguments (through the current fixpoint state), constructor payloads, `return`/`let`/assignment
+   RHS, and `match` deconstruction, the exact position list `check_moves` then enforces — repeated
+   in FnId order until stable, Vec-deterministic like everything in generics. Only affine params
+   infer (nothing consumes a copyable); instances copy written modes from their template and infer
+   the rest per instance, which is what lets `walk<T>` read at `T = I64` and consume at
+   `T = Connection`, and which closed 6c's template-time-only gap on affine-scrutinee matches.
+   Written `sink` is assertive — legal on any type, pinning the mode and revoking the caller's
+   name even when the body never physically consumes (`moved` in the moves map is now unconditional
+   at Sink positions, so a revoked ordinary name errors on any later use). Trait-member modes are
+   declared-only — a bodiless contract has nothing to infer from — so `Self` reads by default,
+   `sink Self` consumes, impls must spell the trait's modes, and an impl body that consumes a
+   read-pinned affine parameter is an error at the impl, never a silent flip. The spawn rule is
+   the borrow refusal's successor: `spawn`/`after` operands must land affine arguments on Sink
+   parameters, because the task outlives the call — and the corpus check surfaced the one honest
+   subtlety, accept-loops and cancellation-owned resources whose bodies never close what they
+   hold, which is exactly what the assertion spelling is for (`accept_loop(listener: sink
+   Listener)`). A direct `await` follows the modes alone: the awaiting task is parked.
+
+   `sink` is a contextual keyword — recognised only between a parameter's `:` and a token that
+   can start a type — so std/http's parameter *named* `sink` stayed legal through its own
+   migration and `sink: sink File` parses as the pathology it is. What the removal commit
+   deleted: `Ty::Ref` and the `owned()`/`is_ref()` peels across eleven files (every one became
+   identity — the moved_resources filters count the same set, trap bytes pinned by the oracle),
+   the expect fork and `borrow_mismatch`, `no_borrowed_arguments`, the affine-pointee match gate,
+   the `&Self` receiver seam (acceptance, auto-borrow stamp, by-value-on-borrow refusal), and the
+   generics/nir/codegen Ref arms. The parser keeps the tokens; the checker answers every `&` with
+   the replacement — "parameters are read by default … a consuming parameter is `sink T`",
+   "Norn has no borrows — pass the value itself", and `&mut` with "mutation is declared in the
+   signature (`mut T`, the next wave)". borrows.norn is now that teaching set, one diagnostic per
+   declaration; sink-errors.norn pins the wave's three new rejections.
+
+   The two waves after this one, unchanged in scope: **the `mut` wave** (the one that touches NIR
+   and both engines): writeback pairs in the call encoding, interp copy-in/copy-out via the
+   existing caller-dest mechanism, codegen real `&mut` — semantically copy-in/copy-out,
+   representationally in place, sound because argument-list exclusivity refuses the same root
+   twice when one use writes; `mut` declared, never inferred (a writeback changes the caller's
+   value), and refused on `task fn`s until writebacks meet the resumed-await protocol. `Mode`
+   grows a variant, not a type — that extensibility is why the mode lives on the parameter.
+   **The sequence wave** (what was 5b): the contiguous COW-copyable sequence, first `mut`
+   consumer `push(mut buf, x)`, and the in-place-vs-threaded-clone measurement — whose baseline
+   is the `x = f(x)` revive idiom the corpus deliberately kept. Partial-move tracking stays
    never: flat rejection plus `match` remains the answer, because a half-moved struct has no name
    in this language.
 6. **Move checking for ordinary values, and `Shared<T>`.** Both wait on a typed value
@@ -603,8 +642,10 @@ Ordered roughly by when it becomes worth doing, not by importance:
 
    Unlocked and NOT this wave: full flattening — the representation payoff 6a deferred because
    only moves make it sound. Item 5 kept the write half — and was then re-cut the same day by the
-   mode decision: the surface this wave flipped is deliberately reversed (ordinary values return
-   to copying, `&` leaves the language) while every piece of its machinery is retained; see item 5.
+   mode decision: the surface this wave flipped was deliberately reversed (ordinary values return
+   to copying, `&` leaves the language) while every piece of its machinery is retained. The
+   reversal landed 2026-08-20 as item 5's modes wave; the 6c walk now runs as the affine/sink
+   checker it was retained to become.
 7. **Generics and traits — landed.** The gate on the general standard library, shipped as one
    wave (2026-08-19) because each half is the other's first consumer: bounds need traits to
    name, and a trait's worth shows first on a type parameter. Item 12 records what "collections"
