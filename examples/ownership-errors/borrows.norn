@@ -33,8 +33,8 @@ task fn names_a_borrow() -> ()
     }
 }
 
-// `tcp_read` looks at a connection and `tcp_close` takes it, so both of these are one character
-// from correct — in opposite directions.
+// `tcp_read` looks at a connection — the unmarked spelling reads, so passing `conn` whole is
+// fine — but `tcp_close` takes it, and a borrow has nothing to give away.
 task fn wrong_way_round(conn: Connection) -> ()
     uses { net.io }
 {

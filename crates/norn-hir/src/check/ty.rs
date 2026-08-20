@@ -484,9 +484,15 @@ impl Checker {
                 self.discarded_task(span);
                 return self.error_expr(span);
             }
-            // Owned where a borrow was wanted, or the reverse. The types alone would say what
-            // differs; what a reader needs is which of the two the call does to their value.
-            if found.ty.owned().fits(expected.owned()) && found.ty.is_ref() != expected.is_ref() {
+            // An owned value where a borrow was asked reads as itself: a `&T` parameter is a
+            // `Read` position, reading does not consume, and the unmarked spelling is the modes
+            // doctrine — so both spellings are legal while the ampersand still is. The value
+            // keeps its owned type; `check_moves` follows the callee's mode, not the `&`.
+            if expected.is_ref() && found.ty.fits(expected.owned()) {
+                return found;
+            }
+            // A borrow where ownership was wanted has nothing to give away.
+            if found.ty.is_ref() && found.ty.owned().fits(expected) {
                 self.borrow_mismatch(expected, span);
                 return self.error_expr(span);
             }

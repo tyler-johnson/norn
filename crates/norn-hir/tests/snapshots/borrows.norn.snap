@@ -30,13 +30,6 @@ error: `held` would be a borrow
    = note: `&` lasts for the call it is handed to, and a name outlives that
    = note: pass it where it is needed — `f(&conn)` — or bind the value itself and take ownership of it
 
-error: this borrows the Connection rather than taking it
-  --> borrows.norn:41:26
-   |
-41 |     match await tcp_read(conn) {
-   |                          ^^^^ write `&` here
-   = note: the call only looks at it, so the value stays yours afterwards
-
 error: this takes the Connection
   --> borrows.norn:45:21
    |
