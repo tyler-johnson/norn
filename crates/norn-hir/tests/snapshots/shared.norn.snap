@@ -1,0 +1,72 @@
+error: `shared` cannot take File
+ --> shared.norn:6:23
+  |
+6 |     let held = shared(file)
+  |                       ^^^^ a shared value is copied freely
+  = note: resources and tasks have exactly one owner; share the data, not the handle
+
+error: a `Shared` value cannot hold File
+ --> shared.norn:9:27
+  |
+9 | fn spell_a_shared_file(x: Shared<File>) -> () {
+  |                           ^^^^^^^^^^^^ resources and tasks have exactly one owner
+  = note: `Shared` is for plain data — it is deeply immutable and copied freely
+
+error: cannot assign through a shared value
+  --> shared.norn:14:5
+   |
+14 |     c.host = "elsewhere"
+   |     ^^^^^^ shared values are immutable
+   = note: `unshare` it, change the copy, and `shared` the result
+
+error: `==` does not apply to Shared<I64>
+  --> shared.norn:18:12
+   |
+18 |     return a == a
+   |            ^^^^^^
+   = note: structural equality on structs and enums is not derived yet; match instead
+
+error: this `match` on Shared<Option<I64>> needs a catch-all arm
+  --> shared.norn:22:5
+   |
+22 |     match x {
+   |     ^^^^^^^^^
+   = note: add `_ => …`
+
+error: `Some` matches Option or Result, but the value is Shared<Option<I64>>
+  --> shared.norn:23:9
+   |
+23 |         Some(v) => v
+   |         ^^^^^^^
+
+error: unknown name `v`
+  --> shared.norn:23:20
+   |
+23 |         Some(v) => v
+   |                    ^
+
+error: `None` matches Option or Result, but the value is Shared<Option<I64>>
+  --> shared.norn:24:9
+   |
+24 |         None => 0
+   |         ^^^^
+
+error: `shared` cannot take File
+  --> shared.norn:33:16
+   |
+33 |     let held = wrap(file)
+   |                ^^^^^^^^^^ instantiated here with an affine payload
+   = note: resources and tasks have exactly one owner; share the data, not the handle
+
+error: `Shared` takes 1 type argument, found 2
+  --> shared.norn:36:19
+   |
+36 | fn wrong_arity(x: Shared<I64, I64>) -> () {
+   |                   ^^^^^^^^^^^^^^^^
+   = note: write the payload type, as in `Shared<Config>`
+
+error: `Shared` is declared twice
+  --> shared.norn:39:8
+   |
+39 | struct Shared {
+   |        ^^^^^^ duplicate type

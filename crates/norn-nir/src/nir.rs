@@ -545,6 +545,7 @@ pub fn print_ty(program: &Program, ty: &Ty) -> String {
             print_ty(program, err)
         ),
         Ty::Task(inner) => format!("Task<{}>", print_ty(program, inner)),
+        Ty::Shared(inner) => format!("Shared<{}>", print_ty(program, inner)),
         Ty::Resource(resource) => resource.name().into(),
         Ty::Ref(inner) => format!("&{}", print_ty(program, inner)),
         Ty::Reactor(id) => program.reactors[id.index()].name.clone(),

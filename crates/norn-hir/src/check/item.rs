@@ -37,6 +37,12 @@ impl Checker {
             "Flow".into(),
             TypeName::Builtin(Ty::Resource(Resource::Flow)),
         );
+        // `Shared` likewise: registered so `struct Shared` is a redeclaration error, while
+        // `resolve_ty` intercepts the name first — the placeholder payload is never read as a
+        // type on the unqualified path.
+        self.ns[self.current]
+            .types
+            .insert("Shared".into(), TypeName::Builtin(Ty::Error));
         self.ns[self.current]
             .types
             .insert("IoError".into(), TypeName::Enum(EnumId::IO_ERROR));

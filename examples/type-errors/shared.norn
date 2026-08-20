@@ -1,0 +1,41 @@
+struct Config {
+    host: String
+}
+
+fn share_a_file(file: File) -> () {
+    let held = shared(file)
+}
+
+fn spell_a_shared_file(x: Shared<File>) -> () {
+}
+
+fn write_through(cfg: Shared<Config>) -> () {
+    let mut c = cfg
+    c.host = "elsewhere"
+}
+
+fn compare_shared(a: Shared<I64>) -> Bool {
+    return a == a
+}
+
+fn match_without_unshare(x: Shared<Option<I64>>) -> I64 {
+    match x {
+        Some(v) => v
+        None => 0
+    }
+}
+
+fn wrap<T>(x: T) -> Shared<T> {
+    return shared(x)
+}
+
+fn leak_through_a_template(file: File) -> () {
+    let held = wrap(file)
+}
+
+fn wrong_arity(x: Shared<I64, I64>) -> () {
+}
+
+struct Shared {
+    payload: I64
+}

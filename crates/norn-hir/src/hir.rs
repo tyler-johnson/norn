@@ -147,6 +147,10 @@ pub enum Ty {
     Enum(EnumId),
     Option(Box<Ty>),
     Result(Box<Ty>, Box<Ty>),
+    /// Immutable refcounted sharing: `shared(x)` builds one, field access reads through it, and
+    /// `unshare(s)` copies the payload back out. Deeply immutable and copied freely — which is
+    /// why the payload may not be affine, refused at every site that could produce one.
+    Shared(Box<Ty>),
     /// A computation that has not run. Calling a `task fn` builds one; `await` and `spawn` are what
     /// start it. Laziness is what lets a policy cancel obsolete work in M3 — it cannot cancel work
     /// it did not control the starting of.
@@ -249,6 +253,7 @@ impl Program {
             Ty::Result(ok, err) => {
                 format!("Result<{}, {}>", self.ty_name(ok), self.ty_name(err))
             }
+            Ty::Shared(inner) => format!("Shared<{}>", self.ty_name(inner)),
             Ty::Task(inner) => format!("Task<{}>", self.ty_name(inner)),
             Ty::Resource(resource) => resource.name().into(),
             Ty::Ref(inner) => format!("&{}", self.ty_name(inner)),
@@ -285,6 +290,11 @@ impl Program {
         match ty {
             Ty::Resource(_) | Ty::Task(_) => true,
             Ty::Ref(_) => false,
+            // Not recursed: a shared value is copyable by definition, and no constructor can
+            // produce a `Shared` of an affine payload — `shared(x)` refuses one, `resolve_ty`
+            // refuses the spelling, and monomorphization re-checks instantiated templates — so
+            // false is truthful for every value that can exist.
+            Ty::Shared(_) => false,
             Ty::Option(inner) => self.affine_seen(inner, visiting),
             Ty::Result(ok, err) => {
                 self.affine_seen(ok, visiting) || self.affine_seen(err, visiting)
@@ -721,6 +731,11 @@ pub enum Builtin {
     TcpClose,
     Send,
     Latest,
+    /// `shared(x)`: wrap a copy of `x` in a `Shared<T>`. Typed by what it is handed, like
+    /// `print` — the result type wraps the argument's.
+    Shared,
+    /// `unshare(s)`: copy the payload back out of a `Shared<T>`. One layer per call.
+    Unshare,
     Bytes,
     BytesLen,
     BytesSlice,
@@ -762,6 +777,8 @@ impl Builtin {
         Builtin::TcpClose,
         Builtin::Send,
         Builtin::Latest,
+        Builtin::Shared,
+        Builtin::Unshare,
         Builtin::Bytes,
         Builtin::BytesLen,
         Builtin::BytesSlice,
@@ -788,6 +805,8 @@ impl Builtin {
             "tcp_close" => Some(Builtin::TcpClose),
             "send" => Some(Builtin::Send),
             "latest" => Some(Builtin::Latest),
+            "shared" => Some(Builtin::Shared),
+            "unshare" => Some(Builtin::Unshare),
             "bytes" => Some(Builtin::Bytes),
             "bytes_len" => Some(Builtin::BytesLen),
             "bytes_slice" => Some(Builtin::BytesSlice),
@@ -816,6 +835,8 @@ impl Builtin {
             Builtin::TcpClose => "tcp_close",
             Builtin::Send => "send",
             Builtin::Latest => "latest",
+            Builtin::Shared => "shared",
+            Builtin::Unshare => "unshare",
             Builtin::Bytes => "bytes",
             Builtin::BytesLen => "bytes_len",
             Builtin::BytesSlice => "bytes_slice",
@@ -841,6 +862,8 @@ impl Builtin {
     pub fn is_pure(self) -> bool {
         match self {
             Builtin::ListenerPort
+            | Builtin::Shared
+            | Builtin::Unshare
             | Builtin::Bytes
             | Builtin::BytesLen
             | Builtin::BytesSlice
@@ -877,6 +900,8 @@ impl Builtin {
             | Builtin::ListenerPort
             | Builtin::Send
             | Builtin::Latest
+            | Builtin::Shared
+            | Builtin::Unshare
             | Builtin::Bytes
             | Builtin::BytesLen
             | Builtin::BytesSlice
@@ -901,9 +926,10 @@ impl Builtin {
         }
     }
 
-    /// Parameter types and result type. `print`, `send`, and `latest` are the builtins whose types
-    /// depend on what they are handed, spelled here as `Ty::Error` — which every type fits — and
-    /// checked properly at the call site rather than pretended to have a type they do not.
+    /// Parameter types and result type. `print`, `send`, `latest`, `shared`, and `unshare` are
+    /// the builtins whose types depend on what they are handed, spelled here as `Ty::Error` —
+    /// which every type fits — and checked properly at the call site rather than pretended to
+    /// have a type they do not.
     ///
     /// The socket builtins are where borrowing earns its keep: reading and writing look at a
     /// descriptor, `tcp_close` takes it away, and the difference is spelled `&`. That is what makes
@@ -931,6 +957,8 @@ impl Builtin {
             Builtin::TcpClose => (vec![connection()], task(Ty::Unit)),
             Builtin::Send => (vec![Ty::Error, Ty::Error], task(Ty::Unit)),
             Builtin::Latest => (vec![Ty::Error], Ty::Error),
+            Builtin::Shared => (vec![Ty::Error], Ty::Error),
+            Builtin::Unshare => (vec![Ty::Error], Ty::Error),
             Builtin::Bytes => (vec![Ty::Str], Ty::Bytes),
             Builtin::BytesLen => (vec![Ty::Bytes], Ty::I64),
             Builtin::BytesSlice => (vec![Ty::Bytes, Ty::I64, Ty::I64], Ty::Bytes),

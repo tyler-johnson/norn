@@ -115,6 +115,12 @@ impl<'p> Registry<'p> {
                 self.intern(ty);
                 self.walk(inner);
             }
+            // A named intern like Task, not a synthetic enum: `Shared<T>` is a pointer, not a
+            // variant shape.
+            Ty::Shared(inner) => {
+                self.intern(ty);
+                self.walk(inner);
+            }
             Ty::Input(inner) | Ty::Signal(inner) => {
                 self.intern(ty);
                 self.walk(inner);

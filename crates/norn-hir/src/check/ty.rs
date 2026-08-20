@@ -157,6 +157,34 @@ impl Checker {
                             None => Ty::Error,
                         };
                     }
+                    "Shared" => {
+                        return match self.type_args(name, args, 1, ty.span) {
+                            Some(mut args) => {
+                                let inner = args.remove(0);
+                                // Refused as a spelling, not just at `shared(x)`: a signature
+                                // taking `Shared<File>` would promise a value no expression can
+                                // build. (A forward-referenced struct's fields may be mid-fill
+                                // here and under-report — harmless, since the type stays
+                                // uninhabited; a constructor for it is refused below.)
+                                if self.program.affine(&inner) {
+                                    self.push(
+                                        Diagnostic::new(
+                                            ty.span,
+                                            format!(
+                                                "a `Shared` value cannot hold {}",
+                                                self.program.ty_name(&inner)
+                                            ),
+                                        )
+                                        .label("resources and tasks have exactly one owner")
+                                        .note("`Shared` is for plain data — it is deeply immutable and copied freely"),
+                                    );
+                                    return Ty::Error;
+                                }
+                                Ty::Shared(Box::new(inner))
+                            }
+                            None => Ty::Error,
+                        };
+                    }
                     // A signal's own type has no spelling. Registering the names here is what
                     // turns the attempt into a teaching diagnostic instead of "unknown type", and
                     // it is also why there is no escape check to write: a signal cannot appear in
@@ -356,6 +384,7 @@ impl Checker {
                         "write both, as in `Result<Config, LoadError>` — there is no default error type"
                     }
                     "Task" => "write the value the task produces, as in `Task<()>`",
+                    "Shared" => "write the payload type, as in `Shared<Config>`",
                     _ => "write the element type, as in `Option<I64>`",
                 }),
             );

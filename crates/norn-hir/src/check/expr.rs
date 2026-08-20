@@ -638,7 +638,14 @@ impl Checker {
             return self.error_expr(span);
         }
 
-        let Ty::Struct(id) = base.ty else {
+        // Field access strips every `Shared` layer of the base — the same rule lowering applies
+        // when it pushes deref projections. The base keeps its `Shared` type; that preserved
+        // truth is what lowering reads.
+        let mut base_ty = &base.ty;
+        while let Ty::Shared(inner) = base_ty {
+            base_ty = inner;
+        }
+        let Ty::Struct(id) = *base_ty else {
             let message = format!("{} has no fields", self.program.ty_name(&base.ty));
             let diagnostic =
                 Diagnostic::new(span, message).label(format!("`{}` accessed here", name.name));
@@ -1146,7 +1153,19 @@ impl Checker {
                     self.push(diagnostic);
                     return;
                 }
-                ExprKind::Field { base, .. } => cursor = base,
+                ExprKind::Field { base, .. } => {
+                    // A read reaches through a `Shared` (field access derefs), so without this
+                    // guard the walk would too — and a shared value is immutable.
+                    if matches!(base.ty.owned(), Ty::Shared(_)) {
+                        self.push(
+                            Diagnostic::new(span, "cannot assign through a shared value")
+                                .label("shared values are immutable")
+                                .note("`unshare` it, change the copy, and `shared` the result"),
+                        );
+                        return;
+                    }
+                    cursor = base;
+                }
                 ExprKind::Error => return,
                 _ => {
                     self.error(span, "only a variable or one of its fields can be assigned");

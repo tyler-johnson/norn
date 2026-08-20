@@ -399,6 +399,7 @@ impl Checker {
                 Box::new(self.subst(err, args, at, depth)),
             ),
             Ty::Task(inner) => Ty::Task(Box::new(self.subst(inner, args, at, depth))),
+            Ty::Shared(inner) => Ty::Shared(Box::new(self.subst(inner, args, at, depth))),
             Ty::Ref(inner) => Ty::Ref(Box::new(self.subst(inner, args, at, depth))),
             Ty::Input(inner) => Ty::Input(Box::new(self.subst(inner, args, at, depth))),
             Ty::Signal(inner) => Ty::Signal(Box::new(self.subst(inner, args, at, depth))),
@@ -485,6 +486,7 @@ impl Checker {
                 self.solve(pe, fe, bindings);
             }
             (Ty::Task(p), Ty::Task(f)) => self.solve(p, f, bindings),
+            (Ty::Shared(p), Ty::Shared(f)) => self.solve(p, f, bindings),
             (Ty::Input(p), Ty::Input(f)) => self.solve(p, f, bindings),
             (Ty::Signal(p), Ty::Signal(f)) => self.solve(p, f, bindings),
             (Ty::Event(p), Ty::Event(f)) => self.solve(p, f, bindings),
@@ -524,6 +526,7 @@ impl Checker {
             }
             Ty::Option(inner)
             | Ty::Task(inner)
+            | Ty::Shared(inner)
             | Ty::Ref(inner)
             | Ty::Input(inner)
             | Ty::Signal(inner)
@@ -567,6 +570,7 @@ impl Checker {
                 .is_none_or(|binding| binding.is_none()),
             Ty::Option(inner)
             | Ty::Task(inner)
+            | Ty::Shared(inner)
             | Ty::Ref(inner)
             | Ty::Input(inner)
             | Ty::Signal(inner)
@@ -940,6 +944,7 @@ impl Checker {
             Ty::Param { .. } => true,
             Ty::Option(inner)
             | Ty::Task(inner)
+            | Ty::Shared(inner)
             | Ty::Ref(inner)
             | Ty::Input(inner)
             | Ty::Signal(inner)
@@ -1348,10 +1353,33 @@ impl Checker {
                 callee: self.mono_callee(*callee, cx),
                 args: args.iter().map(|arg| self.mono_expr(arg, cx)).collect(),
             },
-            ExprKind::Builtin { builtin, args } => ExprKind::Builtin {
-                builtin: *builtin,
-                args: args.iter().map(|arg| self.mono_expr(arg, cx)).collect(),
-            },
+            ExprKind::Builtin { builtin, args } => {
+                let args: Vec<Expr> = args.iter().map(|arg| self.mono_expr(arg, cx)).collect();
+                // The one re-check in the walk: `shared(x)` at `T = File` is invisible to the
+                // template — `Ty::Param` is not affine — and only exists once substituted, so
+                // the creation-site refusal has to run again here, at the instantiation site
+                // where the user can act.
+                if *builtin == Builtin::Shared
+                    && let Some(arg) = args.first()
+                    && self.program.affine(arg.ty.owned())
+                {
+                    self.push(
+                        Diagnostic::new(
+                            cx.at,
+                            format!(
+                                "`shared` cannot take {}",
+                                self.program.ty_name(arg.ty.owned())
+                            ),
+                        )
+                        .label("instantiated here with an affine payload")
+                        .note("resources and tasks have exactly one owner; share the data, not the handle"),
+                    );
+                }
+                ExprKind::Builtin {
+                    builtin: *builtin,
+                    args,
+                }
+            }
             ExprKind::Construct { ctor, args } => ExprKind::Construct {
                 ctor: match ctor {
                     Ctor::Struct(id) => Ctor::Struct(self.mono_struct_id(*id, cx)),

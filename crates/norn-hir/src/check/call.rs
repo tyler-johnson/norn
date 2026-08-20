@@ -458,6 +458,8 @@ impl Checker {
         match builtin {
             Builtin::Send => return self.check_send(args, span),
             Builtin::Latest => return self.check_latest(args, span),
+            Builtin::Shared => return self.check_shared(args, span),
+            Builtin::Unshare => return self.check_unshare(args, span),
             _ => {}
         }
 
@@ -538,6 +540,65 @@ impl Checker {
                 args: vec![target],
             },
             ty: *element,
+            span,
+        }
+    }
+
+    /// `shared(x)`: the result type wraps the argument's, so the builtin is typed by what it is
+    /// handed, like `latest`. The payload may not be affine — a shared value is copied freely,
+    /// and a descriptor has exactly one owner. `shared(&x)` shares a copy of the pointee: `&T`
+    /// and `T` are the same values, and the affine test runs on the pointee.
+    pub(super) fn check_shared(&mut self, args: &[ast::Arg], span: Span) -> Expr {
+        let target = self.check_expr(&args[0].value, None);
+        if target.ty.is_error() {
+            return self.error_expr(span);
+        }
+        let payload = target.ty.owned().clone();
+        if self.program.affine(&payload) {
+            let message = format!("`shared` cannot take {}", self.program.ty_name(&payload));
+            self.push(
+                Diagnostic::new(args[0].span, message)
+                    .label("a shared value is copied freely")
+                    .note("resources and tasks have exactly one owner; share the data, not the handle"),
+            );
+            return self.error_expr(span);
+        }
+        Expr {
+            kind: ExprKind::Builtin {
+                builtin: Builtin::Shared,
+                args: vec![target],
+            },
+            ty: Ty::Shared(Box::new(payload)),
+            span,
+        }
+    }
+
+    /// `unshare(s)`: copy the payload back out — one layer per call, so unsharing a
+    /// `Shared<Shared<T>>` produces a `Shared<T>`. The escape hatch for everything field access
+    /// cannot reach through a `Shared`, `match` on a shared enum above all.
+    pub(super) fn check_unshare(&mut self, args: &[ast::Arg], span: Span) -> Expr {
+        let target = self.check_expr(&args[0].value, None);
+        if target.ty.is_error() {
+            return self.error_expr(span);
+        }
+        let Ty::Shared(inner) = target.ty.owned().clone() else {
+            let message = format!(
+                "`unshare` needs a shared value, not {}",
+                self.program.ty_name(&target.ty)
+            );
+            self.push(
+                Diagnostic::new(args[0].span, message)
+                    .label("not a `Shared`")
+                    .note("wrap one with `shared(x)`"),
+            );
+            return self.error_expr(span);
+        };
+        Expr {
+            kind: ExprKind::Builtin {
+                builtin: Builtin::Unshare,
+                args: vec![target],
+            },
+            ty: *inner,
             span,
         }
     }
