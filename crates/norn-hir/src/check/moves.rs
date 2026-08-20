@@ -1,7 +1,10 @@
 use super::*;
 
 impl Checker {
-    /// Pass six: what an affine value's single owner means for a body that has already typed.
+    /// Pass six: what a moved value's single owner means for a body that has already typed.
+    /// Ordinary values move (BOOTSTRAP §8 item 6c): the tracked set is `Ty::moves` — structs,
+    /// enums, Option, Result, resources, and tasks — so `consume(body); log(body)` is the same
+    /// error double-close always was.
     ///
     /// It runs over typed HIR rather than inside `check_fns` because it needs both halves of what
     /// checking produced — types, to know which values move, and spans, to say where — and needs to
@@ -27,8 +30,17 @@ impl Checker {
             moves.value(&function.body);
             errors.push((self.fn_owner[index], moves.errors));
         }
+        // Deduplicated on (span, message): checking is per instance, so a double use written once
+        // in a template would otherwise report identically once per instantiation.
         for (owner, found) in errors {
-            self.errors[owner].extend(found);
+            for diagnostic in found {
+                let seen = self.errors[owner]
+                    .iter()
+                    .any(|d| d.span == diagnostic.span && d.message == diagnostic.message);
+                if !seen {
+                    self.errors[owner].push(diagnostic);
+                }
+            }
         }
     }
 }
@@ -49,11 +61,31 @@ pub(super) fn task_advice() -> String {
     "a task is work to be done once; build another call if it should happen again".to_string()
 }
 
+/// Whether a match scrutinee was *read* rather than moved: a borrowed name, or a field chain
+/// rooted at a name — the two shapes `value()` walks with `place()`. These are what a match keeps
+/// reading between guards, and the only shapes safe to re-walk.
+fn read_as_place(expr: &Expr) -> bool {
+    match &expr.kind {
+        // A bare name moves into the match unless it is borrowed.
+        ExprKind::Local(_) => expr.ty.is_ref(),
+        ExprKind::Field { base, .. } => rooted_at_local(base),
+        _ => false,
+    }
+}
+
+fn rooted_at_local(expr: &Expr) -> bool {
+    match &expr.kind {
+        ExprKind::Local(_) => true,
+        ExprKind::Field { base, .. } => rooted_at_local(base),
+        _ => false,
+    }
+}
+
 /// One function body's worth of ownership, tracked as it is walked.
 ///
 /// `moved[local]` is `None` while the name still holds its value and `Some(span)` once it does not,
-/// remembering where it went so the diagnostic can show both ends. Only affine locals ever change
-/// state; everything else is copied, and copying is not an event.
+/// remembering where it went so the diagnostic can show both ends. Only move-typed locals ever
+/// change state; everything else is copied, and copying is not an event.
 struct Moves<'p> {
     program: &'p Program,
     locals: &'p [LocalDef],
@@ -84,12 +116,15 @@ impl Moves<'_> {
         }
         match &expr.kind {
             ExprKind::Local(id) => {
-                if self.affine(*id) && self.live(*id, expr.span) {
+                if self.moves(*id) && self.live(*id, expr.span) {
                     self.moved[id.index()] = Some(expr.span);
                 }
             }
-            // Moving one field would leave the rest of the value with no owner and no name. A
-            // `match` is how an aggregate is taken apart, and it moves the whole thing.
+            // A field read copies — single ownership applies to whole values, so reading `p.x`
+            // takes nothing — unless the field's own type is *affine*: a copied descriptor would
+            // be a second owner, and a `match` is how a resource-holding aggregate is taken
+            // apart. The gate is deliberately `affine`, not `moves`: contents are exactly what a
+            // field read is about.
             ExprKind::Field { base, index } => {
                 if self.program.affine(&expr.ty) {
                     self.out_of_field(base, *index, expr.span);
@@ -105,7 +140,7 @@ impl Moves<'_> {
     fn place(&mut self, expr: &Expr) {
         match &expr.kind {
             ExprKind::Local(id) => {
-                if self.affine(*id) {
+                if self.moves(*id) {
                     self.live(*id, expr.span);
                 }
             }
@@ -148,7 +183,7 @@ impl Moves<'_> {
             }
             ExprKind::Match { scrutinee, arms } => {
                 self.value(scrutinee);
-                self.arms(arms);
+                self.arms(scrutinee, arms);
             }
             ExprKind::If { cond, then, els } => {
                 self.value(cond);
@@ -176,8 +211,8 @@ impl Moves<'_> {
                 self.value(expr)
             }
             ExprKind::Scope { body } => self.value(body),
-            // A reactor handle is not affine, so reaching one of its members reads a name and takes
-            // nothing.
+            // A reactor handle copies — it names something a scope owns — so reaching one of its
+            // members reads a name and takes nothing.
             ExprKind::ReactorInput { reactor, .. } | ExprKind::ReactorExport { reactor, .. } => {
                 self.place(reactor)
             }
@@ -188,7 +223,7 @@ impl Moves<'_> {
                 self.diverged = true;
             }
             // The loop rule: a body — condition included, it re-runs every iteration — may not
-            // move an affine value declared outside the loop. Body-locals are fresh each pass and
+            // move a value declared outside the loop. Body-locals are fresh each pass and
             // move freely. A legal body is therefore a no-op on outer ownership, which is what
             // lets one walk stand for every iteration: afterwards `moved` is restored to the entry
             // state, and the body-locals' stale entries are unobservable because nothing after the
@@ -245,7 +280,7 @@ impl Moves<'_> {
     }
 
     /// The arms of a `match`, each starting from the state the scrutinee left behind.
-    fn arms(&mut self, arms: &[Arm]) {
+    fn arms(&mut self, scrutinee: &Expr, arms: &[Arm]) {
         let mut entry = self.moved.clone();
         let mut outcomes = Vec::new();
         for arm in arms {
@@ -256,6 +291,15 @@ impl Moves<'_> {
                 // arm after it. That is the difference between a guard and a body: one ran, the
                 // other ran if it matched.
                 self.value(guard);
+                // When the scrutinee was read as a place — a borrowed name, or a field chain —
+                // the match is still reading it after every failed guard, so a guard that moved
+                // its root has taken what the next arm examines. Re-walking such a scrutinee is a
+                // liveness check and nothing else. The filter is load-bearing twice over: an
+                // owned name moved *into* the match would re-report its own legitimate move, and
+                // a scrutinee with a call in it would double-count the call's argument moves.
+                if read_as_place(scrutinee) {
+                    self.place(scrutinee);
+                }
                 entry = self.moved.clone();
             }
             outcomes.push(self.branch(|this| this.value(&arm.body)));
@@ -320,8 +364,9 @@ impl Moves<'_> {
         }
     }
 
-    /// Names a pattern introduces. They are fresh, and binding part of a scrutinee is how an affine
-    /// aggregate is taken apart — the scrutinee moved as a whole, and the pieces are named here.
+    /// Names a pattern introduces. They are fresh, and binding part of a scrutinee is how an owned
+    /// aggregate is taken apart — the scrutinee moved as a whole, and the pieces are named here —
+    /// or, through a borrow, how its pieces are copied out.
     fn bind(&mut self, pat: &Pat) {
         match &pat.kind {
             PatKind::Bind(id) => {
@@ -353,9 +398,11 @@ impl Moves<'_> {
         union(frame, &moved);
     }
 
-    /// Report every affine local the loop moved without declaring. `summary` is everything that
-    /// can reach the back edge or the exit; only affine locals ever hold `Some`, so affinity needs
-    /// no separate check.
+    /// Report every move-typed local the loop moved without declaring. `summary` is everything
+    /// that can reach the back edge or the exit; only move-typed locals ever hold `Some`, so the
+    /// move set needs no separate check. The advice holds for ordinary values as it did for
+    /// resources: `x = f(x)` inside the body is legal — the name owns again at the bottom of the
+    /// pass — and a value each pass should own outright is declared inside the loop.
     fn escaped_moves(
         &mut self,
         entry: &[Option<Span>],
@@ -388,8 +435,8 @@ impl Moves<'_> {
         }
     }
 
-    fn affine(&self, id: LocalId) -> bool {
-        self.program.affine(&self.locals[id.index()].ty)
+    fn moves(&self, id: LocalId) -> bool {
+        self.locals[id.index()].ty.moves()
     }
 
     /// Report a use of something that is not there any more. `false` means it was already reported
@@ -401,11 +448,15 @@ impl Moves<'_> {
         let local = &self.locals[id.index()];
         let name = local.name.clone();
         let ty = self.program.ty_name(&local.ty);
-        // What to write instead depends on what was lost. A borrow is the answer for anything with
-        // a descriptor behind it; it is not the answer for a task, which has to be built again
-        // because running it twice is what was wanted and is not what `&` would give.
+        // What to write instead depends on what was lost. A borrow is the answer for everything
+        // except a task, which has to be built again because running it twice is what was wanted
+        // and is not what `&` would give; a matchable value also gets the match spelling, because
+        // its second use is very often a `match`.
         let advice = match local.ty {
             Ty::Task(_) => task_advice(),
+            Ty::Enum(_) | Ty::Option(_) | Ty::Result(_, _) => format!(
+                "`&{name}` is how a call looks at it without taking it, and `match &{name}` is how a match does"
+            ),
             _ => format!("`&{name}` is how a call looks at it without taking it"),
         };
         self.errors.push(

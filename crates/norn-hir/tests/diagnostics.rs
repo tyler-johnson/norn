@@ -144,6 +144,115 @@ task fn main(session: Session) -> ()
 }
 ",
     );
+
+    // Single ownership applies to whole values: a field read copies, however often.
+    accepted(
+        "a field read copies",
+        "\
+struct Point {
+    x: I64
+    y: I64
+}
+
+fn main() -> I64 {
+    let p = Point(x: 1, y: 2)
+    p.x + p.x + p.y
+}
+",
+    );
+
+    // `match &x` reads; the move afterwards is the value's first and only.
+    accepted(
+        "a match through `&` is not the move",
+        "\
+enum Journal {
+    Empty
+    Entry(I64)
+}
+
+fn consume(journal: Journal) -> I64 {
+    match journal {
+        Journal.Empty => 0
+        Journal.Entry(seq) => seq
+    }
+}
+
+fn main() -> I64 {
+    let journal = Journal.Entry(7)
+    match &journal {
+        Journal.Empty => 0
+        Journal.Entry(seq) => seq
+    }
+    consume(journal)
+}
+",
+    );
+
+    // The assign-revive idiom, on an ordinary value, in a loop: the name owns again at the
+    // bottom of every pass, so the back edge finds nothing missing.
+    accepted(
+        "a list is rebuilt into its own name inside a loop",
+        "\
+enum List {
+    Nil
+    Cons(I64, List)
+}
+
+fn main() -> () {
+    let mut items = List.Nil
+    let mut n = 0
+    while n < 3 {
+        items = List.Cons(n, items)
+        n = n + 1
+    }
+    print(items)
+}
+",
+    );
+
+    // A `&Self` method reads its receiver, so calling it is not a use the next line pays for.
+    accepted(
+        "a `&Self` method leaves its receiver owned",
+        "\
+trait Describe {
+    fn describe(value: &Self) -> String
+}
+
+struct Config {
+    host: String
+}
+
+impl Describe for Config {
+    fn describe(value: &Self) -> String {
+        value.host
+    }
+}
+
+fn main() -> () {
+    let config = Config(host: \"localhost\")
+    print(config.describe())
+    print(config.describe())
+}
+",
+    );
+
+    // `print(&p)` is the non-consuming spelling — the documented answer to `print(p); print(p)`.
+    accepted(
+        "printing through a borrow looks without taking",
+        "\
+struct Point {
+    x: I64
+    y: I64
+}
+
+fn main() -> () {
+    let p = Point(x: 1, y: 2)
+    print(&p)
+    print(&p)
+    print(p)
+}
+",
+    );
 }
 
 /// The read half of borrowing (BOOTSTRAP §8 item 6c): field access and `match` reach through a

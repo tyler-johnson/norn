@@ -227,6 +227,28 @@ impl Ty {
     pub fn is_ref(&self) -> bool {
         matches!(self, Ty::Ref(_))
     }
+
+    /// Whether using a value of this type as a value consumes it — the move set, BOOTSTRAP §8
+    /// item 6c. A struct, enum, Option, or Result is an owner whatever it holds, so the test is
+    /// the outermost constructor alone: no recursion, no table lookups. Resources and tasks were
+    /// always here; everything else copies — scalars, `Str`, and `Bytes` because their values are
+    /// cheap or interned, `Shared` because being copied freely is its whole point, handles because
+    /// they name something a scope owns, `Ref` because not owning is *its* whole point, and
+    /// `Param`/`Never`/`Error` because a hole, an absence, and a failure own nothing.
+    ///
+    /// Distinct from `Program::affine` on purpose: `affine` asks "may this be shared or held" and
+    /// must reach through contents; `moves` asks "does whole-value use consume" and must not.
+    pub fn moves(&self) -> bool {
+        matches!(
+            self,
+            Ty::Struct(_)
+                | Ty::Enum(_)
+                | Ty::Option(_)
+                | Ty::Result(_, _)
+                | Ty::Resource(_)
+                | Ty::Task(_)
+        )
+    }
 }
 
 pub struct Program {
@@ -267,14 +289,15 @@ impl Program {
         }
     }
 
-    /// Whether a value of this type is moved by being used, rather than copied.
-    ///
-    /// The affine set in v0 is deliberately small: operating-system resources, because a descriptor
-    /// has exactly one closer; a built-but-unstarted `Task<T>`, because starting one twice would run
-    /// its effects twice and because it may be carrying a resource; and any aggregate holding one of
-    /// those, because a struct is no less an owner than a variable. Everything else is copied, which
-    /// is what an interpreter that clones values already does and what keeps `print(p); print(p)`
-    /// legal. Ordinary values become move-checked when M5 makes the copy cost something.
+    /// Whether a value of this type may reach a resource — the sharing/holding question, distinct
+    /// from `Ty::moves`, the whole-value-use question. `moves` says a struct of two I64s is
+    /// consumed by use; `affine` says it may still be shared, matched through a borrow, and held
+    /// by a reactor, because copying it duplicates no descriptor. The affine set is deliberately
+    /// small: operating-system resources, because a descriptor has exactly one closer; a
+    /// built-but-unstarted `Task<T>`, because starting one twice would run its effects twice and
+    /// because it may be carrying a resource; and any aggregate reaching one of those, because a
+    /// struct is no less an owner than a variable — which is why this test recurses through
+    /// contents where `moves` reads the outermost constructor alone.
     ///
     /// A borrow is never affine: not owning it is the whole point.
     pub fn affine(&self, ty: &Ty) -> bool {

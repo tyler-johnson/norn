@@ -1,0 +1,59 @@
+error: `p` has already been moved
+  --> plain-moves.norn:40:11
+   |
+40 |     print(p)
+   |           ^ used here
+  --> plain-moves.norn:39:11
+   |
+39 |     print(p)
+   |           ^ moved here
+   = note: a `Point` has one owner, and using it as a value is what hands it over
+   = note: `&p` is how a call looks at it without taking it
+
+error: `journal` has already been moved
+  --> plain-moves.norn:47:39
+   |
+47 |         Journal.Entry(_, _) => newest(&journal)
+   |                                       ^^^^^^^^ used here
+  --> plain-moves.norn:45:11
+   |
+45 |     match journal {
+   |           ^^^^^^^ moved here
+   = note: a `Journal` has one owner, and using it as a value is what hands it over
+   = note: `&journal` is how a call looks at it without taking it, and `match &journal` is how a match does
+
+error: `p` has already been moved
+  --> plain-moves.norn:55:5
+   |
+55 |     p.x
+   |     ^ used here
+  --> plain-moves.norn:54:13
+   |
+54 |     let q = p
+   |             ^ moved here
+   = note: a `Point` has one owner, and using it as a value is what hands it over
+   = note: `&p` is how a call looks at it without taking it
+
+error: `p` has already been moved
+  --> plain-moves.norn:60:19
+   |
+60 |     Pair(a: p, b: p)
+   |                   ^ used here
+  --> plain-moves.norn:60:13
+   |
+60 |     Pair(a: p, b: p)
+   |             ^ moved here
+   = note: a `Point` has one owner, and using it as a value is what hands it over
+   = note: `&p` is how a call looks at it without taking it
+
+error: `journal` cannot be moved inside a loop
+  --> plain-moves.norn:69:29
+   |
+69 |         total = total + sum(journal)
+   |                             ^^^^^^^ moved here
+  --> plain-moves.norn:65:20
+   |
+65 | fn sums_every_pass(journal: Journal) -> I64 {
+   |                    ^^^^^^^ …but it was declared outside the loop
+   = note: a `Journal` has one owner; the first pass of the loop hands it over, and the next would find it gone
+   = note: declare it inside the loop if each pass should have its own

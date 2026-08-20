@@ -1,0 +1,73 @@
+// Ordinary values move (BOOTSTRAP §8 item 6c). A struct, enum, Option, or Result has one owner,
+// exactly as a Connection always did: using it as a value hands it over, and the name holds
+// nothing afterwards. Each function here is wrong in exactly one way, and each is one `&` — or
+// one rebuild — from correct.
+
+struct Point {
+    x: I64
+    y: I64
+}
+
+struct Pair {
+    a: Point
+    b: Point
+}
+
+enum Journal {
+    Empty
+    Entry(I64, Journal)
+}
+
+fn newest(journal: &Journal) -> I64 {
+    match journal {
+        Journal.Empty => 0
+        Journal.Entry(seq, _) => seq
+    }
+}
+
+fn sum(journal: Journal) -> I64 {
+    match journal {
+        Journal.Empty => 0
+        Journal.Entry(seq, rest) => seq + sum(rest)
+    }
+}
+
+// The BOOTSTRAP §4 prediction, landed: `print` takes its argument like any call, and
+// `print(&p); print(&p)` is the spelling that looks twice.
+fn prints_twice() -> () {
+    let p = Point(x: 1, y: 2)
+    print(p)
+    print(p)
+}
+
+// A match moves its scrutinee, so the arm cannot also hand the whole value on.
+fn matches_then_uses(journal: Journal) -> I64 {
+    match journal {
+        Journal.Empty => 0
+        Journal.Entry(_, _) => newest(&journal)
+    }
+}
+
+// The right side of a `let` is a use like any other: the new name owns, and the old one is done.
+fn assigns_it_away() -> I64 {
+    let p = Point(x: 1, y: 2)
+    let q = p
+    p.x
+}
+
+// Both fields want the same value, and one argument list cannot hand it over twice.
+fn doubles_a_payload(p: Point) -> Pair {
+    Pair(a: p, b: p)
+}
+
+// The loop rule, on an ordinary value: the first pass hands the journal to `sum`, and the next
+// pass would find the name empty.
+fn sums_every_pass(journal: Journal) -> I64 {
+    let mut total = 0
+    let mut n = 3
+    while n > 0 {
+        total = total + sum(journal)
+        n = n - 1
+    }
+    total
+}
