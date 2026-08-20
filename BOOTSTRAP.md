@@ -152,7 +152,10 @@ Alternatives considered:
   observe the difference — the interpreter clones, and the native backend that would make a copy
   cost something is M5. Move checking for ordinary values arrives with it, and until then
   `print(p); print(p)` is legal. (Landed: §8 item 6c, 2026-08-19 — `print(p); print(p)` on a
-  struct is now the predicted compile error, and `print(&p)` is the spelling that looks twice.)
+  struct is now the predicted compile error, and `print(&p)` is the spelling that looks twice.
+  Reversed by decision the same day: the mode doctrine — `DESIGN.md` §7, §8 item 5 — returns
+  ordinary values to copying; moves confine to the affine tier plus inferred `sink`, and the 6c
+  machinery becomes that checker.)
 
   `Shared<T>` is deferred for the same reason: with ordinary values copyable it is a representation
   choice with no observable effect, and an inert type in the language is worse than an absent one.
@@ -165,7 +168,8 @@ Alternatives considered:
 ### Excluded, deliberately
 
 Generics; traits; a borrow checker (`&T` is permitted only as a non-escaping parameter, enforced
-syntactically); dynamic subgraphs (`switch`); macros and derives; a multi-threaded work-stealing
+syntactically — and the exclusion is now permanent: the mode decision, §8 item 5, replaces `&`
+with parameter modes rather than ever growing the checker); dynamic subgraphs (`switch`); macros and derives; a multi-threaded work-stealing
 scheduler; capability *inference*. Modules were on this list — "beyond a single file" — until the
 post-M6 module work landed them: a program is now a graph of files, subdirectories included, and
 §8 item 12 records the surface that settled.
@@ -177,7 +181,9 @@ outlives the expression building it is a `Task<T>`, so `spawn` and `after` rejec
 argument and that is the whole of the escape analysis. `await f(&x)` is exempt because the awaiting
 task is parked for the duration and ownership is unique: it cannot invalidate the borrow itself, and
 nobody else holds the value. `&mut` is left with a diagnostic rather than a meaning, since one
-exclusive-borrow rule is a borrow checker.
+exclusive-borrow rule is a borrow checker. That positional discipline turned out to be the
+destination rather than a stopgap: the mode decision (§8 item 5) keeps "no borrow can be named or
+stored" as a permanent fact of the language and removes the `&` spelling itself.
 
 The cut worth defending is **static reactor graphs**. Dynamic switching is where graph arenas,
 region reclamation, and subscription lifetimes all become load-bearing — it is the majority of
@@ -322,7 +328,9 @@ descriptor cannot be written down and restored, and an input declared `overflow:
 leak a socket every time its mailbox filled. `Shared<T>` and ordinary-value moves were deferred to
 M5; see §4 — both since landed by §8 item 6, whose 6c wave extends this milestone's done-when to
 ordinary values: use-after-move on a struct is now the same compile error it always was on a
-Connection.
+Connection. The mode decision (§8 item 5) withdraws that extension: ordinary values return to
+copying, and the milestone's obligation settles back on the affine set — where consumption becomes
+part of the signature, inferred as `sink`.
 
 *Done when:* use-after-move and double-close are compile errors, and a cancelled request is
 observably leak-free.
@@ -470,18 +478,34 @@ Ordered roughly by when it becomes worth doing, not by importance:
    semantic tokens are what replace that guess with the checker's answer.
 4. **Cranelift backend.** Replaces the Rust emitter once NIR has stopped churning; removes `rustc`
    from the deployment path.
-5. **Borrow checking.** Until then, `&T` as a non-escaping parameter only, and no `&mut` at all.
-   Partial moves wait here too: M4 rejects moving out of a field rather than tracking it, because a
-   half-moved struct has no name in this language and `match` already takes one apart.
+5. **Parameter modes — the borrow checker is cancelled.** Decided 2026-08-19; `DESIGN.md` §7 and
+   §14 record the doctrine. Norn will never have a borrow checker or a tracing collector. The
+   surface is three modes on parameters — `T` reads (unmarked, the default), `mut T` writes back,
+   `sink T` consumes — with no `&`, no lifetimes, and no reference types anywhere; ordinary values
+   copy, the affine tier moves, and the acyclic-heap theorem carries safety. `sink` is inferred
+   from bodies by a call-graph fixpoint (the same shape `uses` inference will take, item 8) and
+   enforced at call sites; writing it is an assertion — legal on any type, revoking the caller's
+   name even without physical consumption — and required only where no body exists to infer from
+   (`sink Self` on a trait method). Call sites stay unmarked for all three modes: no ceremony
+   characters, the compiler and LSP surface the information. `mut` stays declared on purpose — a
+   writeback changes the caller's value, and stating that up front is kept deliberately.
 
-   **The read half landed with item 6c (2026-08-19).** A `&T` parameter is now usable, not just
-   passable: field access reads through a borrow, `match` on a borrowed scrutinee types against
-   the pointee and binds owned copies (refused whole when the pointee reaches a resource — a
-   copied descriptor would be a second owner), and a trait may declare `value: &Self`, the call
-   site auto-borrowing an owned receiver. All of it positional still — no named borrows, no ref
-   returns or fields, and the borrow erased before NIR. **What remains as this item is the write
-   half:** `&mut`, first consumer `push(&mut buf, x)`, plus everything that needs real analysis —
-   naming, returning, and storing borrows.
+   The read half that landed with item 6c survives in full as the unmarked mode's plumbing; what
+   this item now carries is the migration, in three waves. **The modes wave** (purely static):
+   un-flip copy-default (moves.rs scopes back to the affine tier; its 6c machinery is retained as
+   the affine/sink checker), sink inference plus the assertive-`sink` check, receiver modes
+   (`Self` reads by default), `&` removed with teaching diagnostics, mode moved off `Ty::Ref` onto
+   the parameter (types are always owned — the `owned()`/`is_ref()` peels dissolve), and the
+   corpus re-migrated (std/list's `&`s come back out; std/http's `respond` family keeps its
+   consumption contract, now inferred). **The `mut` wave** (the one that touches NIR and both
+   engines): writeback pairs in the call encoding, interp copy-in/copy-out via the existing
+   caller-dest mechanism, codegen real `&mut` — semantically copy-in/copy-out, representationally
+   in place, sound because argument-list exclusivity refuses the same root twice when one use
+   writes; `mut` refused on `task fn`s until writebacks meet the resumed-await protocol. **The
+   sequence wave** (what was 5b): the contiguous COW-copyable sequence, first `mut` consumer
+   `push(mut buf, x)`, and the in-place-vs-threaded-clone measurement. Partial-move tracking stays
+   never: flat rejection plus `match` remains the answer, because a half-moved struct has no name
+   in this language.
 6. **Move checking for ordinary values, and `Shared<T>`.** Both wait on a typed value
    representation — and the representation landed first, as its own wave: **6a, typed NIR and a
    typed backend (2026-08-19), zero surface change.** The item decomposed as 6a, 6b (`Shared<T>`,
@@ -578,8 +602,9 @@ Ordered roughly by when it becomes worth doing, not by importance:
    executable spec, and ownership-errors/plain-moves.norn pins the wording.
 
    Unlocked and NOT this wave: full flattening — the representation payoff 6a deferred because
-   only moves make it sound. Item 5 keeps the write half: `&mut`, first consumer
-   `push(&mut buf, x)`.
+   only moves make it sound. Item 5 kept the write half — and was then re-cut the same day by the
+   mode decision: the surface this wave flipped is deliberately reversed (ordinary values return
+   to copying, `&` leaves the language) while every piece of its machinery is retained; see item 5.
 7. **Generics and traits — landed.** The gate on the general standard library, shipped as one
    wave (2026-08-19) because each half is the other's first consumer: bounds need traits to
    name, and a trait's worth shows first on a type parameter. Item 12 records what "collections"
@@ -640,6 +665,9 @@ Ordered roughly by when it becomes worth doing, not by importance:
    infallible rendering only, and std/bytes's fallible `to_string(Bytes) -> Option<String>`
    stays a free function, fallibility living in the type as the naming format demands.
 8. **Capability inference, test handlers.** `uses { ... }` is checked but not inferred in v0.
+   Decided 2026-08-19: inference is the destination — the compiler computes the set, and a written
+   `uses` becomes an optional public bound, the same inferred-by-default, declared-as-assertion
+   shape item 5 gives `sink` (`DESIGN.md` §6 carries the note).
 9. **Derives and constrained attributes.** `@derive(Json)`, `@http_api` — `DESIGN.md` §8 stage 2.
 10. **Durable state projections, supervision policy.**
 11. **The rest of HTTP, and general flows.** M6's wire is deliberately narrow, and each narrowing
@@ -770,7 +798,7 @@ Ordered roughly by when it becomes worth doing, not by importance:
     leaves the contiguous one's spelling the open question. That half's pricing gate has lifted —
     item 6b's typed views price a buffer honestly, the same wave that made `Bytes` slices
     zero-copy — so what the contiguous sequence waits on now is its mutation story:
-    `push(&mut buf, x)` wants item 5's write half, which follows 6c. Whatever
+    `push(mut buf, x)` wants item 5's `mut` wave, and the type itself is item 5's third. Whatever
     lands must make finiteness structural, because `for` earns its way into a turn only by being
     bounded by the data (`DESIGN.md` §14).
     What never dissolves is a small intrinsic layer at the syscall boundary, which is also where

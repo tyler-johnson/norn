@@ -43,7 +43,7 @@ Functional reactive programming is often experienced through libraries layered o
 
 The proposed language is intended for ordinary server software: HTTP services, outbound requests, file and socket I/O, streaming, background work, timers, configuration, and long-lived state. It separates finite asynchronous procedures from persistent reactive relationships. `Task<T>` represents one eventual result; `Flow<T>` represents a backpressured sequence; `Event<T>` represents discrete occurrences; `Signal<T>` represents a current value that changes over time; and a `Reactor` owns a transactional reactive graph.
 
-Concurrency is organized around cheap structured tasks and isolated reactors. A reactor handles one input at a time, stabilizes its graph atomically, publishes coherent snapshots, and starts effects only after stabilization. Values cross reactor boundaries by ownership transfer, immutable sharing, or bounded flows. Ordinary values use ownership and borrowing; operating-system resources are affine; dynamic reactive graphs live in reactor-local arenas that can be reclaimed at quiescent points.
+Concurrency is organized around cheap structured tasks and isolated reactors. A reactor handles one input at a time, stabilizes its graph atomically, publishes coherent snapshots, and starts effects only after stabilization. Values cross reactor boundaries by ownership transfer, immutable sharing, or bounded flows. Ordinary values are values — they copy, and a function's signature states whether it reads, writes, or consumes what it is given; operating-system resources are affine; dynamic reactive graphs live in reactor-local arenas that can be reclaimed at quiescent points.
 
 The result is not "Rust plus signals" or "Go plus observables." Its potential contribution is a tighter principle: **ownership defines the boundary of reactive consistency, parallel execution, effects, and reclamation.** The components have clear precedents, but their combination may constitute a novel server-oriented language design if supported by a precise semantics and empirical evaluation.
 
@@ -146,7 +146,7 @@ The reactive transaction is deterministic given its prior state and ordered inpu
 
 | Type | Meaning | Lifetime / pressure | Typical use |
 |---|---|---|---|
-| `T` | An ordinary value available now. | Owned or borrowed. | Configuration records, parsed JSON, domain values. |
+| `T` | An ordinary value available now. | Owned; copies freely. | Configuration records, parsed JSON, domain values. |
 | `Task<T>` | One computation that will eventually return, fail, or be cancelled. | Structured lifetime; no queue. | HTTP calls, file reads, database queries. |
 | `Flow<T>` | A potentially long sequence consumed under demand. | Backpressured by default. | Byte bodies, files, database rows, log streams. |
 | `Event<T>` | Discrete occurrences within a reactor's temporal domain. | No implicit cross-reactor buffer. | Completions, timers, changes, domain inputs. |
@@ -453,6 +453,8 @@ task fn replace_file(path: Path, contents: Flow<Bytes>)
 
 A package that does not declare `net.connect` cannot start making outbound requests in a later release without changing its public effect signature. Tests can supply fake capabilities for clocks, filesystems, HTTP, randomness, and process signals.
 
+> **Decided 2026-08-19: `uses` will be inferred.** The clause stays a checked annotation in v0; the destination is that the compiler computes a function's capability set from its body, and a written `uses` becomes an optional public bound — the same inferred-by-default, declared-as-assertion shape the `sink` parameter mode has (§7). See `BOOTSTRAP.md` §8 item 8.
+
 Koka is an important precedent for treating effects and handlers as part of a typed general-purpose language rather than informal documentation.[^9] This proposal would use a narrower, systems-oriented effect model whose main jobs are authority tracking, test substitution, and preserving the pure reactor-turn boundary.
 
 ### Effect requests are values
@@ -499,66 +501,73 @@ Questions about exactly-once delivery, transaction coupling, and durable outboxe
 
 ## 7 · Memory management
 
-### Ownership where it clarifies; local collection where it does not
+### Neither a borrow checker nor a garbage collector
 
 A uniform Rust-style borrow checker applied directly to a dynamic reactive graph would likely be difficult to use. Long-lived closures, switching subgraphs, delayed feedback, subscriptions, and task callbacks have lifetimes governed by graph reachability and temporal structure rather than lexical blocks. Conversely, a uniform tracing garbage collector would weaken deterministic cleanup of files, sockets, and response bodies and could introduce global pause behavior.
 
-The proposed design therefore uses several coordinated mechanisms.
+The language has neither. Ordinary values are values — copying is the semantics, and no reference can be written down — so the heap cannot form a cycle and reference counting collects it completely and deterministically. What remains for the programmer to state is intent, not lifetime: a function's signature says whether it reads, writes, or consumes what it is given. The priorities, in order: memory safety, then simplicity and ease, then explicitness — a marking is kept only where it changes what the caller's code means, never as ceremony the compiler could carry itself.
 
-### Ordinary values: ownership and borrowing
+### Ordinary values: copies and parameter modes
 
-Non-copy values have one owner. Assignment and function calls move them unless borrowed:
+Ordinary values copy. A copy is cheap by construction — an aggregate holds its interior behind reference counts, so copying is a shallow spine plus refcount bumps, never a deep clone. There is no `&`, no lifetime, and no aliasing rule to learn: `T` is always the whole value, and a parameter's *mode* says what the function may do with it.
 
 ```
-// Ownership
+// The three modes
+fn display_name(user: User) -> String {
+    return user.profile.display_name    // reads; returns a copy
+}
+
+fn normalize(user: mut User) {
+    user.profile.display_name = trim(user.profile.display_name)
+}                                       // writes back; the caller's variable is updated
+
+fn consume(body: sink Bytes) { ... }    // consumes; the caller's name dies
+```
+
+The unmarked mode is read, and it is the common case: most parameters are only looked at, so looking at a value is what needs no ceremony. `mut` is writeback: semantically the callee works on its own copy and the result is written back to the caller's variable when the call returns; representationally the native backend passes a pointer and mutates in place, which is unobservable because the argument list is the only aliasing that could exist and it is checked — the same variable cannot be passed twice to a call that writes it. Interior data copies on write: a write into storage that is shared clones exactly the level that is shared, once, and is in place thereafter. Mutation is free when the value is unheld; a copy happens at the moment sharing and writing collide, never before.
+
+```
+// Consumption
 let body = await request.body.read_all(limit: 8.mebibytes)?
 consume(body)
 
 log(body)
-// error: `body` was moved into consume
+// error: `body` was given to `consume`, which consumes it
 ```
 
-```
-// Borrowing
-fn display_name(user: &User) -> &String {
-    return &user.profile.display_name
-}
+`sink` is inferred. The compiler determines from a function's body that a parameter is consumed — stored, returned inside something, handed to a consuming operation, or given to a task — and enforces it at every call site. Writing `sink` is an assertion rather than a requirement: it is legal on any parameter, and a declared `sink` the body never physically consumes still revokes the caller's name — compile-time typestate, for one-shot tokens and answer-once protocols. The keyword is required only where there is no body to infer from: a trait method that consumes its receiver declares `sink Self`.
 
-fn normalize(user: &mut User) {
-    user.profile.display_name = user.profile.display_name.trim()
-}
-```
+Call sites are unmarked for all three modes. The information lives in the signature, written or inferred, and surfacing it is the compiler's and the IDE's job — the one deliberate asymmetry is that `mut` must be written in the signature, because a writeback changes the caller's value and that is worth stating up front. A mode is a calling convention, not a type: no field, return, payload, or `let` can hold "a borrowed `T`", because the concept does not exist. What references would have provided — cheap access to a value someone else owns — comes back through modes, `Shared<T>`, and copy-on-write containers, none of which introduce aliasing a program can observe.
 
-At a given point there may be any number of immutable borrows or one mutable borrow. Most lifetimes are inferred. Explicit lifetime parameters are reserved for lower-level APIs.
+> **Status (2026-08-19).** This section records the decided design. v0 at this date still carries the previous surface — ordinary values move, and reads are spelled `&T` positionally, per `BOOTSTRAP.md` §8 item 6c — and the modes wave that replaces it is `BOOTSTRAP.md` §8 item 5. `mut` will be refused on `task fn`s until writebacks meet the resumed-await protocol.
 
-### Suspension is a lifetime boundary
+### Value semantics make the heap acyclic
 
-```
-// Borrow across await
-let user = &mut cache[id]
-await http.get(url)
-user.status = Active
+Because no reference can be written into a value, every value is a tree of owned structure over immutably shared substructure: the heap is a directed acyclic graph by construction, since a cycle would require a value that reaches itself and there is no way to write one down. On an acyclic heap, reference counting is not an approximation of garbage collection — it *is* garbage collection: complete (nothing uncollectable can exist), deterministic (the last owner frees, at a known program point), and local (no pauses, no tracer, no write barriers). Swift is the instructive contrast: reference semantics for classes reintroduces cycles, and every Swift programmer carries `weak` and retain-cycle debugging as a permanent tax. This design refuses the cycle rather than the count — there are no weak references because there is nothing for them to break.
 
-// error: exclusive borrow may not remain live while this task is suspended
-```
+The theorem holds only while four lines hold, and each is an obligation on a future feature rather than folklore. First, no reference types as values, ever: when closures arrive they capture by value or by `Shared`, never by reference. Second, mutation happens only through exclusivity — a `mut` writeback, a linear single-owner value, or copy-on-write — so sharing is always sharing of immutable data. Third, live system objects such as reactors, tasks, and listeners are owned by scopes and supervisors, not by reference counts: program structure, not heap reachability, decides when they die. Fourth, dynamic graph memory is arena-owned and reclaimed at quiescent points (below), so cyclic *topology* in the reactive graph never touches the value heap.
 
-The task instead extracts owned request data, performs the I/O, and reacquires access afterward. Scoped child tasks may borrow a parent's values because the compiler knows they cannot outlive the scope:
+### Suspension is not a lifetime boundary
+
+Holding a reference across an `await` is where async Rust's lifetimes earn their complexity budget: a suspended task is a value, its borrows freeze whatever they point into, and the checker must prove nobody moves or mutates the target for the whole suspension. This design dissolves the problem rather than solving it. A suspended task owns everything it holds — copies, `Shared` handles, resources — and nothing it holds can point into anyone else's memory, because no such pointer can be written. A `mut` writeback completes when the call returns, so no suspension can observe a half-written value.
+
+Concurrent readers of the same data receive it as values, not as views into a parent's frame:
 
 ```
-// Scoped borrowing
-let records = load_records()
+// Sharing work without references
+let records = shared(load_records())
 
 scope {
-    spawn scoped { validate(&records) }
-    spawn scoped { build_index(&records) }
+    spawn validate(records)
+    spawn build_index(records)
 }
 ```
 
-> **v0 answers this positionally rather than by analysis.** A reference is producible only in parameter position and cannot be given a name, so there is no field, return, payload, `let`, or reactor member that could hold one. The single value that outlives the expression building it is a `Task<T>`, so `spawn` and an effect request reject a borrowed argument — and `await f(&x)` is left alone, because the awaiting task is parked for the duration and ownership is unique, so it cannot invalidate the borrow itself and nobody else holds the value. That is a lifetime boundary enforced by where a thing can be written rather than by inference, and it holds while there is no aliasing: a borrow lives only for the call it is an argument to, which is why the boundary survives loops — no borrow can be live across a back edge, so `&listener` in an accept loop is just one read per pass. Reads through a borrow exist (`BOOTSTRAP.md` §8 item 6c): field access and `match` reach through a `&`, a match through one binds owned copies, and a trait method may take `&Self` — and the `consume(body); log(body)` error above is real, because ordinary values move. Naming, returning, and storing borrows, `&mut`, scoped borrowing of a parent's values, and explicit lifetimes all wait for the real borrow checker; see `BOOTSTRAP.md` §8 item 5.
+Both workers hold the snapshot alive by refcount; the scope, not a lifetime analysis, bounds the tasks.
 
 ### Cross-reactor transfer
 
-Mutable references never cross reactor boundaries. A message is either moved, deeply immutable and shared, or encoded into a bounded flow. This links memory safety to concurrency safety.
+Nothing crosses a reactor boundary except by move, immutable sharing, or a bounded flow — there are no references to cross. This links memory safety to concurrency safety.
 
 ```
 // Message transfer
@@ -584,6 +593,8 @@ await file.read(buffer)
 
 This statically prevents common failures such as using a closed handle, committing a transaction twice, sending the same response body twice, or concurrently driving a non-shareable socket from unrelated tasks.
 
+Consumption is part of a function's signature. The compiler infers it from the body — a `respond(conn, ...)` that closes the connection makes `conn` a consuming parameter — and an author who wants the contract pinned writes it: `fn respond(conn: sink Connection, ...)`. Either way the caller's name dies at the call, so answering a request twice is a compile error rather than a protocol bug.
+
 ### Immutable sharing and byte buffers
 
 Servers need cheap sharing of configuration, schemas, routing tables, snapshots, and byte buffers. `Shared<T>` provides immutable reference-counted sharing. References can be non-atomic within one reactor and upgraded to atomic representation when crossing a thread or reactor boundary.
@@ -599,18 +610,26 @@ let payload = packet.slice(32, packet.len)
 
 There is no general-purpose `Shared<Mutable<T>>`. Shared mutation requires a reactor, an explicitly atomic type, or an opt-in lock from a low-level concurrency package.
 
-> **Both halves of this section arrived with `BOOTSTRAP.md` §8 item 6b (2026-08-19).** The zero-copy `slice` sketched above is spelled `bytes_slice(packet, 0, 32)` in v0 and is O(1) exactly as promised — natively; the reference interpreter copies, unobservably, and the differential oracle holds the two to the same bytes. `shared(x)` builds a `Shared<T>` today: immutable, refcounted, readable through field access, copied back out with `unshare`, refused an affine payload, and legal across reactor boundaries. What v0 does not yet have is the payoff sharing exists for — ordinary values still copy freely until §8 item 6c makes them move — and the non-atomic-upgraded-to-atomic representation refinement waits with the multithreaded runtime. Affine ownership of operating-system resources, described above, is implemented in full.
+> **Both halves of this section arrived with `BOOTSTRAP.md` §8 item 6b (2026-08-19).** The zero-copy `slice` sketched above is spelled `bytes_slice(packet, 0, 32)` in v0 and is O(1) exactly as promised — natively; the reference interpreter copies, unobservably, and the differential oracle holds the two to the same bytes. `shared(x)` builds a `Shared<T>` today: immutable, refcounted, readable through field access, copied back out with `unshare`, refused an affine payload, and legal across reactor boundaries. Under the mode doctrine (`BOOTSTRAP.md` §8 item 5), ordinary values copying freely is the design rather than a gap — `Shared<T>`'s job is making a *large* value's copy an O(1) refcount bump and carrying it across reactor boundaries — and the non-atomic-upgraded-to-atomic representation refinement waits with the multithreaded runtime. Affine ownership of operating-system resources, described above, is implemented in full.
 
+
+### The standard library is written in the language
+
+Rust's standard library is written in Rust, on raw memory, with no runtime beneath it. This language wants the same property, with one exception the design already names: the reactive runtime itself, because FRP requires an engine. Everything else — containers, string and byte handling, protocols — should be ordinary source in this language, checked by the same checker, portable to every compilation target, and free of magic types. A builtin is scaffolding: it exists to make a milestone shippable and is expected to dissolve into ordinary source once the language can express it, the way `bytes_concat` dissolved when `+` on `Bytes` landed.
+
+The floor this stands on is one compiler-provided atom: `Slots<T>`, a fixed-capacity typed slab. It is *linear* — single-owner, moved rather than copied — which is a weaker demand than resource affinity: dropping one is fine (its memory is freed; there is no descriptor to leak), it may live in reactor state, and natively it needs no reference counts at all, which is what makes it the fast lane for flat representation. Its operations are get, set, and take by index, bounds-trapped, with defined empty-slot semantics — an `Option` or a trap, never undefined behavior. "Raw memory" is a representation promise rather than a semantics change: a contiguous buffer natively, linear memory on wasm, an array on a TypeScript target — the same program, the same traps.
+
+On that atom, the growable sequence is an ordinary struct holding a `Slots<T>` and a length: `push` writes through `mut`, growth allocates a larger slab and moves the elements across, and the user-facing type copies like any value, copy-on-write at the storage level. Hash maps follow as open addressing over `Slots<Option<(K, V)>>`. The one privileged intrinsic this stack needs is the storage-uniqueness test the copy-on-write branch asks — trusted standard-library internals, not user surface. No `unsafe` appears anywhere in this story, because what a standard library actually requires is not undefined behavior; it is a primitive with defined trapping and an honest cost model.
 
 ### Reactive graphs: reactor-local arenas
 
 Each reactor owns a graph arena. Signal and event handles refer to nodes in that arena; application variables do not individually own nodes. Roots include exported values, active external subscriptions, event sources, pending task continuations, and currently selected dynamic branches.
 
-After a turn, the reactor is at a quiescent point. It can reclaim detached child regions and, when necessary, trace a small local graph to collect cycles. Other reactors continue running. This avoids both lexical-lifetime contortions for graph topology and a whole-process stop-the-world collector.
+After a turn, the reactor is at a quiescent point. It reclaims detached child regions whole — the region is the unit of collection, so cyclic *topology* among nodes and subscriptions never needs a cycle collector, and the value heap, acyclic by construction, never needs one either. Other reactors continue running. This avoids both lexical-lifetime contortions for graph topology and a whole-process stop-the-world collector.
 
 | Memory class | Mechanism | Reason |
 |---|---|---|
-| Task-local ordinary data | Ownership, borrowing, escape analysis, temporary regions | Fast allocation and deterministic reclamation. |
+| Task-local ordinary data | Value semantics and reference counting on an acyclic heap | Fast allocation and deterministic reclamation. |
 | OS resources | Affine ownership and deterministic drop | Cleanup must follow cancellation and all error paths. |
 | Immutable shared data | Reference-counted `Shared<T>` | Cheap snapshots and zero-copy transfer. |
 | Reactor state | Exclusive reactor ownership | No data races or application locks. |
@@ -698,9 +717,9 @@ macro fn instrument<T, Effects>(
 }
 ```
 
-The macro signature reveals that instrumentation adds a logging effect. A macro representation could expose value type, effect set, ownership mode, suspension behavior, reactive domain, and source location. Generated code is then rechecked by the ordinary type, effect, borrow, and causality passes.
+The macro signature reveals that instrumentation adds a logging effect. A macro representation could expose value type, effect set, ownership mode, suspension behavior, reactive domain, and source location. Generated code is then rechecked by the ordinary type, effect, ownership, and causality passes.
 
-Procedural macros should run in a deterministic sandbox with bounded resources, no network access, and only declared file inputs. They should have no semantic privilege: a macro cannot forge a capability, suppress a borrow error, introduce an unchecked reactive cycle, or publish mutable reactor state.
+Procedural macros should run in a deterministic sandbox with bounded resources, no network access, and only declared file inputs. They should have no semantic privilege: a macro cannot forge a capability, suppress an ownership error, introduce an unchecked reactive cycle, or publish mutable reactor state.
 
 ### Expansion must remain observable
 
@@ -737,7 +756,7 @@ run derives and typed macro expansion
     ↓
 type and effect checking
     ↓
-ownership and borrow checking
+ownership and mode checking
     ↓
 build reactive dependency graphs
     ↓
@@ -774,7 +793,7 @@ let results = await parallel {
 }
 ```
 
-The parallel region is scoped. Inputs must be immutably borrowed for the duration of the region or moved into workers. Results are owned values returned to the parent. Blocking foreign functions require an explicit `blocking` boundary so they cannot stall the normal task scheduler.
+The parallel region is scoped. Inputs are copied or `Shared` into workers, or moved outright. Results are owned values returned to the parent. Blocking foreign functions require an explicit `blocking` boundary so they cannot stall the normal task scheduler.
 
 ---
 
@@ -1071,7 +1090,7 @@ event paths = path_requests.map_task(
 )
 ```
 
-Each result carries the region, chunk, entity, and state version for which it was computed. The receiving region accepts, rebases, or rejects it during a later turn. No task retains a mutable borrow of the live world while suspended.
+Each result carries the region, chunk, entity, and state version for which it was computed. The receiving region accepts, rebases, or rejects it during a later turn. No task can retain a handle into the live world while suspended — there is no reference type to hold, so the isolation is by construction.
 
 ### Network replication has several pressure policies
 
@@ -1282,9 +1301,9 @@ A library can imitate the surface vocabulary—`event.map`, `signal.combine`, `r
 - which effects a task may perform and which capability authorizes them;
 - which reactor owns a value and whether a reference crosses an invalid boundary;
 - whether a feedback cycle lacks a delay or other temporal boundary;
-- whether a task closure captures borrowed state that may outlive its owner;
+- whether a task closure captures only values it owns, so nothing it holds can outlive its owner;
 - whether a cross-reactor flow or mailbox has an explicit pressure policy;
-- whether a resource is moved, shared, borrowed, or consumed exactly once; and
+- whether a resource is moved, shared, or consumed exactly once; and
 - whether generated macro code adds hidden effects, tasks, queues, or reactive topology.
 
 Those semantics also enable tools that conventional debuggers rarely provide:
@@ -1312,7 +1331,7 @@ A runtime trace should be able to say that an input entered a particular reactor
 Semantic elegance is insufficient. A credible server language must arrive with enough practical depth that teams do not spend their time rebuilding basic infrastructure. At minimum, the ecosystem needs:
 
 - **Server foundations** — HTTP/1.1, HTTP/2, WebSockets, TLS, TCP and UDP, files, processes, timers, DNS, JSON, and binary serialization.
-- **Data systems** — Database drivers, pools, transactions, migrations, caches, message systems, and clear ownership conventions for borrowed or streamed results.
+- **Data systems** — Database drivers, pools, transactions, migrations, caches, message systems, and clear ownership conventions for shared or streamed results.
 - **Operations** — Structured logging, tracing, metrics, profiling, panic isolation, supervision, health checks, graceful shutdown, and resource-leak diagnostics.
 - **Developer workflow** — Fast builds, a package manager, reproducible dependencies, editor support, formatter, linter, tests, virtual clocks, deterministic event injection, and native deployment.
 - **Interoperability** — A stable C ABI, safe wrappers for foreign resources, blocking annotations, thread-safety declarations, and a practical path to existing libraries.
@@ -1348,7 +1367,7 @@ The possible novelty lies in treating these concerns as one server-oriented sema
 |---|---|---|
 | FRP and I/O | Effects occur inside subscriptions or callbacks. | Turn propagation is pure; effect requests start after stabilization. |
 | Concurrency | Shared state, arbitrary threads, or purely actor-style messages. | Structured tasks for procedures; reactors for temporal state; owned communication between them. |
-| Memory | One tracing heap or uniform lexical ownership. | Ownership for values and resources; local arenas for dynamic reactive topology. |
+| Memory | One tracing heap or uniform lexical ownership. | Value semantics with parameter modes; affine resources; local arenas for dynamic reactive topology. |
 | Streaming | Events and byte streams share one abstraction. | Backpressured flows are distinct from logical reactor events. |
 | Scheduling | Flattening and cancellation policy hidden in operators. | `serial`, `parallel`, `latest`, and `keyed` are explicit semantics. |
 | Macros | Token-level code generation may hide runtime behavior. | Core reactivity is built in; ecosystem macros are typed, sandboxed, and graph-visible. |
@@ -1357,7 +1376,7 @@ The possible novelty lies in treating these concerns as one server-oriented sema
 
 A compelling language contribution requires more than a feature list. A small formal core should establish at least:
 
-1. **Memory safety:** no invalid borrow, use-after-free, double close, or use of a transferred resource.
+1. **Memory safety:** no use-after-free, dangling view, double close, or use of a transferred resource.
 2. **Data-race freedom:** mutable reactor-owned state cannot be accessed concurrently.
 3. **Glitch freedom:** reactive expressions observe coherent graph states.
 4. **Turn determinism:** the same state and ordered input produce the same stable state and effect descriptions.
@@ -1398,6 +1417,8 @@ Independent pure subgraphs can theoretically recompute in parallel while preserv
 
 Rust demonstrates the power and cost of explicit ownership. This language could simplify common server code through task-local regions, immutable-by-default structs, move inference, and constrained reactor boundaries. The danger is either producing Rust-level complexity plus FRP complexity, or hiding so much that performance and lifetime become mysterious.
 
+*Answered 2026-08-19, and the answer is a doctrine rather than a dial: modes, not pointers. Users see three parameter modes — `T` reads, `mut T` writes back, `sink T` consumes — and no references, lifetimes, or borrow checker, ever; ordinary values copy, the affine resource tier moves, `sink` is inferred with the keyword kept as an assertion, and safety is carried by the acyclic-heap theorem (§7) rather than by analysis. The danger this question names is resolved by removing the `T`-versus-`&T` distinction rather than teaching it, under a stated priority order: memory safety, then simplicity and ease, then explicitness. `BOOTSTRAP.md` §8 item 5 carries the plan.*
+
 **What is durable?**
 
 Serializing a live graph with closures and sources is undesirable. A reactor should expose an application-defined durable state projection, and the runtime should rebuild ephemeral graph structure after recovery. Whether event sourcing, snapshots, or external databases are standard patterns rather than core semantics remains open.
@@ -1418,11 +1439,11 @@ FFI calls need declarations covering blocking behavior, thread safety, ownership
 
 **Phase 1: executable reference semantics.** Build a small interpreter with ordinary immutable values, tasks, events, signals, stateful operators, one reactor, and a deterministic turn trace. The aim is to settle propagation, causality, dynamic switching, effect requests, and cancellation—not performance.
 
-**Phase 2: minimal native server runtime.** Add ahead-of-time compilation, an M:N task scheduler, timers, TCP, HTTP, files, flows, structured scopes, and affine resources. Keep ownership conservative: move-only resources, immutable sharing, and reactor isolation before a sophisticated borrow checker.
+**Phase 2: minimal native server runtime.** Add ahead-of-time compilation, an M:N task scheduler, timers, TCP, HTTP, files, flows, structured scopes, and affine resources. Keep ownership conservative: move-only resources, immutable sharing, and reactor isolation instead of a borrow checker — the mode decision (§7, §14) makes that ordering permanent.
 
-**Phase 3: ownership and local graph reclamation.** Introduce borrowing, task-local regions, cross-reactor transfer rules, and reactor-local graph arenas. Measure the cost of reference counting, region promotion, dynamic graph switching, and local tracing.
+**Phase 3: ownership and local graph reclamation.** Introduce parameter modes (`mut` writeback, inferred `sink`), task-local regions, cross-reactor transfer rules, and reactor-local graph arenas. Measure the cost of reference counting, region promotion, dynamic graph switching, and local tracing.
 
-**Phase 4: effects, persistence patterns, and tooling.** Add capability inference, test handlers, graph visualization, turn tracing, queue inspection, and application-defined durable snapshots. Develop standard patterns for transactional outboxes and replay without making them magical.
+**Phase 4: effects, persistence patterns, and tooling.** Add capability inference (decided 2026-08-19: `uses` becomes inferred), test handlers, graph visualization, turn tracing, queue inspection, and application-defined durable snapshots. Develop standard patterns for transactional outboxes and replay without making them magical.
 
 **Phase 5: constrained metaprogramming.** Begin with derives and HTTP/schema generation. Add hygienic syntax and typed procedural macros only after the semantic APIs they manipulate are stable.
 
