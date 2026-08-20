@@ -55,20 +55,19 @@ pub(super) fn union(into: &mut [Option<Span>], from: &[Option<Span>]) {
     }
 }
 
-/// The advice for a lost task, shared between "already moved" and "moved inside a loop": a borrow
-/// is never the answer for one, because running it twice is what was wanted and is not what `&`
-/// would give.
+/// The advice for a lost task, shared between "already moved" and "moved inside a loop": reading
+/// is never the answer for one, because running it twice is what was wanted and is not what a
+/// read would give.
 pub(super) fn task_advice() -> String {
     "a task is work to be done once; build another call if it should happen again".to_string()
 }
 
-/// Whether a match scrutinee was *read* rather than moved: a borrowed name, or a field chain
-/// rooted at a name — the two shapes `value()` walks with `place()`. These are what a match keeps
-/// reading between guards, and the only shapes safe to re-walk.
+/// Whether a match scrutinee was *read* rather than moved: a field chain rooted at a name — the
+/// shape `value()` walks with `place()`. This is what a match keeps reading between guards, and
+/// the only shape safe to re-walk; a bare affine name moves into the match, deconstruction being
+/// a consuming use.
 fn read_as_place(expr: &Expr) -> bool {
     match &expr.kind {
-        // A bare name moves into the match unless it is borrowed.
-        ExprKind::Local(_) => expr.ty.is_ref(),
         ExprKind::Field { base, .. } => rooted_at_local(base),
         _ => false,
     }
@@ -114,12 +113,6 @@ struct Moves<'p> {
 impl Moves<'_> {
     /// An expression whose value is consumed. This is where a move happens.
     fn value(&mut self, expr: &Expr) {
-        // A borrow takes nothing. It still has to name something that is there, which is the whole
-        // of what makes `tcp_close(conn)` followed by `tcp_read(&conn)` an error.
-        if expr.ty.is_ref() {
-            self.place(expr);
-            return;
-        }
         match &expr.kind {
             // Liveness is asked unconditionally: an ordinary local never moves by *type*, but a
             // `sink` position revokes any name it is handed, and a revoked name is gone however
@@ -143,8 +136,8 @@ impl Moves<'_> {
         }
     }
 
-    /// An expression only part of which is read: the base of a field access, the operand of `&`,
-    /// or an argument at a `Read` position. The root still has to be live, but nothing moves.
+    /// An expression only part of which is read: the base of a field access, or an argument at
+    /// a `Read` position. The root still has to be live, but nothing moves.
     fn place(&mut self, expr: &Expr) {
         match &expr.kind {
             ExprKind::Local(id) => {
@@ -160,12 +153,6 @@ impl Moves<'_> {
     /// the name is what the assertion means — while everything that is not a bare name behaves
     /// as the value it is.
     fn consume(&mut self, expr: &Expr) {
-        if expr.ty.is_ref() {
-            // A borrow has nothing to give away, even where a sink asks; the mismatch was the
-            // type checker's to report.
-            self.place(expr);
-            return;
-        }
         match &expr.kind {
             ExprKind::Local(id) => {
                 if self.live(*id, expr.span) {
@@ -338,7 +325,7 @@ impl Moves<'_> {
                 // arm after it. That is the difference between a guard and a body: one ran, the
                 // other ran if it matched.
                 self.value(guard);
-                // When the scrutinee was read as a place — a borrowed name, or a field chain —
+                // When the scrutinee was read as a place — a field chain rooted at a name —
                 // the match is still reading it after every failed guard, so a guard that moved
                 // its root has taken what the next arm examines. Re-walking such a scrutinee is a
                 // liveness check and nothing else. The filter is load-bearing twice over: an
@@ -411,9 +398,9 @@ impl Moves<'_> {
         }
     }
 
-    /// Names a pattern introduces. They are fresh, and binding part of a scrutinee is how an owned
-    /// aggregate is taken apart — the scrutinee moved as a whole, and the pieces are named here —
-    /// or, through a borrow, how its pieces are copied out.
+    /// Names a pattern introduces. They are fresh, and binding part of a scrutinee is how an
+    /// affine aggregate is taken apart — the scrutinee moved as a whole, and the pieces are named
+    /// here — while an ordinary scrutinee simply copies into them.
     fn bind(&mut self, pat: &Pat) {
         match &pat.kind {
             PatKind::Bind(id) => {
@@ -529,16 +516,13 @@ impl Moves<'_> {
             );
             return false;
         }
-        // What to write instead depends on what was lost. A borrow is the answer for everything
-        // except a task, which has to be built again because running it twice is what was wanted
-        // and is not what `&` would give; a matchable value also gets the match spelling, because
-        // its second use is very often a `match`.
+        // What took the value was a consuming position — a `sink` parameter, a constructor
+        // payload, a deconstructing `match` — because a read takes nothing. The advice is the
+        // doctrine, except for a task, which has to be built again: running it twice is what was
+        // wanted, and no reordering gives that.
         let advice = match local.ty {
             Ty::Task(_) => task_advice(),
-            Ty::Enum(_) | Ty::Option(_) | Ty::Result(_, _) => format!(
-                "`&{name}` is how a call looks at it without taking it, and `match &{name}` is how a match does"
-            ),
-            _ => format!("`&{name}` is how a call looks at it without taking it"),
+            _ => "reads are unmarked and take nothing; what consumes is a `sink` position, a constructor payload, or a deconstructing `match`".to_string(),
         };
         self.errors.push(
             Diagnostic::new(span, format!("`{name}` has already been moved"))
@@ -553,16 +537,16 @@ impl Moves<'_> {
     }
 
     fn out_of_field(&mut self, base: &Expr, index: usize, span: Span) {
-        let field = match base.ty.owned() {
+        let field = match &base.ty {
             Ty::Struct(id) => self.program.structs[id.index()].fields[index].name.clone(),
             _ => index.to_string(),
         };
-        let whole = self.program.ty_name(base.ty.owned());
+        let whole = self.program.ty_name(&base.ty);
         self.errors.push(
             Diagnostic::new(span, format!("`{field}` cannot be moved out of a `{whole}`"))
                 .label("this would leave the rest of the value with no owner")
                 .note("an owned value moves whole; `match` is what takes one apart, as in `match session { Session(conn: conn) => … }`")
-                .note("to read it without taking it, write `&`"),
+                .note("a position that only reads can be handed the whole value: reads are unmarked, and take nothing"),
         );
     }
 }

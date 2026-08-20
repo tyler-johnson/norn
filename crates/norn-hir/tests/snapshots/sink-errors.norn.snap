@@ -20,7 +20,7 @@ error: `conn` has already been moved
 31 |     await shutdown(conn)
    |                    ^^^^ moved here
    = note: a `Connection` has one owner, and using it as a value is what hands it over
-   = note: `&conn` is how a call looks at it without taking it
+   = note: reads are unmarked and take nothing; what consumes is a `sink` position, a constructor payload, or a deconstructing `match`
 
 error: work started with `spawn` must own its Connection
   --> sink-errors.norn:50:20

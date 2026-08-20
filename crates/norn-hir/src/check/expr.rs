@@ -1,4 +1,3 @@
-use super::turns::effect_arguments;
 use super::*;
 
 impl Checker {
@@ -80,49 +79,6 @@ impl Checker {
     }
 
     // ---------------------------------------------------------------- tasks
-
-    /// A task built here and started later may not be holding a borrow.
-    ///
-    /// This is the whole of the escape analysis that is not already a fact about where a reference
-    /// can be written. A `Task<T>` is the one value in v0 that outlives the expression that made it,
-    /// so it is the one value that could carry a borrow past the call it belongs to. `await f(&x)`
-    /// is exempt for a reason worth stating: the awaiting task is parked for the duration, so it
-    /// cannot invalidate the borrow itself, and ownership is unique, so no one else can either.
-    pub(super) fn no_borrowed_arguments(&mut self, task: &Expr, what: &str, when: &str) {
-        for arg in effect_arguments(task) {
-            if !arg.ty.is_ref() {
-                continue;
-            }
-            let name = self.program.ty_name(arg.ty.owned());
-            self.push(
-                Diagnostic::new(arg.span, format!("`{what}` cannot be handed a borrow"))
-                    .label(format!("this is borrowed, and the task {when}"))
-                    .note(format!(
-                        "the work is built here and started later, so it has to own its {name}"
-                    ))
-                    .note("drop the `&` to move the value in; `await f(&x)` is the form that may borrow, because the task is finished by the time that line is"),
-            );
-        }
-    }
-
-    /// `&` written where ownership was wanted, or left out where a borrow was. Both are one
-    /// character from correct, so the diagnostic's job is to say which way the value is going.
-    pub(super) fn borrow_mismatch(&mut self, expected: &Ty, span: Span) {
-        let name = self.program.ty_name(expected.owned());
-        let diagnostic = if expected.is_ref() {
-            Diagnostic::new(
-                span,
-                format!("this borrows the {name} rather than taking it"),
-            )
-            .label("write `&` here")
-            .note("the call only looks at it, so the value stays yours afterwards")
-        } else {
-            Diagnostic::new(span, format!("this takes the {name}"))
-                .label("drop the `&`")
-                .note("ownership moves into the call, and the value cannot be used here again")
-        };
-        self.push(diagnostic);
-    }
 
     pub(super) fn error_expr(&self, span: Span) -> Expr {
         Expr {
@@ -283,7 +239,6 @@ impl Checker {
         if task.ty.is_error() {
             return self.error_expr(span);
         }
-        self.no_borrowed_arguments(&task, "spawn", "runs after this line");
         match &task.ty {
             Ty::Task(produced) if **produced == Ty::Unit => {}
             Ty::Task(produced) => {
@@ -638,11 +593,9 @@ impl Checker {
             return self.error_expr(span);
         }
 
-        // Field access reads through a borrow — `&T` and `T` are the same values — and then
-        // strips every `Shared` layer of the base, the same rule lowering applies when it pushes
-        // deref projections. A `Ref` is only ever outermost, so one peel is enough; the base
-        // keeps its own type, and the borrow is erased before lowering reads it.
-        let mut base_ty = base.ty.owned();
+        // Field access strips every `Shared` layer of the base, the same rule lowering applies
+        // when it pushes deref projections; the base keeps its own type.
+        let mut base_ty = &base.ty;
         while let Ty::Shared(inner) = base_ty {
             base_ty = inner;
         }
@@ -685,14 +638,14 @@ impl Checker {
     }
 
     /// `data[i]` — sugar for the hidden `bytes_at` builtin, and `Bytes` is the one type it works
-    /// on in v0. A `&Bytes` indexes too: borrows are erased before the runtime, so the expansion
-    /// is the same expression `check_builtin` would build for a pure two-argument builtin.
+    /// on in v0: the expansion is the same expression `check_builtin` would build for a pure
+    /// two-argument builtin.
     pub(super) fn check_index(&mut self, base: &ast::Expr, index: &ast::Expr, span: Span) -> Expr {
         let base = self.check_expr(base, None);
         if base.ty.is_error() {
             return self.error_expr(span);
         }
-        if *base.ty.owned() != Ty::Bytes {
+        if base.ty != Ty::Bytes {
             let message = format!(
                 "only `Bytes` can be indexed in v0, not {}",
                 self.program.ty_name(&base.ty)
@@ -719,19 +672,16 @@ impl Checker {
             self.exclusive_borrow(span);
             return self.check_expr(inner, None);
         }
-        // A borrow erases: the expression is the operand, wearing a type that says the call it is
-        // handed to will not take it away. Nothing downstream of the checker learns that `&` was
-        // written, which is why lowering and the runtime are untouched by ownership.
+        // The borrow that used to erase here now has nothing to erase into: reading does not
+        // consume, so the operand alone already does everything `&x` did.
         if matches!(op, ast::UnOp::Ref) {
-            let mut inner = self.check_expr(inner, None);
-            inner.ty = match inner.ty {
-                Ty::Ref(_) | Ty::Error | Ty::Never => inner.ty,
-                owned => Ty::Ref(Box::new(owned)),
-            };
-            // The `&` is part of what a diagnostic about this expression should underline, even
-            // though it is not part of what the expression evaluates to.
-            inner.span = span;
-            return inner;
+            self.push(
+                Diagnostic::new(span, "Norn has no borrows")
+                    .label("`&` takes nothing to take")
+                    .note("pass the value itself: reading does not consume it")
+                    .note("whether a call consumes is its signature's to declare (`sink T`), never the call site's"),
+            );
+            return self.check_expr(inner, None);
         }
         let inner = self.check_expr(inner, None);
         if inner.ty.is_error() {
@@ -1042,10 +992,6 @@ impl Checker {
         if task.ty.is_error() {
             return StmtKind::Expr(self.error_expr(span));
         }
-        // Unreachable in v0 — a turn has nothing borrowable in scope, because nothing a reactor
-        // holds may be affine and a reference cannot be a member. It is written anyway, because the
-        // rule belongs to `after` and not to what `after` can currently reach.
-        self.no_borrowed_arguments(&task, "after", "starts once the snapshot is published");
         let Ty::Task(produced) = task.ty.clone() else {
             let message = format!(
                 "`after` describes work to start later, and this is {}",
@@ -1157,7 +1103,7 @@ impl Checker {
                 ExprKind::Field { base, .. } => {
                     // A read reaches through a `Shared` (field access derefs), so without this
                     // guard the walk would too — and a shared value is immutable.
-                    if matches!(base.ty.owned(), Ty::Shared(_)) {
+                    if matches!(base.ty, Ty::Shared(_)) {
                         self.push(
                             Diagnostic::new(span, "cannot assign through a shared value")
                                 .label("shared values are immutable")

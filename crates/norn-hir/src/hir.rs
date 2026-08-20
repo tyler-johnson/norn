@@ -170,14 +170,6 @@ pub enum Ty {
     /// it did not control the starting of.
     Task(Box<Ty>),
     Resource(Resource),
-    /// `&T`. A value the callee may look at but does not own, so passing one does not move it.
-    ///
-    /// Producible only in parameter position: `resolve_ty` refuses it everywhere else, which is
-    /// what makes "a reference may not escape" a fact about where it can be written down rather
-    /// than an analysis. The one place it could still escape is a task, which outlives the call
-    /// that built it — so `spawn` and `after` operands may not borrow, and `await f(&x)` is safe
-    /// because the awaiting task is parked and ownership is unique.
-    Ref(Box<Ty>),
     /// A handle to a running reactor. Spelled by its own name, exactly like a `Listener`.
     ///
     /// Not affine: a handle names something a scope owns, and neither `send` nor `latest` consumes
@@ -228,19 +220,6 @@ impl Ty {
     pub fn is_error(&self) -> bool {
         matches!(self, Ty::Error)
     }
-
-    /// What this type is when the borrow is stripped. `&T` and `T` are the same values, so every
-    /// question except "does using it move it" is asked of the pointee.
-    pub fn owned(&self) -> &Ty {
-        match self {
-            Ty::Ref(inner) => inner,
-            other => other,
-        }
-    }
-
-    pub fn is_ref(&self) -> bool {
-        matches!(self, Ty::Ref(_))
-    }
 }
 
 pub struct Program {
@@ -270,7 +249,6 @@ impl Program {
             Ty::Shared(inner) => format!("Shared<{}>", self.ty_name(inner)),
             Ty::Task(inner) => format!("Task<{}>", self.ty_name(inner)),
             Ty::Resource(resource) => resource.name().into(),
-            Ty::Ref(inner) => format!("&{}", self.ty_name(inner)),
             Ty::Reactor(id) => self.reactors[id.index()].name.clone(),
             Ty::Input(inner) => format!("an input taking {}", self.ty_name(inner)),
             Ty::Signal(inner) => format!("a signal of {}", self.ty_name(inner)),
@@ -289,8 +267,6 @@ impl Program {
     /// because it may be carrying a resource; and any aggregate reaching one of those, because a
     /// struct is no less an owner than a variable — which is why this test recurses through
     /// contents rather than reading the outermost constructor alone.
-    ///
-    /// A borrow is never affine: not owning it is the whole point.
     pub fn affine(&self, ty: &Ty) -> bool {
         self.affine_seen(ty, &mut Vec::new())
     }
@@ -303,7 +279,6 @@ impl Program {
         }
         match ty {
             Ty::Resource(_) | Ty::Task(_) => true,
-            Ty::Ref(_) => false,
             // Not recursed: a shared value is copyable by definition, and no constructor can
             // produce a `Shared` of an affine payload — `shared(x)` refuses one, `resolve_ty`
             // refuses the spelling, and monomorphization re-checks instantiated templates — so
@@ -948,14 +923,12 @@ impl Builtin {
     /// The socket builtins are where the mode column earns its keep: reading and writing look at
     /// a descriptor, `tcp_close` takes it away, and the difference is `Read` against `Sink`. That
     /// is what makes closing a connection and then reading from it the same error as any other
-    /// use after a move. (The resource-reading params still spell `&T` while the ampersand
-    /// lives; the mode is the contract, and the `Ref` dies with the surface.)
+    /// use after a move.
     pub fn signature(self) -> (Vec<(Ty, Mode)>, Ty) {
         let listener = || Ty::Resource(Resource::Listener);
         let connection = || Ty::Resource(Resource::Connection);
         let file = || Ty::Resource(Resource::File);
         let flow = || Ty::Resource(Resource::Flow);
-        let borrowed = |ty: Ty| Ty::Ref(Box::new(ty));
         let io_error = || Ty::Enum(EnumId::IO_ERROR);
         let task = |ty: Ty| Ty::Task(Box::new(ty));
         let fallible = |ok: Ty| Ty::Result(Box::new(ok), Box::new(io_error()));
@@ -963,19 +936,13 @@ impl Builtin {
         let sink = |ty: Ty| (ty, Mode::Sink);
         match self {
             Builtin::Print => (vec![read(Ty::Error)], Ty::Unit),
-            Builtin::ListenerPort => (vec![read(borrowed(listener()))], Ty::I64),
+            Builtin::ListenerPort => (vec![read(listener())], Ty::I64),
             Builtin::Sleep => (vec![read(Ty::I64)], task(Ty::Unit)),
             Builtin::TcpListen => (vec![read(Ty::I64)], task(fallible(listener()))),
-            Builtin::TcpAccept => (
-                vec![read(borrowed(listener()))],
-                task(fallible(connection())),
-            ),
-            Builtin::TcpRead => (
-                vec![read(borrowed(connection()))],
-                task(fallible(Ty::Bytes)),
-            ),
+            Builtin::TcpAccept => (vec![read(listener())], task(fallible(connection()))),
+            Builtin::TcpRead => (vec![read(connection())], task(fallible(Ty::Bytes))),
             Builtin::TcpWrite => (
-                vec![read(borrowed(connection())), read(Ty::Bytes)],
+                vec![read(connection()), read(Ty::Bytes)],
                 task(fallible(Ty::Unit)),
             ),
             Builtin::TcpClose => (vec![sink(connection())], task(Ty::Unit)),
@@ -994,15 +961,15 @@ impl Builtin {
             Builtin::BytesAt => (vec![read(Ty::Bytes), read(Ty::I64)], Ty::I64),
             Builtin::FileCreate => (vec![read(Ty::Str)], task(fallible(file()))),
             Builtin::FileWrite => (
-                vec![read(borrowed(file())), read(Ty::Bytes)],
+                vec![read(file()), read(Ty::Bytes)],
                 task(fallible(Ty::Unit)),
             ),
             Builtin::FileClose => (vec![sink(file())], task(Ty::Unit)),
             Builtin::FlowOfFile => (vec![read(Ty::Str)], task(fallible(flow()))),
             // An empty chunk means the flow is exhausted — a mid-stream end of input is already
             // `UnexpectedEof` in the runtime, so empty is unambiguous.
-            Builtin::FlowNext => (vec![read(borrowed(flow()))], task(fallible(Ty::Bytes))),
-            Builtin::FlowLen => (vec![read(borrowed(flow()))], Ty::I64),
+            Builtin::FlowNext => (vec![read(flow())], task(fallible(Ty::Bytes))),
+            Builtin::FlowLen => (vec![read(flow())], Ty::I64),
             Builtin::FlowClose => (vec![sink(flow())], task(Ty::Unit)),
         }
     }

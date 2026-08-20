@@ -132,19 +132,17 @@ impl Checker {
                     .as_ref()
                     .map_or(Ty::Unit, |ty| self.resolve_ty(ty));
                 self.self_ty = None;
-                // The receiver mode is the trait's to declare: `Self` and `&Self` read,
-                // `sink Self` consumes. An impl spells the same mode — conformance holds the
-                // written signature and modes against the trait's — and the call site adapts,
-                // auto-borrowing an owned receiver where the method spells `&Self`.
+                // The receiver mode is the trait's to declare: `Self` reads, `sink Self`
+                // consumes. An impl spells the same mode — conformance holds the written
+                // signature and modes against the trait's.
                 match params.first() {
                     Some((_, first)) if *first == self_param() => {}
-                    Some((_, Ty::Ref(inner))) if **inner == self_param() => {}
                     _ => {
                         self.push(
                             Diagnostic::new(
                                 member.span,
                                 format!(
-                                    "`{}`'s first parameter must be `Self` or `&Self`",
+                                    "`{}`'s first parameter must be `Self`",
                                     member.name.name
                                 ),
                             )
@@ -152,7 +150,8 @@ impl Checker {
                             .note(format!(
                                 "the method spelling `value.{}(…)` passes the receiver as the first argument",
                                 member.name.name
-                            )),
+                            ))
+                            .note("a receiver reads by default; a consuming method declares `sink Self`"),
                         );
                         continue;
                     }
@@ -578,10 +577,8 @@ impl Checker {
         // A type parameter's methods come from its declared bounds — propagation by declaration,
         // never a search of the impls, because inside the template nothing concrete exists to
         // search. The call becomes a symbolic stub in the fn-instance registry; monomorphization
-        // resolves it per instance through `find_impl_method`. Selection looks through a borrow
-        // everywhere in this resolver: `&T` and `T` are the same values, so the receiver's owned
-        // type is what picks the method, and the borrow only decides how the receiver is passed.
-        if let Ty::Param { index, name } = receiver.ty.owned() {
+        // resolves it per instance through `find_impl_method`.
+        if let Ty::Param { index, name } = &receiver.ty {
             let bounds = self
                 .bounds_in_scope
                 .get(*index as usize)
@@ -626,14 +623,8 @@ impl Checker {
                     self.error_expr(span)
                 }
                 [trait_id] => {
-                    // The stub's identity is the owned Self: the borrow is the receiver's mode,
-                    // not part of which (trait, method, receiver) the call means.
-                    let stub = self.request_trait_call(
-                        *trait_id,
-                        &method.name,
-                        receiver.ty.owned().clone(),
-                        span,
-                    );
+                    let stub =
+                        self.request_trait_call(*trait_id, &method.name, receiver.ty.clone(), span);
                     let display = format!("{name}.{}", method.name);
                     self.call_method(stub, &display, receiver, args, span)
                 }
@@ -662,7 +653,7 @@ impl Checker {
         let candidates: Vec<(TraitId, FnId)> = self
             .impls
             .iter()
-            .filter(|imp| same_ty(&imp.receiver, receiver.ty.owned()))
+            .filter(|imp| same_ty(&imp.receiver, &receiver.ty))
             .filter_map(|imp| {
                 imp.methods
                     .iter()
@@ -671,10 +662,10 @@ impl Checker {
                     .map(|id| (imp.trait_id, id))
             })
             .collect();
-        let ty_name = self.program.ty_name(receiver.ty.owned());
+        let ty_name = self.program.ty_name(&receiver.ty);
         match candidates.as_slice() {
             [] => {
-                if let Ty::Struct(id) = receiver.ty.owned()
+                if let Ty::Struct(id) = &receiver.ty
                     && self.program.structs[id.index()]
                         .field(&method.name)
                         .is_some()
@@ -748,49 +739,18 @@ impl Checker {
 
     /// The rewrite that makes a method a plain call: the receiver becomes the first argument,
     /// and everything after it is checked the way `call_fn` checks arguments. Impl functions are
-    /// never generic and never tasks this wave, so neither branch of `call_fn` is needed.
+    /// never generic and never tasks this wave, so neither branch of `call_fn` is needed. The
+    /// receiver needs no adaptation: reading is unmarked, and whether the method consumes it is
+    /// the mode column's fact, enforced by `check_moves` like any other argument.
     fn call_method(
         &mut self,
         id: FnId,
         display: &str,
-        mut receiver: Expr,
+        receiver: Expr,
         args: &[ast::Arg],
         span: Span,
     ) -> Expr {
         let (params, ret) = self.signatures[id.index()].clone();
-        // The receiver adapts to the declared mode. A `&Self` method reads, so an owned receiver
-        // is auto-borrowed — the same type-stamp erasure `check_unary` gives a written `&`, and
-        // safe from task smuggling for the same reason nothing else here needs a check: an impl
-        // method is never a `task fn` this wave, so an auto-borrowed receiver can never become a
-        // `spawn` or `after` operand, and a nested method call is finished evaluating by the time
-        // either builds its task. The other direction is a refusal: a method that takes `Self`
-        // consumes its receiver, and a borrow has nothing to give away.
-        match params.first() {
-            Some((_, first)) if first.is_ref() => {
-                receiver.ty = match receiver.ty {
-                    Ty::Ref(_) | Ty::Error | Ty::Never => receiver.ty,
-                    owned => Ty::Ref(Box::new(owned)),
-                };
-            }
-            Some(_) if receiver.ty.is_ref() => {
-                let method = display.rsplit('.').next().unwrap_or(display);
-                self.push(
-                    Diagnostic::new(
-                        receiver.span,
-                        format!(
-                            "`{method}` takes its receiver by value, but this receiver is borrowed"
-                        ),
-                    )
-                    .label("a borrow reads without taking")
-                    .note("only a method with a `&Self` receiver can be called through one")
-                    .note(
-                        "to consume the value, own it: take the parameter by value instead of `&`",
-                    ),
-                );
-                return self.error_expr(span);
-            }
-            _ => {}
-        }
         let names: Vec<String> = params.iter().skip(1).map(|(n, _)| n.clone()).collect();
         let Some(order) = self.argument_order(&names, args, display, "parameter", span) else {
             return self.error_expr(span);

@@ -1,28 +1,31 @@
-// Where a borrow may and may not be written. Each function here is wrong in exactly one way.
-//
-// A reference is a parameter type and nothing else. That is not a rule the checker applies so much
-// as a shape of the grammar: there is no field, no return, no `let`, and no reactor member that can
-// hold one, so a borrow has nowhere to go when the call it was passed to ends. The one value that
-// outlives its call is a task, which is why `spawn` is the last case below.
+// Where `&` gets a teaching answer instead of a meaning (BOOTSTRAP §8 item 5). References are
+// not part of Norn: reads are unmarked and take nothing, a parameter that consumes declares
+// `sink`, and mutation will be declared `mut` in its own wave. Each declaration here is wrong in
+// exactly one way, and each answer names the spelling that replaced the borrow.
 
-// A struct cannot hold a borrow, because the struct would outlive it.
+// A struct field owns; `&` does not name a type.
 struct Held {
     conn: &Connection
 }
 
-// Neither can a return type: the caller would be handed something the callee no longer has.
-fn hands_it_back(conn: &Connection) -> &Connection {
+// A parameter spelled `&T`: parameters read by default, so the mark said nothing `T` does not.
+fn peek(conn: &Connection) -> () {
+    ()
+}
+
+// A return type: the caller is handed the value itself.
+fn hand_back(conn: Connection) -> &Connection {
     conn
 }
 
-// `&mut` has no meaning yet. v0 borrows only to read.
+// `&mut`: mutation is declared in the signature, and it is the next wave's `mut`.
 fn rewrite(conn: &mut Connection) -> () {
     ()
 }
 
-// A name outlives the call a borrow belongs to, so a borrow cannot be given one.
+// A borrowed expression: there is nothing for `&` to take — reading does not consume.
 task fn names_a_borrow() -> ()
-    uses { net.listen, net.io }
+    uses { net.listen }
 {
     match await tcp_listen(0) {
         Ok(listener) => {
@@ -33,33 +36,12 @@ task fn names_a_borrow() -> ()
     }
 }
 
-// `tcp_read` looks at a connection — the unmarked spelling reads, so passing `conn` whole is
-// fine — but `tcp_close` takes it, and a borrow has nothing to give away.
-task fn wrong_way_round(conn: Connection) -> ()
+// An argument spelled `&x`: whether a call consumes is its signature's fact, never the site's.
+task fn reads_with_a_mark(conn: Connection) -> ()
     uses { net.io }
 {
-    match await tcp_read(conn) {
+    match await tcp_read(&conn) {
         Ok(_) => ()
         Err(_) => ()
-    }
-    await tcp_close(&conn)
-}
-
-task fn serve(conn: &Connection) -> ()
-    uses { net.io }
-{
-    match await tcp_read(conn) {
-        Ok(_) => ()
-        Err(_) => ()
-    }
-}
-
-// A spawned task starts after this line and runs for as long as the scope lasts, so it has to own
-// what it was handed. `await serve(&conn)` would have been fine: the borrow ends when the call does.
-task fn spawns_a_borrow(conn: Connection) -> ()
-    uses { net.io }
-{
-    scope {
-        spawn serve(&conn)
     }
 }

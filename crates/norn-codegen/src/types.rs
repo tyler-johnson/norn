@@ -125,8 +125,6 @@ impl<'p> Registry<'p> {
                 self.intern(ty);
                 self.walk(inner);
             }
-            // `&T` and `T` are the same values; only the pointee has a representation.
-            Ty::Ref(inner) => self.walk(inner),
             // No value of these ever exists in executable code: `Never` slots are never written
             // or read, and `Param`/`Error`/`Event` cannot reach a checked, non-inert body.
             Ty::Never | Ty::Param { .. } | Ty::Error | Ty::Event(_) => {}
@@ -179,7 +177,6 @@ impl<'p> Registry<'p> {
             Ty::Reactor(_) => "reactor".into(),
             Ty::Input(_) => "input".into(),
             Ty::Signal(_) => "signal".into(),
-            Ty::Ref(inner) => self.key(inner),
             other => panic!("no representation for {other:?}"),
         }
     }
@@ -205,7 +202,6 @@ impl<'p> Registry<'p> {
             Ty::Resource(_) => "ResourceId".into(),
             Ty::Reactor(_) => "ReactorId".into(),
             Ty::Input(_) | Ty::Signal(_) => "(ReactorId, usize)".into(),
-            Ty::Ref(inner) => self.repr(inner),
             // A diverging expression's slot: it exists so every temp has one, and no path ever
             // writes or reads it.
             Ty::Never => "()".into(),
@@ -242,13 +238,13 @@ impl<'p> Registry<'p> {
     /// The field types of one variant of an enum type — a table lookup for a declared enum,
     /// structural for an Option/Result instantiation.
     pub fn variant_field_tys(&self, ty: &Ty, variant: usize) -> Vec<Ty> {
-        match ty.owned() {
+        match ty {
             Ty::Enum(id) => self.program.enums[id.index()].variants[variant]
                 .fields
                 .iter()
                 .map(|field| field.ty.clone())
                 .collect(),
-            Ty::Option(_) | Ty::Result(..) => synthetic_variants(ty.owned())[variant]
+            Ty::Option(_) | Ty::Result(..) => synthetic_variants(ty)[variant]
                 .fields
                 .iter()
                 .map(|field| field.ty.clone())
@@ -258,7 +254,7 @@ impl<'p> Registry<'p> {
     }
 
     pub fn variant_count(&self, ty: &Ty) -> usize {
-        match ty.owned() {
+        match ty {
             Ty::Enum(id) => self.program.enums[id.index()].variants.len(),
             Ty::Option(_) | Ty::Result(..) => 2,
             other => panic!("no variants on {other:?}"),
@@ -677,7 +673,6 @@ fn unreal(ty: &Ty) -> bool {
         Ty::Option(inner)
         | Ty::Task(inner)
         | Ty::Shared(inner)
-        | Ty::Ref(inner)
         | Ty::Input(inner)
         | Ty::Signal(inner)
         | Ty::Event(inner) => unreal(inner),

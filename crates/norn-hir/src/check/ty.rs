@@ -1,54 +1,52 @@
 use super::*;
 
 impl Checker {
-    /// A parameter is the one place a reference may be written, so it is the one caller that does
-    /// not go through `resolve_ty`.
+    /// A parameter type. What distinguishes it from `resolve_ty` any more is only the teaching:
+    /// `&T` was the read-parameter spelling once, so here it is answered with the mode that
+    /// replaced it rather than with the general no-borrows refusal.
     pub(super) fn resolve_param_ty(&mut self, ty: &ast::Type) -> Ty {
         match &ty.kind {
             ast::TypeKind::Ref { mutable: true, .. } => {
                 self.exclusive_borrow(ty.span);
                 Ty::Error
             }
-            ast::TypeKind::Ref { inner, .. } => {
-                // `&&T` is `&T`: re-borrowing a borrowed parameter to pass it on is the ordinary
-                // thing to write, and it should not need a different spelling from the first borrow.
-                let inner = self.resolve_param_ty(inner);
-                match inner {
-                    Ty::Ref(_) | Ty::Error => inner,
-                    owned => Ty::Ref(Box::new(owned)),
-                }
+            ast::TypeKind::Ref { .. } => {
+                self.push(
+                    Diagnostic::new(ty.span, "parameters are read by default")
+                        .label("`&` is not a parameter mode")
+                        .note("write the type alone: a read takes nothing, so `&T` said nothing `T` does not")
+                        .note("a consuming parameter is declared in the signature, `sink T`"),
+                );
+                Ty::Error
             }
             _ => self.resolve_ty(ty),
         }
     }
 
-    /// The diagnostic `&mut` gets instead of a meaning. One exclusive-borrow rule is a borrow
-    /// checker, and v0 has nothing that needs one.
+    /// The diagnostic `&mut` gets instead of a meaning.
     pub(super) fn exclusive_borrow(&mut self, span: Span) {
         self.push(
-            Diagnostic::new(span, "`&mut` has no meaning yet")
-                .label("exclusive borrows arrive with mutation through references")
-                .note("v0 borrows only to read: `&T` lets a call look at a value without taking it")
-                .note("to change something, take it by value and return it, or hold it in a reactor's `state`"),
+            Diagnostic::new(span, "references are not part of Norn")
+                .label("`&mut` names a borrow, and there are none")
+                .note("mutation is declared in the signature — `mut T`, the next wave of BOOTSTRAP §8 item 5")
+                .note("until it lands, take the value and return the successor, or hold it in a reactor's `state`"),
         );
     }
 
     pub(super) fn resolve_ty(&mut self, ty: &ast::Type) -> Ty {
         match &ty.kind {
             ast::TypeKind::Unit => Ty::Unit,
-            // A reference is writable in exactly one position, which is what makes "a borrow may
-            // not escape" a fact about the grammar rather than an analysis: there is nowhere to
-            // store one. `Ty::Error` rather than the pointee, so that a return type nobody may
-            // write does not then disagree with the body that returns one.
+            // `Ty::Error` rather than the pointee, so that a type nobody may write does not
+            // then disagree with the value it was written against.
             ast::TypeKind::Ref { mutable, .. } => {
                 if *mutable {
                     self.exclusive_borrow(ty.span);
                 } else {
                     self.push(
-                        Diagnostic::new(ty.span, "a reference cannot be written here")
-                            .label("`&` is only a parameter type")
-                            .note("a borrow lasts for the call it is passed to, so there is nowhere else it could be kept")
-                            .note("to hold the value, name it by its own type and take ownership of it"),
+                        Diagnostic::new(ty.span, "Norn has no borrows")
+                            .label("`&` does not name a type")
+                            .note("reading does not consume, so a value is passed, stored, and returned as itself")
+                            .note("a parameter that consumes is declared `sink T`; every other position owns"),
                     );
                 }
                 Ty::Error
@@ -395,10 +393,7 @@ impl Checker {
 
     // ---------------------------------------------------------------- locals
 
-    /// A `let`, or a name a pattern binds. A reference may not be given a name: `resolve_ty` keeps
-    /// one out of every written position, and this keeps one out of the inferred position that is
-    /// left, so `let held = &conn` is answered here rather than becoming the one way to smuggle a
-    /// borrow past the end of the call it belongs to.
+    /// A `let`, or a name a pattern binds.
     pub(super) fn declare_local(
         &mut self,
         name: String,
@@ -406,21 +401,9 @@ impl Checker {
         mutable: bool,
         span: Span,
     ) -> LocalId {
-        let ty = if ty.is_ref() {
-            self.push(
-                Diagnostic::new(span, format!("`{name}` would be a borrow"))
-                    .label("a borrow cannot be given a name")
-                    .note("`&` lasts for the call it is handed to, and a name outlives that")
-                    .note("pass it where it is needed — `f(&conn)` — or bind the value itself and take ownership of it"),
-            );
-            Ty::Error
-        } else {
-            ty
-        };
         self.declare_role(name, ty, mutable, LocalRole::Ordinary, span)
     }
 
-    /// A parameter, which is the one position where a reference may be written down.
     pub(super) fn declare_param(&mut self, name: String, ty: Ty, span: Span) -> LocalId {
         self.declare_role(name, ty, false, LocalRole::Ordinary, span)
     }
@@ -482,18 +465,6 @@ impl Checker {
                 && produced.fits(expected)
             {
                 self.discarded_task(span);
-                return self.error_expr(span);
-            }
-            // An owned value where a borrow was asked reads as itself: a `&T` parameter is a
-            // `Read` position, reading does not consume, and the unmarked spelling is the modes
-            // doctrine — so both spellings are legal while the ampersand still is. The value
-            // keeps its owned type; `check_moves` follows the callee's mode, not the `&`.
-            if expected.is_ref() && found.ty.fits(expected.owned()) {
-                return found;
-            }
-            // A borrow where ownership was wanted has nothing to give away.
-            if found.ty.is_ref() && found.ty.owned().fits(expected) {
-                self.borrow_mismatch(expected, span);
                 return self.error_expr(span);
             }
             let message = format!(

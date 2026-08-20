@@ -400,7 +400,6 @@ impl Checker {
             ),
             Ty::Task(inner) => Ty::Task(Box::new(self.subst(inner, args, at, depth))),
             Ty::Shared(inner) => Ty::Shared(Box::new(self.subst(inner, args, at, depth))),
-            Ty::Ref(inner) => Ty::Ref(Box::new(self.subst(inner, args, at, depth))),
             Ty::Input(inner) => Ty::Input(Box::new(self.subst(inner, args, at, depth))),
             Ty::Signal(inner) => Ty::Signal(Box::new(self.subst(inner, args, at, depth))),
             Ty::Event(inner) => Ty::Event(Box::new(self.subst(inner, args, at, depth))),
@@ -469,9 +468,6 @@ impl Checker {
             self.bind_params(param, bindings, &Ty::Error);
             return;
         }
-        // Borrows strip on both sides: `&T` and `T` are the same values, and whether the borrow
-        // was right is the re-check's question, not inference's.
-        let found = found.owned();
         match (param, found) {
             (Ty::Param { index, .. }, _) => {
                 let slot = &mut bindings[*index as usize];
@@ -479,7 +475,6 @@ impl Checker {
                     *slot = Some(found.clone());
                 }
             }
-            (Ty::Ref(inner), _) => self.solve(inner, found, bindings),
             (Ty::Option(p), Ty::Option(f)) => self.solve(p, f, bindings),
             (Ty::Result(po, pe), Ty::Result(fo, fe)) => {
                 self.solve(po, fo, bindings);
@@ -527,7 +522,6 @@ impl Checker {
             Ty::Option(inner)
             | Ty::Task(inner)
             | Ty::Shared(inner)
-            | Ty::Ref(inner)
             | Ty::Input(inner)
             | Ty::Signal(inner)
             | Ty::Event(inner) => self.bind_params(inner, bindings, to),
@@ -571,7 +565,6 @@ impl Checker {
             Ty::Option(inner)
             | Ty::Task(inner)
             | Ty::Shared(inner)
-            | Ty::Ref(inner)
             | Ty::Input(inner)
             | Ty::Signal(inner)
             | Ty::Event(inner) => self.mentions_unbound(inner, bindings),
@@ -785,7 +778,7 @@ impl Checker {
     /// Attach the opaque-parameter teaching note when the offending type is a bare `T` — the one
     /// note every operation a parameter cannot do shares.
     pub(super) fn with_opaque_note(&self, diagnostic: Diagnostic, ty: &Ty) -> Diagnostic {
-        if let Ty::Param { name, .. } = ty.owned() {
+        if let Ty::Param { name, .. } = ty {
             diagnostic.note(format!(
                 "`{name}` is opaque inside `{}`: without a bound it can only be moved, stored, matched by binding, or passed on",
                 self.fn_name
@@ -951,7 +944,6 @@ impl Checker {
             Ty::Option(inner)
             | Ty::Task(inner)
             | Ty::Shared(inner)
-            | Ty::Ref(inner)
             | Ty::Input(inner)
             | Ty::Signal(inner)
             | Ty::Event(inner) => self.mentions_param(inner),
@@ -1373,14 +1365,14 @@ impl Checker {
                 // where the user can act.
                 if *builtin == Builtin::Shared
                     && let Some(arg) = args.first()
-                    && self.program.affine(arg.ty.owned())
+                    && self.program.affine(&arg.ty)
                 {
                     self.push(
                         Diagnostic::new(
                             cx.at,
                             format!(
                                 "`shared` cannot take {}",
-                                self.program.ty_name(arg.ty.owned())
+                                self.program.ty_name(&arg.ty)
                             ),
                         )
                         .label("instantiated here with an affine payload")

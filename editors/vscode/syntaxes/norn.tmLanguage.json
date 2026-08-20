@@ -540,8 +540,9 @@
       "comment": "Only ever included from a context that is already known to be a type position, because Norn attaches no meaning to capitalization: `Profile` and `profile` are the same kind of name, and only where they appear says which is a type.",
       "patterns": [
         {
-          "name": "storage.modifier.reference.norn",
-          "match": "&(\\s*\\bmut\\b)?"
+          "comment": "The contextual parameter mode: `sink` reads as a keyword only where a type can follow, which is exactly the type position this rule is included from.",
+          "name": "storage.modifier.sink.norn",
+          "match": "\\bsink\\b(?=\\s+[A-Za-z_(&])"
         },
         {
           "name": "entity.name.type.unit.norn",
@@ -786,7 +787,7 @@
         },
         {
           "name": "keyword.operator.norn",
-          "match": "[&|@]"
+          "match": "[|@]"
         }
       ]
     },

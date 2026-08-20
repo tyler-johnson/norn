@@ -35,10 +35,14 @@ error: I64 has more than one method named `shout`
    = note: `Quiet` provides one
    = note: methods share one name and functions do not: call the function form the impl delegates to
 
-error: `consume` takes its receiver by value, but this receiver is borrowed
+error: `user` was given away
+  --> methods.norn:65:22
+   |
+65 |     user.consume() + user.consume()
+   |                      ^^^^ used here
   --> methods.norn:65:5
    |
-65 |     user.consume()
-   |     ^^^^ a borrow reads without taking
-   = note: only a method with a `&Self` receiver can be called through one
-   = note: to consume the value, own it: take the parameter by value instead of `&`
+65 |     user.consume() + user.consume()
+   |     ^^^^ given here
+   = note: a `User` copies, but it was handed to a `sink` parameter, and the name does not survive that
+   = note: `let kept = user` before the call keeps a copy under a name of its own

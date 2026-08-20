@@ -642,7 +642,7 @@ impl Lowerer<'_> {
                 // No deref peel here: `check_assignable` refused a `Shared`-typed base, so a
                 // write never traverses one.
                 debug_assert!(
-                    !matches!(base.ty.owned(), hir::Ty::Shared(_)),
+                    !matches!(base.ty, hir::Ty::Shared(_)),
                     "a write projected through a shared value survived checking"
                 );
                 self.place(base).field(*index)

@@ -1,10 +1,10 @@
 // Using a value that has already been given away. Each function here is wrong in exactly one way.
 //
 // A `Connection` has one owner. Passing it to a call that takes it makes the call the owner, and
-// the name it was passed under holds nothing afterwards — whether the next line reads it, borrows
-// it, or hands it somewhere else again. `tcp_close` is the case worth reading first: closing a
-// socket and then reading from it is not a special rule about descriptors, it is the ordinary rule
-// about names, and that is what makes double-close a compile error.
+// the name it was passed under holds nothing afterwards — whether the next line reads it or hands
+// it somewhere else again. `tcp_close` is the case worth reading first: closing a socket and then
+// reading from it is not a special rule about descriptors, it is the ordinary rule about names,
+// and that is what makes double-close a compile error.
 
 struct Session {
     conn: Connection
@@ -23,7 +23,7 @@ task fn reads_a_closed_socket(conn: Connection) -> ()
     uses { net.io }
 {
     await tcp_close(conn)
-    match await tcp_read(&conn) {
+    match await tcp_read(conn) {
         Ok(_) => ()
         Err(_) => ()
     }
@@ -53,7 +53,7 @@ task fn moves_on_one_branch(conn: Connection, tidy: Bool) -> ()
     if tidy {
         await tcp_close(conn)
     }
-    match await tcp_read(&conn) {
+    match await tcp_read(conn) {
         Ok(_) => ()
         Err(_) => ()
     }

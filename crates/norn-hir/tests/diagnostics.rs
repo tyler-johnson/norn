@@ -161,9 +161,9 @@ fn main() -> I64 {
 ",
     );
 
-    // `match &x` reads; the move afterwards is the value's first and only.
+    // An ordinary value copies, so a match is not its last use and neither is a call.
     accepted(
-        "a match through `&` is not the move",
+        "a match on a copyable is not a move",
         "\
 enum Journal {
     Empty
@@ -179,7 +179,7 @@ fn consume(journal: Journal) -> I64 {
 
 fn main() -> I64 {
     let journal = Journal.Entry(7)
-    match &journal {
+    match journal {
         Journal.Empty => 0
         Journal.Entry(seq) => seq
     }
@@ -210,12 +210,12 @@ fn main() -> () {
 ",
     );
 
-    // A `&Self` method reads its receiver, so calling it is not a use the next line pays for.
+    // A `Self` method reads its receiver, so calling it is not a use the next line pays for.
     accepted(
-        "a `&Self` method leaves its receiver owned",
+        "a `Self` method leaves its receiver owned",
         "\
 trait Describe {
-    fn describe(value: &Self) -> String
+    fn describe(value: Self) -> String
 }
 
 struct Config {
@@ -223,7 +223,7 @@ struct Config {
 }
 
 impl Describe for Config {
-    fn describe(value: &Self) -> String {
+    fn describe(value: Self) -> String {
         value.host
     }
 }
@@ -236,9 +236,10 @@ fn main() -> () {
 ",
     );
 
-    // `print(&p)` is the non-consuming spelling — the documented answer to `print(p); print(p)`.
+    // Printing reads — the documented answer to `print(p); print(p)` is that it was never a
+    // question: reads are unmarked, and take nothing.
     accepted(
-        "printing through a borrow looks without taking",
+        "printing reads, however often",
         "\
 struct Point {
     x: I64
@@ -247,86 +248,75 @@ struct Point {
 
 fn main() -> () {
     let p = Point(x: 1, y: 2)
-    print(&p)
-    print(&p)
+    print(p)
+    print(p)
     print(p)
 }
 ",
     );
 }
 
-/// The read half of borrowing (BOOTSTRAP §8 item 6c): field access and `match` reach through a
-/// `&`, and what a pattern binds is an owned copy. Pinned inline because the corpus that dogfoods
-/// these lands with the corpus migration, and the rules should hold before it does.
+/// The read half of the modes doctrine (BOOTSTRAP §8 item 5): field access and `match` on an
+/// owned value, spelled plainly, because reads are unmarked and an ordinary value copies.
 #[test]
-fn a_borrow_reads_without_taking() {
-    // A borrowed scrutinee with payload bindings: the pattern types against the pointee, and the
-    // bindings are owned copies.
+fn a_read_is_unmarked() {
+    // A parameter is a read: matching an ordinary value in it costs the caller nothing.
     accepted(
-        "a match reaches through a borrowed parameter",
+        "a match in a read parameter takes nothing from the caller",
         "\
 enum Verdict {
     Pass
     Fail(String)
 }
 
-fn describe(verdict: &Verdict) -> String {
+fn describe(verdict: Verdict) -> String {
     match verdict {
         Verdict.Pass => \"pass\"
         Verdict.Fail(reason) => reason
     }
 }
-",
-    );
-
-    // `match &x` on an owned local reads it, so the name is still there afterwards.
-    accepted(
-        "a match through `&` leaves the value owned",
-        "\
-enum Verdict {
-    Pass
-    Fail(String)
-}
 
 fn main() -> () {
     let verdict = Verdict.Fail(\"missing\")
-    match &verdict {
-        Verdict.Pass => print(\"pass\")
-        Verdict.Fail(reason) => print(reason)
-    }
-    match verdict {
-        Verdict.Pass => print(\"pass\")
-        Verdict.Fail(reason) => print(reason)
-    }
+    print(describe(verdict))
+    print(describe(verdict))
 }
 ",
     );
 
-    // One top-level peel is provably enough for nested patterns — a `Ty::Ref` is unspellable in
-    // any field — so exhaustiveness still resolves at OPTION under the borrow.
+    // Deconstructing an *affine* value is a consuming use, so a parameter that matches one
+    // infers `sink` — per instance, which is what closes the old template-time-only gap — and
+    // the caller hands the value over.
     accepted(
-        "a nested pattern under a borrow is exhaustive at the pointee",
+        "a match on an affine parameter flips it to sink",
         "\
-enum List<T> {
-    Nil
-    Cons(T, List<T>)
+enum Carrier {
+    Empty
+    Wrapped(Connection)
 }
 
-fn first(maybe: &Option<List<I64>>) -> I64 {
-    match maybe {
-        Some(List.Cons(head, _)) => head
-        Some(List.Nil) => 0
-        None => -1
+task fn close_carried(carrier: Carrier) -> ()
+    uses { net.io }
+{
+    match carrier {
+        Carrier.Empty => ()
+        Carrier.Wrapped(conn) => await tcp_close(conn)
     }
+}
+
+task fn main(carrier: Carrier) -> ()
+    uses { net.io }
+{
+    await close_carried(carrier)
 }
 ",
     );
 
-    // A scalar behind a borrow keeps the scalar's rule: a catch-all arm is what completes it.
+    // A scalar keeps the scalar's rule wherever it sits: a catch-all arm is what completes it.
     accepted(
-        "a match on a borrowed scalar keeps the catch-all rule",
+        "a match on an owned scalar keeps the catch-all rule",
         "\
-fn describe(n: &I64) -> String {
+fn describe(n: I64) -> String {
     match n {
         0 => \"zero\"
         _ => \"nonzero\"
@@ -335,34 +325,37 @@ fn describe(n: &I64) -> String {
 ",
     );
 
-    // Field access reads through a borrowed struct.
+    // A field read in a read parameter: two calls on one value, nothing marked anywhere.
     accepted(
-        "a field read reaches through a borrowed parameter",
+        "a field read in a read parameter takes nothing",
         "\
 struct Config {
     host: String
     port: I64
 }
 
-fn port(config: &Config) -> I64 {
+fn port(config: Config) -> I64 {
     config.port
+}
+
+fn main() -> () {
+    let config = Config(host: \"localhost\", port: 80)
+    print(port(config))
+    print(port(config))
 }
 ",
     );
 }
 
-/// `&Self` receivers: a trait may declare that a method only reads, the impl spells the same
-/// mode, and the call site auto-borrows an owned receiver — so the name survives the call, pinned
-/// here ahead of the flip that makes the difference observable. The generic case pins the
-/// stub/mono interaction: the stub's identity stays the owned Self while its parameter carries
-/// the `Ref`.
+/// Receivers read by default: a `Self` method leaves its receiver with the caller, through the
+/// concrete path and the bounded-generic stub path alike.
 #[test]
-fn a_borrowed_receiver_leaves_the_value_owned() {
+fn a_receiver_reads_by_default() {
     accepted(
-        "a `&Self` method is declared, implemented, and called twice",
+        "a `Self` method is declared, implemented, and called twice",
         "\
 trait Describe {
-    fn describe(value: &Self) -> String
+    fn describe(value: Self) -> String
 }
 
 struct Config {
@@ -370,7 +363,7 @@ struct Config {
 }
 
 impl Describe for Config {
-    fn describe(value: &Self) -> String {
+    fn describe(value: Self) -> String {
         value.host
     }
 }
@@ -402,7 +395,7 @@ fn modes_make_reads_unmarked() {
 task fn watch(conn: Connection) -> ()
     uses { net.io }
 {
-    let data = await tcp_read(&conn)
+    let data = await tcp_read(conn)
     ()
 }
 

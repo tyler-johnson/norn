@@ -546,14 +546,13 @@ impl Checker {
 
     /// `shared(x)`: the result type wraps the argument's, so the builtin is typed by what it is
     /// handed, like `latest`. The payload may not be affine — a shared value is copied freely,
-    /// and a descriptor has exactly one owner. `shared(&x)` shares a copy of the pointee: `&T`
-    /// and `T` are the same values, and the affine test runs on the pointee.
+    /// and a descriptor has exactly one owner.
     pub(super) fn check_shared(&mut self, args: &[ast::Arg], span: Span) -> Expr {
         let target = self.check_expr(&args[0].value, None);
         if target.ty.is_error() {
             return self.error_expr(span);
         }
-        let payload = target.ty.owned().clone();
+        let payload = target.ty.clone();
         if self.program.affine(&payload) {
             let message = format!("`shared` cannot take {}", self.program.ty_name(&payload));
             self.push(
@@ -581,7 +580,7 @@ impl Checker {
         if target.ty.is_error() {
             return self.error_expr(span);
         }
-        let Ty::Shared(inner) = target.ty.owned().clone() else {
+        let Ty::Shared(inner) = target.ty.clone() else {
             let message = format!(
                 "`unshare` needs a shared value, not {}",
                 self.program.ty_name(&target.ty)

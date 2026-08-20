@@ -1,46 +1,47 @@
-error: a reference cannot be written here
-  --> borrows.norn:10:11
-   |
-10 |     conn: &Connection
-   |           ^^^^^^^^^^^ `&` is only a parameter type
-   = note: a borrow lasts for the call it is passed to, so there is nowhere else it could be kept
-   = note: to hold the value, name it by its own type and take ownership of it
+error: Norn has no borrows
+ --> borrows.norn:8:11
+  |
+8 |     conn: &Connection
+  |           ^^^^^^^^^^^ `&` does not name a type
+  = note: reading does not consume, so a value is passed, stored, and returned as itself
+  = note: a parameter that consumes is declared `sink T`; every other position owns
 
-error: a reference cannot be written here
-  --> borrows.norn:14:40
+error: parameters are read by default
+  --> borrows.norn:12:15
    |
-14 | fn hands_it_back(conn: &Connection) -> &Connection {
-   |                                        ^^^^^^^^^^^ `&` is only a parameter type
-   = note: a borrow lasts for the call it is passed to, so there is nowhere else it could be kept
-   = note: to hold the value, name it by its own type and take ownership of it
+12 | fn peek(conn: &Connection) -> () {
+   |               ^^^^^^^^^^^ `&` is not a parameter mode
+   = note: write the type alone: a read takes nothing, so `&T` said nothing `T` does not
+   = note: a consuming parameter is declared in the signature, `sink T`
 
-error: `&mut` has no meaning yet
-  --> borrows.norn:19:18
+error: Norn has no borrows
+  --> borrows.norn:17:35
    |
-19 | fn rewrite(conn: &mut Connection) -> () {
-   |                  ^^^^^^^^^^^^^^^ exclusive borrows arrive with mutation through references
-   = note: v0 borrows only to read: `&T` lets a call look at a value without taking it
-   = note: to change something, take it by value and return it, or hold it in a reactor's `state`
+17 | fn hand_back(conn: Connection) -> &Connection {
+   |                                   ^^^^^^^^^^^ `&` does not name a type
+   = note: reading does not consume, so a value is passed, stored, and returned as itself
+   = note: a parameter that consumes is declared `sink T`; every other position owns
 
-error: `held` would be a borrow
-  --> borrows.norn:29:17
+error: references are not part of Norn
+  --> borrows.norn:22:18
    |
-29 |             let held = &listener
-   |                 ^^^^ a borrow cannot be given a name
-   = note: `&` lasts for the call it is handed to, and a name outlives that
-   = note: pass it where it is needed — `f(&conn)` — or bind the value itself and take ownership of it
+22 | fn rewrite(conn: &mut Connection) -> () {
+   |                  ^^^^^^^^^^^^^^^ `&mut` names a borrow, and there are none
+   = note: mutation is declared in the signature — `mut T`, the next wave of BOOTSTRAP §8 item 5
+   = note: until it lands, take the value and return the successor, or hold it in a reactor's `state`
 
-error: this takes the Connection
-  --> borrows.norn:45:21
+error: Norn has no borrows
+  --> borrows.norn:32:24
    |
-45 |     await tcp_close(&conn)
-   |                     ^^^^^ drop the `&`
-   = note: ownership moves into the call, and the value cannot be used here again
+32 |             let held = &listener
+   |                        ^^^^^^^^^ `&` takes nothing to take
+   = note: pass the value itself: reading does not consume it
+   = note: whether a call consumes is its signature's to declare (`sink T`), never the call site's
 
-error: `spawn` cannot be handed a borrow
-  --> borrows.norn:63:21
+error: Norn has no borrows
+  --> borrows.norn:43:26
    |
-63 |         spawn serve(&conn)
-   |                     ^^^^^ this is borrowed, and the task runs after this line
-   = note: the work is built here and started later, so it has to own its Connection
-   = note: drop the `&` to move the value in; `await f(&x)` is the form that may borrow, because the task is finished by the time that line is
+43 |     match await tcp_read(&conn) {
+   |                          ^^^^^ `&` takes nothing to take
+   = note: pass the value itself: reading does not consume it
+   = note: whether a call consumes is its signature's to declare (`sink T`), never the call site's

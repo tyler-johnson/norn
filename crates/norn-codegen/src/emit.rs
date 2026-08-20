@@ -316,7 +316,7 @@ impl Emitter<'_> {
         for &id in &self.task_fns {
             let function = &self.program.fns[id];
             let moved: Vec<usize> = (0..function.params)
-                .filter(|&i| matches!(function.tys[i].owned(), Ty::Resource(_)))
+                .filter(|&i| matches!(function.tys[i], Ty::Resource(_)))
                 .collect();
             if moved.is_empty() {
                 continue;
@@ -354,7 +354,7 @@ impl Emitter<'_> {
             }
             let params = builtin.signature().0;
             let moved: Vec<usize> = (0..params.len())
-                .filter(|&i| matches!(params[i].0.owned(), Ty::Resource(_)))
+                .filter(|&i| matches!(params[i].0, Ty::Resource(_)))
                 .collect();
             if moved.is_empty() {
                 continue;
@@ -504,7 +504,7 @@ impl Emitter<'_> {
             .signature()
             .0
             .iter()
-            .map(|(ty, _)| self.repr(ty.owned()))
+            .map(|(ty, _)| self.repr(ty))
             .collect()
     }
 
@@ -1040,7 +1040,7 @@ impl Emitter<'_> {
             Rvalue::Use(operand) => self.operand_expr(function, ctx, operand),
             Rvalue::Unary(op, operand) => {
                 let value = self.operand_expr(function, ctx, operand);
-                match (op, self.operand_ty(function, operand).owned()) {
+                match (op, self.operand_ty(function, operand)) {
                     (hir::UnOp::Neg, Ty::I64) => format!("({value}).wrapping_neg()"),
                     (hir::UnOp::Neg, Ty::F64) => format!("-({value})"),
                     (hir::UnOp::Not, Ty::Bool) => format!("!({value})"),
@@ -1108,7 +1108,7 @@ impl Emitter<'_> {
                 let ename = if *enum_id == hir::EnumId::OPTION.index()
                     || *enum_id == hir::EnumId::RESULT.index()
                 {
-                    self.repr(dest_ty.owned())
+                    self.repr(dest_ty)
                 } else {
                     format!("E{enum_id}")
                 };
@@ -1165,7 +1165,7 @@ impl Emitter<'_> {
             // No trap: float division and remainder are IEEE, infinities and NaN included.
             BinOp::DivFloat => format!("({a}) / ({b})"),
             BinOp::RemFloat => format!("({a}) % ({b})"),
-            BinOp::Concat => match self.operand_ty(function, lhs).owned() {
+            BinOp::Concat => match self.operand_ty(function, lhs) {
                 Ty::Str => format!("str_concat({a}, {b})"),
                 Ty::Bytes => format!("bytes_concat({a}, {b})"),
                 other => panic!("concat on {other:?} survived checking"),
@@ -1176,10 +1176,7 @@ impl Emitter<'_> {
             BinOp::Eq | BinOp::Ne => {
                 let ty = self.operand_ty(function, lhs);
                 assert!(
-                    matches!(
-                        ty.owned(),
-                        Ty::I64 | Ty::F64 | Ty::Bool | Ty::Str | Ty::Bytes
-                    ),
+                    matches!(ty, Ty::I64 | Ty::F64 | Ty::Bool | Ty::Str | Ty::Bytes),
                     "equality on {ty:?} survived checking"
                 );
                 if op == BinOp::Eq {
@@ -1195,7 +1192,7 @@ impl Emitter<'_> {
                     BinOp::Gt => "is_gt",
                     _ => "is_ge",
                 };
-                match self.operand_ty(function, lhs).owned() {
+                match self.operand_ty(function, lhs) {
                     // Only floats can fail to order; everything else is total.
                     Ty::F64 => format!("cmp_f64({a}, {b}, {fname})?.{test}()"),
                     Ty::I64 | Ty::Str | Ty::Bytes => {

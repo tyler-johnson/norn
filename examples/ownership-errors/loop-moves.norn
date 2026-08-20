@@ -1,7 +1,7 @@
 // What a back edge means for ownership: a loop body — condition included, it re-runs every pass —
 // may not move an affine value it did not declare. The first pass would hand the value over, and
 // the next would find it gone. A value declared inside the loop is fresh each pass and moves
-// freely, which is what the accept loop does on purpose: the listener is only ever borrowed, and
+// freely, which is what the accept loop does on purpose: the listener is only ever read, and
 // each connection is born and dies inside one pass.
 
 // The first pass closes the connection; the second would close nothing.
@@ -39,12 +39,12 @@ fn consumes(conn: sink Connection) -> Bool {
     true
 }
 
-// Legal: the listener is borrowed, never moved, and each pass declares its own connection.
+// Legal: the listener is only read, never moved, and each pass declares its own connection.
 task fn accepts_forever(listener: Listener) -> ()
     uses { net.io }
 {
     loop {
-        match await tcp_accept(&listener) {
+        match await tcp_accept(listener) {
             Ok(conn) => await tcp_close(conn)
             Err(_) => break
         }
@@ -56,11 +56,11 @@ task fn accepts_forever(listener: Listener) -> ()
 task fn replaces_each_pass(listener: Listener, passes: I64) -> Result<(), IoError>
     uses { net.io }
 {
-    let mut conn = await tcp_accept(&listener)?
+    let mut conn = await tcp_accept(listener)?
     let mut n = passes
     while n > 0 {
         await tcp_close(conn)
-        conn = await tcp_accept(&listener)?
+        conn = await tcp_accept(listener)?
         n = n - 1
     }
     await tcp_close(conn)

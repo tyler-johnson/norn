@@ -38,7 +38,7 @@ impl Program {
     /// payload — a table lookup for a user enum, structural for `Option` and `Result`, whose
     /// instantiations never appear in the enum table.
     pub fn ty_of_proj(&self, ty: &Ty, proj: &Proj) -> Ty {
-        match (ty.owned(), proj) {
+        match (ty, proj) {
             (Ty::Struct(id), Proj::Field(field)) => {
                 self.structs[id.index()].fields[*field].ty.clone()
             }
@@ -67,7 +67,7 @@ impl Program {
 
     /// How the variant a `Downcast` names is spelled, given the type it downcasts.
     pub fn variant_name(&self, ty: &Ty, variant: usize) -> String {
-        match ty.owned() {
+        match ty {
             Ty::Enum(id) => self.enums[id.index()].variants[variant].name.clone(),
             Ty::Option(_) if variant == EnumId::SOME => "Some".into(),
             Ty::Option(_) => "None".into(),
@@ -565,7 +565,6 @@ pub fn print_ty(program: &Program, ty: &Ty) -> String {
         Ty::Task(inner) => format!("Task<{}>", print_ty(program, inner)),
         Ty::Shared(inner) => format!("Shared<{}>", print_ty(program, inner)),
         Ty::Resource(resource) => resource.name().into(),
-        Ty::Ref(inner) => format!("&{}", print_ty(program, inner)),
         Ty::Reactor(id) => program.reactors[id.index()].name.clone(),
         Ty::Input(inner) => format!("Input<{}>", print_ty(program, inner)),
         Ty::Signal(inner) => format!("Signal<{}>", print_ty(program, inner)),

@@ -48,7 +48,6 @@ impl Checker {
                         .filter(|&param| {
                             self.param_modes[index][param] == Mode::Read
                                 && !self.mode_pinned[index][param]
-                                && !def.locals[param].ty.is_ref()
                                 && self.program.affine(&def.locals[param].ty)
                         })
                         .collect();
@@ -89,7 +88,6 @@ impl Checker {
                 .filter(|&param| {
                     self.param_modes[index][param] == Mode::Read
                         && self.mode_pinned[index][param]
-                        && !def.locals[param].ty.is_ref()
                         && self.program.affine(&def.locals[param].ty)
                 })
                 .collect();
@@ -164,8 +162,7 @@ impl Checker {
                     unreachable!("matched above");
                 };
                 for (arg, mode) in args.iter().zip(modes) {
-                    // Borrowed arguments are `no_borrowed_arguments`' case while `&` lives.
-                    if mode == Mode::Sink || arg.ty.is_ref() || !self.program.affine(&arg.ty) {
+                    if mode == Mode::Sink || !self.program.affine(&arg.ty) {
                         continue;
                     }
                     let ty = self.program.ty_name(&arg.ty);
@@ -297,10 +294,6 @@ fn collect_started<'e>(expr: &'e Expr, out: &mut Vec<(&'e Expr, &'static str)>) 
 
 /// An expression whose value is consumed.
 fn value(expr: &Expr, param_modes: &[Vec<Mode>], consumed: &mut [Option<Span>]) {
-    if expr.ty.is_ref() {
-        place(expr, param_modes, consumed);
-        return;
-    }
     match &expr.kind {
         ExprKind::Local(id) => {
             if let Some(slot) = consumed.get_mut(id.index())

@@ -50,17 +50,17 @@ fn main() {
 }
 
 trait Consume {
-    fn consume(value: Self) -> String
+    fn consume(value: sink Self) -> String
 }
 
 impl Consume for User {
-    fn consume(value: Self) -> String {
+    fn consume(value: sink Self) -> String {
         value.name
     }
 }
 
-// A method that takes `Self` consumes its receiver, and a borrow has nothing to give away:
-// only a `&Self` method can be called through one.
-fn takes_borrowed(user: &User) -> String {
-    user.consume()
+// A `sink Self` method takes its receiver — asserted at the trait, so it holds however cheap a
+// `User` is to copy — and the second call finds the name gone.
+fn consumes_twice(user: User) -> String {
+    user.consume() + user.consume()
 }
