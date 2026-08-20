@@ -129,6 +129,20 @@ impl Capability {
     }
 }
 
+/// A parameter's calling mode (BOOTSTRAP §8 item 5). `Read` looks at the argument without
+/// consuming it — the unmarked default, what makes passing a value not a move. `Sink` takes it:
+/// the caller's name dies at the call, written `sink T` or inferred from a body that consumes.
+///
+/// Modes are a fact about checking alone: the checker keeps them beside its signatures, `moves`
+/// enforces them, and nothing downstream — NIR, either engine, the backend — learns they exist.
+/// The enum lives here only because `Builtin::signature` carries the builtins' column of it.
+/// Extensible on purpose: the mutation wave adds `Mut` as a variant, not a type.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Mode {
+    Read,
+    Sink,
+}
+
 /// A type. Everything an executable body carries is monomorphic — generic declarations are
 /// templates the checker instantiates, and only `Ty::Param` names a hole, opaque inside the one
 /// template body that declares it. `Option` and `Result` keep their own spellings: they are the
@@ -926,15 +940,17 @@ impl Builtin {
         }
     }
 
-    /// Parameter types and result type. `print`, `send`, `latest`, `shared`, and `unshare` are
-    /// the builtins whose types depend on what they are handed, spelled here as `Ty::Error` —
-    /// which every type fits — and checked properly at the call site rather than pretended to
-    /// have a type they do not.
+    /// Parameter types with their modes, and the result type. `print`, `send`, `latest`,
+    /// `shared`, and `unshare` are the builtins whose types depend on what they are handed,
+    /// spelled here as `Ty::Error` — which every type fits — and checked properly at the call
+    /// site rather than pretended to have a type they do not.
     ///
-    /// The socket builtins are where borrowing earns its keep: reading and writing look at a
-    /// descriptor, `tcp_close` takes it away, and the difference is spelled `&`. That is what makes
-    /// closing a connection and then reading from it the same error as any other use after a move.
-    pub fn signature(self) -> (Vec<Ty>, Ty) {
+    /// The socket builtins are where the mode column earns its keep: reading and writing look at
+    /// a descriptor, `tcp_close` takes it away, and the difference is `Read` against `Sink`. That
+    /// is what makes closing a connection and then reading from it the same error as any other
+    /// use after a move. (The resource-reading params still spell `&T` while the ampersand
+    /// lives; the mode is the contract, and the `Ref` dies with the surface.)
+    pub fn signature(self) -> (Vec<(Ty, Mode)>, Ty) {
         let listener = || Ty::Resource(Resource::Listener);
         let connection = || Ty::Resource(Resource::Connection);
         let file = || Ty::Resource(Resource::File);
@@ -943,37 +959,51 @@ impl Builtin {
         let io_error = || Ty::Enum(EnumId::IO_ERROR);
         let task = |ty: Ty| Ty::Task(Box::new(ty));
         let fallible = |ok: Ty| Ty::Result(Box::new(ok), Box::new(io_error()));
+        let read = |ty: Ty| (ty, Mode::Read);
+        let sink = |ty: Ty| (ty, Mode::Sink);
         match self {
-            Builtin::Print => (vec![Ty::Error], Ty::Unit),
-            Builtin::ListenerPort => (vec![borrowed(listener())], Ty::I64),
-            Builtin::Sleep => (vec![Ty::I64], task(Ty::Unit)),
-            Builtin::TcpListen => (vec![Ty::I64], task(fallible(listener()))),
-            Builtin::TcpAccept => (vec![borrowed(listener())], task(fallible(connection()))),
-            Builtin::TcpRead => (vec![borrowed(connection())], task(fallible(Ty::Bytes))),
+            Builtin::Print => (vec![read(Ty::Error)], Ty::Unit),
+            Builtin::ListenerPort => (vec![read(borrowed(listener()))], Ty::I64),
+            Builtin::Sleep => (vec![read(Ty::I64)], task(Ty::Unit)),
+            Builtin::TcpListen => (vec![read(Ty::I64)], task(fallible(listener()))),
+            Builtin::TcpAccept => (
+                vec![read(borrowed(listener()))],
+                task(fallible(connection())),
+            ),
+            Builtin::TcpRead => (
+                vec![read(borrowed(connection()))],
+                task(fallible(Ty::Bytes)),
+            ),
             Builtin::TcpWrite => (
-                vec![borrowed(connection()), Ty::Bytes],
+                vec![read(borrowed(connection())), read(Ty::Bytes)],
                 task(fallible(Ty::Unit)),
             ),
-            Builtin::TcpClose => (vec![connection()], task(Ty::Unit)),
-            Builtin::Send => (vec![Ty::Error, Ty::Error], task(Ty::Unit)),
-            Builtin::Latest => (vec![Ty::Error], Ty::Error),
-            Builtin::Shared => (vec![Ty::Error], Ty::Error),
-            Builtin::Unshare => (vec![Ty::Error], Ty::Error),
-            Builtin::Bytes => (vec![Ty::Str], Ty::Bytes),
-            Builtin::BytesLen => (vec![Ty::Bytes], Ty::I64),
-            Builtin::BytesSlice => (vec![Ty::Bytes, Ty::I64, Ty::I64], Ty::Bytes),
-            Builtin::TextUnchecked => (vec![Ty::Bytes], Ty::Str),
-            Builtin::Byte => (vec![Ty::I64], Ty::Bytes),
-            Builtin::BytesAt => (vec![Ty::Bytes, Ty::I64], Ty::I64),
-            Builtin::FileCreate => (vec![Ty::Str], task(fallible(file()))),
-            Builtin::FileWrite => (vec![borrowed(file()), Ty::Bytes], task(fallible(Ty::Unit))),
-            Builtin::FileClose => (vec![file()], task(Ty::Unit)),
-            Builtin::FlowOfFile => (vec![Ty::Str], task(fallible(flow()))),
+            Builtin::TcpClose => (vec![sink(connection())], task(Ty::Unit)),
+            Builtin::Send => (vec![read(Ty::Error), read(Ty::Error)], task(Ty::Unit)),
+            Builtin::Latest => (vec![read(Ty::Error)], Ty::Error),
+            Builtin::Shared => (vec![read(Ty::Error)], Ty::Error),
+            Builtin::Unshare => (vec![read(Ty::Error)], Ty::Error),
+            Builtin::Bytes => (vec![read(Ty::Str)], Ty::Bytes),
+            Builtin::BytesLen => (vec![read(Ty::Bytes)], Ty::I64),
+            Builtin::BytesSlice => (
+                vec![read(Ty::Bytes), read(Ty::I64), read(Ty::I64)],
+                Ty::Bytes,
+            ),
+            Builtin::TextUnchecked => (vec![read(Ty::Bytes)], Ty::Str),
+            Builtin::Byte => (vec![read(Ty::I64)], Ty::Bytes),
+            Builtin::BytesAt => (vec![read(Ty::Bytes), read(Ty::I64)], Ty::I64),
+            Builtin::FileCreate => (vec![read(Ty::Str)], task(fallible(file()))),
+            Builtin::FileWrite => (
+                vec![read(borrowed(file())), read(Ty::Bytes)],
+                task(fallible(Ty::Unit)),
+            ),
+            Builtin::FileClose => (vec![sink(file())], task(Ty::Unit)),
+            Builtin::FlowOfFile => (vec![read(Ty::Str)], task(fallible(flow()))),
             // An empty chunk means the flow is exhausted — a mid-stream end of input is already
             // `UnexpectedEof` in the runtime, so empty is unambiguous.
-            Builtin::FlowNext => (vec![borrowed(flow())], task(fallible(Ty::Bytes))),
-            Builtin::FlowLen => (vec![borrowed(flow())], Ty::I64),
-            Builtin::FlowClose => (vec![flow()], task(Ty::Unit)),
+            Builtin::FlowNext => (vec![read(borrowed(flow()))], task(fallible(Ty::Bytes))),
+            Builtin::FlowLen => (vec![read(borrowed(flow()))], Ty::I64),
+            Builtin::FlowClose => (vec![sink(flow())], task(Ty::Unit)),
         }
     }
 }

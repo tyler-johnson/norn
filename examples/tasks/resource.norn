@@ -4,11 +4,12 @@
 // comes. The handle moves with the `spawn`, so the child is what owns it — and cancelling the child
 // closes the socket without anyone writing cleanup code.
 //
-// The move is now a static fact as well as a runtime one: `main` may not name `listener` after the
-// `spawn`, and `wait_for_client` borrows it with `&` because accepting looks at a listener rather
-// than taking it.
+// The move is a static fact as well as a runtime one: `main` may not name `listener` after the
+// `spawn`. `wait_for_client` never closes the socket itself — cancellation is its closer — so the
+// transfer is declared rather than inferred: `sink` is what says the spawned child owns what it
+// was handed, and accepting then looks at the listener without taking it.
 
-task fn wait_for_client(listener: Listener) -> ()
+task fn wait_for_client(listener: sink Listener) -> ()
     uses { net.io }
 {
     match await tcp_accept(&listener) {

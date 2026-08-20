@@ -205,13 +205,7 @@ fn dump_item(item: &Item) -> Node {
             if decl.exported.is_some() {
                 children.push(atom("export"));
             }
-            children.push(list(
-                "params",
-                decl.params
-                    .iter()
-                    .map(|p| list("param", vec![atom(&p.name.name), dump_type(&p.ty)]))
-                    .collect(),
-            ));
+            children.push(list("params", decl.params.iter().map(dump_param).collect()));
             if !decl.uses.is_empty() {
                 children.push(list(
                     "uses",
@@ -256,13 +250,7 @@ fn dump_fn_head(
     if !type_params.is_empty() {
         children.push(dump_type_params(type_params));
     }
-    children.push(list(
-        "params",
-        params
-            .iter()
-            .map(|p| list("param", vec![atom(&p.name.name), dump_type(&p.ty)]))
-            .collect(),
-    ));
+    children.push(list("params", params.iter().map(dump_param).collect()));
     if let Some(ret) = ret {
         children.push(list("ret", vec![dump_type(ret)]));
     }
@@ -332,6 +320,15 @@ fn dump_member(member: &Member) -> Node {
             list("on", children)
         }
     }
+}
+
+fn dump_param(p: &Param) -> Node {
+    let mut children = vec![atom(&p.name.name)];
+    if p.sink.is_some() {
+        children.push(atom("sink"));
+    }
+    children.push(dump_type(&p.ty));
+    list("param", children)
 }
 
 fn dump_type(ty: &Type) -> Node {

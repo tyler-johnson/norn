@@ -613,3 +613,36 @@ fn loops_round_trip() {
         "the canonical form parses to a different tree"
     );
 }
+
+#[test]
+fn sink_is_a_parameter_mode() {
+    let dumped = ast("fn close(conn: sink Connection) {}\n");
+    assert!(dumped.contains("(param conn sink Connection)"), "{dumped}");
+}
+
+#[test]
+fn sink_stays_an_ordinary_name() {
+    // A parameter *named* sink — std/http has one — and an expression naming it.
+    let dumped = ast("fn save(sink: File) {\n    print(sink)\n}\n");
+    assert!(dumped.contains("(param sink File)"), "{dumped}");
+
+    // The mode reads only when a type can follow, so a type named `sink` stays a type.
+    let dumped = ast("fn odd(x: sink) {}\n");
+    assert!(dumped.contains("(param x sink)"), "{dumped}");
+    assert!(!dumped.contains("(param x sink sink)"), "{dumped}");
+}
+
+#[test]
+fn sink_pathologies_resolve_by_lookahead() {
+    // `sink: sink Sink` — a parameter named sink, in the sink mode, of a type named Sink.
+    let dumped = ast("fn worst(sink: sink Sink) {}\n");
+    assert!(dumped.contains("(param sink sink Sink)"), "{dumped}");
+}
+
+#[test]
+fn sink_round_trips() {
+    let source = "fn close(conn: sink Connection) -> () {\n    ()\n}\n";
+    let parsed = parse(source);
+    assert!(parsed.ok(), "{}", errors(source));
+    assert_eq!(print::module(&parsed.module), source);
+}

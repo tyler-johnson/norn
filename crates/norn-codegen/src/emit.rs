@@ -354,7 +354,7 @@ impl Emitter<'_> {
             }
             let params = builtin.signature().0;
             let moved: Vec<usize> = (0..params.len())
-                .filter(|&i| matches!(params[i].owned(), Ty::Resource(_)))
+                .filter(|&i| matches!(params[i].0.owned(), Ty::Resource(_)))
                 .collect();
             if moved.is_empty() {
                 continue;
@@ -504,7 +504,7 @@ impl Emitter<'_> {
             .signature()
             .0
             .iter()
-            .map(|ty| self.repr(ty.owned()))
+            .map(|(ty, _)| self.repr(ty.owned()))
             .collect()
     }
 

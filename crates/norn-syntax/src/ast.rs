@@ -147,9 +147,14 @@ pub struct FnDecl {
     pub span: Span,
 }
 
+/// One parameter: `conn: Connection`, or `conn: sink Connection` when the callee consumes it.
+/// `sink` is a contextual keyword — recognised only between the `:` and the type, and only when
+/// what follows can start a type — so it stays an ordinary name everywhere else, parameter names
+/// included. The span is the word itself, so the checker can point at it.
 #[derive(Debug)]
 pub struct Param {
     pub name: Ident,
+    pub sink: Option<Span>,
     pub ty: Type,
     pub span: Span,
 }

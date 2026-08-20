@@ -527,15 +527,40 @@ impl Parser {
         while !self.at(&TokenKind::RParen) && !self.at_eof() {
             let name = self.ident()?;
             self.expect(TokenKind::Colon)?;
+            let sink = self.sink_mode();
             let ty = self.ty()?;
             let span = name.span.to(ty.span);
-            params.push(Param { name, ty, span });
+            params.push(Param {
+                name,
+                sink,
+                ty,
+                span,
+            });
             if !self.eat(&TokenKind::Comma) {
                 break;
             }
         }
         let close = self.expect(TokenKind::RParen)?.span;
         Ok((params, close))
+    }
+
+    /// The contextual `sink` mode, if the parameter wrote one. `sink` is not a reserved word:
+    /// it reads as a mode only when the token after it can start a type, so `sink: File` is a
+    /// parameter named `sink` and `x: sink Sink` is the mode followed by a type named `Sink`.
+    fn sink_mode(&mut self) -> Option<Span> {
+        let TokenKind::Ident(name) = &self.peek().kind else {
+            return None;
+        };
+        if name != "sink" {
+            return None;
+        }
+        if !matches!(
+            self.peek_at(1).kind,
+            TokenKind::Ident(_) | TokenKind::LParen | TokenKind::Amp
+        ) {
+            return None;
+        }
+        Some(self.advance().span)
     }
 
     /// `uses { clock, net.io }`. The caller has already decided whether a `uses` is allowed here.

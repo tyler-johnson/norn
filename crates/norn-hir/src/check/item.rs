@@ -1,5 +1,23 @@
 use super::*;
 
+/// The written mode column of a parameter list, with which entries are pinned: `sink T` is
+/// `Sink`, asserted rather than observed, so inference must not soften it; everything else is
+/// `Read` until a body proves otherwise.
+pub(super) fn written_modes(params: &[ast::Param]) -> (Vec<Mode>, Vec<bool>) {
+    let modes = params
+        .iter()
+        .map(|p| {
+            if p.sink.is_some() {
+                Mode::Sink
+            } else {
+                Mode::Read
+            }
+        })
+        .collect();
+    let pinned = params.iter().map(|p| p.sink.is_some()).collect();
+    (modes, pinned)
+}
+
 impl Checker {
     /// Pass one: every type name exists before any type is resolved, so declarations may refer to
     /// one another in any order.
@@ -391,6 +409,7 @@ impl Checker {
                 .iter()
                 .map(|p| (p.name.name.clone(), self.resolve_param_ty(&p.ty)))
                 .collect();
+            let (modes, pinned) = written_modes(&decl.params);
             let ret = decl.ret.as_ref().map_or(Ty::Unit, |ty| self.resolve_ty(ty));
             self.type_params_in_scope.clear();
             let uses = self.capabilities(&decl.uses);
@@ -400,6 +419,8 @@ impl Checker {
             self.fn_bounds.push(bounds);
             self.ns[self.current].fns.insert(decl.name.name.clone(), id);
             self.signatures.push((params.clone(), ret.clone()));
+            self.param_modes.push(modes);
+            self.mode_pinned.push(pinned);
             self.program.fns.push(FnDef {
                 // A non-entry module's functions display with their file's stem — "fmt.digits" —
                 // the way lifted reactor members already display dotted. Resolution still goes by
@@ -575,6 +596,10 @@ impl Checker {
         self.fn_owner.push(self.current);
         self.fn_bounds.push(Vec::new());
         self.signatures.push((Vec::new(), Ty::Error));
+        // A lifted body's parameters are the reactor's members, none of which may be affine, so
+        // every mode is `Read`; `infer_sinks` pads the row to the real arity once it is known.
+        self.param_modes.push(Vec::new());
+        self.mode_pinned.push(Vec::new());
         self.program.fns.push(FnDef {
             name,
             type_params: Vec::new(),

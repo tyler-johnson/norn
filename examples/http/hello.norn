@@ -26,7 +26,7 @@ task fn serve(conn: Connection) -> ()
     }
 }
 
-task fn accept_loop(listener: Listener) -> ()
+task fn accept_loop(listener: sink Listener) -> ()
     uses { net.io }
 {
     scope {

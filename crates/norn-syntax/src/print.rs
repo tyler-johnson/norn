@@ -169,11 +169,7 @@ fn print_item(item: &Item) -> String {
             out
         }
         Item::Reactor(decl) => {
-            let params: Vec<_> = decl
-                .params
-                .iter()
-                .map(|p| format!("{}: {}", p.name.name, print_type(&p.ty)))
-                .collect();
+            let params: Vec<_> = decl.params.iter().map(print_param).collect();
             let export = if decl.exported.is_some() {
                 "export "
             } else {
@@ -256,10 +252,7 @@ fn print_fn_head(
     if is_task {
         out.push_str("task ");
     }
-    let params: Vec<_> = params
-        .iter()
-        .map(|p| format!("{}: {}", p.name.name, print_type(&p.ty)))
-        .collect();
+    let params: Vec<_> = params.iter().map(print_param).collect();
     out.push_str(&format!(
         "fn {name}{}({})",
         print_type_params(type_params),
@@ -336,6 +329,11 @@ fn print_member(member: &Member) -> String {
             )
         }
     }
+}
+
+fn print_param(p: &Param) -> String {
+    let mode = if p.sink.is_some() { "sink " } else { "" };
+    format!("{}: {mode}{}", p.name.name, print_type(&p.ty))
 }
 
 pub fn print_type(ty: &Type) -> String {

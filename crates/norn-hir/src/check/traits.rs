@@ -35,9 +35,13 @@ pub(super) struct TraitDef {
 }
 
 /// One trait member. The receiver is `params[0]`, typed as the reserved `Self` parameter slot.
+/// The modes are the trait's to declare — a bodiless contract has nothing to infer from — so
+/// every impl inherits them pinned: `sink Self` consumes at every call site, and everything
+/// else reads.
 pub(super) struct TraitMethod {
     pub(super) name: String,
     pub(super) params: Vec<(String, Ty)>,
+    pub(super) modes: Vec<Mode>,
     pub(super) ret: Ty,
 }
 
@@ -122,15 +126,16 @@ impl Checker {
                     .iter()
                     .map(|p| (p.name.name.clone(), self.resolve_param_ty(&p.ty)))
                     .collect();
+                let (modes, _) = super::item::written_modes(&member.params);
                 let ret = member
                     .ret
                     .as_ref()
                     .map_or(Ty::Unit, |ty| self.resolve_ty(ty));
                 self.self_ty = None;
-                // The receiver mode is the trait's to declare: `Self` consumes, `&Self` reads.
-                // An impl spells the same mode — conformance holds the written signature against
-                // the trait's, and `subst` carries the `Ref` through — and the call site adapts,
-                // auto-borrowing an owned receiver where the method only reads.
+                // The receiver mode is the trait's to declare: `Self` and `&Self` read,
+                // `sink Self` consumes. An impl spells the same mode — conformance holds the
+                // written signature and modes against the trait's — and the call site adapts,
+                // auto-borrowing an owned receiver where the method spells `&Self`.
                 match params.first() {
                     Some((_, first)) if *first == self_param() => {}
                     Some((_, Ty::Ref(inner))) if **inner == self_param() => {}
@@ -155,6 +160,7 @@ impl Checker {
                 methods.push(TraitMethod {
                     name: member.name.name.clone(),
                     params,
+                    modes,
                     ret,
                 });
             }
@@ -319,6 +325,7 @@ impl Checker {
                     .iter()
                     .map(|p| (p.name.name.clone(), self.resolve_param_ty(&p.ty)))
                     .collect();
+                let (modes, _) = super::item::written_modes(&member.params);
                 let ret = member
                     .ret
                     .as_ref()
@@ -363,10 +370,33 @@ impl Checker {
                     methods.push((name, None));
                     continue;
                 }
+                // Modes conform separately from types: `sink Self` and `Self` name the same
+                // type, and what the caller keeps is the half of the contract the mode carries.
+                let wanted_modes = self.traits[trait_id.index()].methods[position]
+                    .modes
+                    .clone();
+                if modes != wanted_modes {
+                    self.push(
+                        Diagnostic::new(
+                            member.span,
+                            format!(
+                                "`{name}` and `{trait_name}`'s declaration disagree about `sink`"
+                            ),
+                        )
+                        .label("conflicting mode")
+                        .note("a parameter's mode is the trait's to declare: whether the caller keeps the value is part of the contract, and every impl spells the same one"),
+                    );
+                    methods.push((name, None));
+                    continue;
+                }
                 let id = FnId(self.program.fns.len() as u32);
                 self.fn_owner.push(self.current);
                 self.fn_bounds.push(Vec::new());
                 self.signatures.push((params.clone(), ret.clone()));
+                // Pinned whole: the contract is declared at the trait, so a body that consumes a
+                // read parameter is an error `infer_sinks` reports rather than a mode it flips.
+                self.param_modes.push(wanted_modes);
+                self.mode_pinned.push(vec![true; params.len()]);
                 self.program.fns.push(FnDef {
                     name: format!("{trait_name}.{name} for {receiver_name}"),
                     type_params: Vec::new(),

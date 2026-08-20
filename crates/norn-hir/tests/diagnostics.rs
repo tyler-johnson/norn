@@ -389,6 +389,84 @@ fn main() -> () {
     );
 }
 
+/// Parameter modes (BOOTSTRAP §8 item 5): reads are unmarked, `sink` consumes, and the mode is
+/// inferred from the body where it is not written. Pinned inline ahead of the corpus migration —
+/// the corpus is still `&`-spelled, and these are the spellings that replace it.
+#[test]
+fn modes_make_reads_unmarked() {
+    // The headline ergonomic win: an owned affine argument at a read-mode position survives the
+    // call, so a resource can be handed to a reader without `&` and still be closed afterwards.
+    accepted(
+        "an owned resource passed to a reader is still owned after the call",
+        "\
+task fn watch(conn: Connection) -> ()
+    uses { net.io }
+{
+    let data = await tcp_read(&conn)
+    ()
+}
+
+task fn main(conn: Connection) -> ()
+    uses { net.io }
+{
+    await watch(conn)
+    await tcp_close(conn)
+}
+",
+    );
+
+    // Sink inference propagates through calls: `wrap` never touches a socket builtin, but it
+    // hands the connection to `close_it`, which closes — two hops from the consumption fact.
+    accepted(
+        "sink inference reaches through a two-hop chain",
+        "\
+task fn close_it(conn: Connection) -> ()
+    uses { net.io }
+{
+    await tcp_close(conn)
+}
+
+task fn wrap(conn: Connection) -> ()
+    uses { net.io }
+{
+    await close_it(conn)
+}
+
+task fn main(conn: Connection) -> ()
+    uses { net.io }
+{
+    await wrap(conn)
+}
+",
+    );
+
+    // `sink Self`: the trait declares the consuming receiver, the impl spells the same mode,
+    // and a call site hands the receiver over.
+    accepted(
+        "a `sink Self` method is declared, implemented, and called",
+        "\
+trait Consume {
+    fn finish(value: sink Self) -> I64
+}
+
+struct Job {
+    id: I64
+}
+
+impl Consume for Job {
+    fn finish(value: sink Self) -> I64 {
+        value.id
+    }
+}
+
+fn main() -> () {
+    let job = Job(id: 1)
+    print(job.finish())
+}
+",
+    );
+}
+
 /// Generic *types* land ahead of the corpus that dogfoods them — std/list and the run example
 /// arrive later in the item 7 wave — so the acceptance side is pinned here: instantiation by
 /// annotation, by expectation, by field inference, through patterns, and inside reactor state.

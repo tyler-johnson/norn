@@ -100,6 +100,8 @@ impl Checker {
             import_target: (0..modules).map(|_| Vec::new()).collect(),
             pending_fn_imports: Vec::new(),
             signatures: Vec::new(),
+            param_modes: Vec::new(),
+            mode_pinned: Vec::new(),
             locals: Vec::new(),
             scopes: Vec::new(),
             ret: Ty::Unit,
@@ -197,6 +199,9 @@ impl Checker {
         // every generic instance as an ordinary monomorphic function.
         self.monomorphize();
         self.check_turns();
+        // Sink inference runs immediately before `check_moves`, on the same tables it will
+        // enforce: every executable body is concrete by now, so a mode is a per-instance fact.
+        self.infer_sinks();
         self.check_moves();
     }
 

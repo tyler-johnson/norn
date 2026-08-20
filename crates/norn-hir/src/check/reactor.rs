@@ -54,6 +54,15 @@ impl Checker {
                 if !claim(self, &mut taken, &param.name) {
                     continue;
                 }
+                // Modes are a fact about calls; a reactor parameter is state, written once when
+                // the reactor is created, and spawning already hands the arguments over.
+                if let Some(at) = param.sink {
+                    self.push(
+                        Diagnostic::new(at, "a reactor parameter has no mode")
+                            .label("`sink` does not apply here")
+                            .note("`spawn reactor` always hands its arguments over; there is no call for a mode to describe"),
+                    );
+                }
                 let ty = self.resolve_ty(&param.ty);
                 let ty = self.reactor_ty(ty, "parameter", &param.name.name, param.span);
                 let slot = slots.len();

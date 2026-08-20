@@ -18,6 +18,7 @@ impl Checker {
         for (index, function) in self.program.fns.iter().enumerate() {
             let mut moves = Moves {
                 program: &self.program,
+                param_modes: &self.param_modes,
                 locals: &function.locals,
                 moved: vec![None; function.locals.len()],
                 declared: (0..function.locals.len())
@@ -84,10 +85,15 @@ fn rooted_at_local(expr: &Expr) -> bool {
 /// One function body's worth of ownership, tracked as it is walked.
 ///
 /// `moved[local]` is `None` while the name still holds its value and `Some(span)` once it does not,
-/// remembering where it went so the diagnostic can show both ends. Only affine locals ever
-/// change state; everything else is copied, and copying is not an event.
+/// remembering where it went so the diagnostic can show both ends. An affine local moves at any
+/// whole-value use; an ordinary local is copied — copying is not an event — and changes state
+/// only at a `sink` position, which revokes whatever name it is handed.
 struct Moves<'p> {
     program: &'p Program,
+    /// The settled mode tables, indexed by `FnId` in lockstep with the checker's signatures —
+    /// what an argument position means. Missing entries read as `Read`: a lifted body's row is
+    /// shorter than its arity, and its parameters are reactor members, which are never affine.
+    param_modes: &'p [Vec<Mode>],
     locals: &'p [LocalDef],
     moved: Vec<Option<Span>>,
     /// Which locals have been declared on the path walked so far: parameters at entry, everything
@@ -115,8 +121,11 @@ impl Moves<'_> {
             return;
         }
         match &expr.kind {
+            // Liveness is asked unconditionally: an ordinary local never moves by *type*, but a
+            // `sink` position revokes any name it is handed, and a revoked name is gone however
+            // cheap its value was to copy.
             ExprKind::Local(id) => {
-                if self.moves(*id) && self.live(*id, expr.span) {
+                if self.live(*id, expr.span) && self.moves(*id) {
                     self.moved[id.index()] = Some(expr.span);
                 }
             }
@@ -134,17 +143,36 @@ impl Moves<'_> {
         }
     }
 
-    /// An expression only part of which is read: the base of a field access, or the operand of `&`.
-    /// The root still has to be live, but nothing moves.
+    /// An expression only part of which is read: the base of a field access, the operand of `&`,
+    /// or an argument at a `Read` position. The root still has to be live, but nothing moves.
     fn place(&mut self, expr: &Expr) {
         match &expr.kind {
             ExprKind::Local(id) => {
-                if self.moves(*id) {
-                    self.live(*id, expr.span);
-                }
+                self.live(*id, expr.span);
             }
             ExprKind::Field { base, .. } => self.place(base),
             _ => self.parts(expr),
+        }
+    }
+
+    /// An argument at a `Sink` position: the caller's name dies whatever its type. This is the
+    /// one place a copyable local is marked moved — a written `sink` is assertive, and revoking
+    /// the name is what the assertion means — while everything that is not a bare name behaves
+    /// as the value it is.
+    fn consume(&mut self, expr: &Expr) {
+        if expr.ty.is_ref() {
+            // A borrow has nothing to give away, even where a sink asks; the mismatch was the
+            // type checker's to report.
+            self.place(expr);
+            return;
+        }
+        match &expr.kind {
+            ExprKind::Local(id) => {
+                if self.live(*id, expr.span) {
+                    self.moved[id.index()] = Some(expr.span);
+                }
+            }
+            _ => self.value(expr),
         }
     }
 
@@ -172,10 +200,30 @@ impl Moves<'_> {
                 self.value(lhs);
                 self.value(rhs);
             }
-            ExprKind::Call { args, .. }
-            | ExprKind::Builtin { args, .. }
-            | ExprKind::Construct { args, .. }
-            | ExprKind::SpawnReactor { args, .. } => {
+            // A call's arguments follow the callee's modes: a `Sink` position takes the value —
+            // the caller's name dies there — and a `Read` position only has to name something
+            // that is live. This is what makes passing a value not a move.
+            ExprKind::Call { callee, args } => {
+                for (index, arg) in args.iter().enumerate() {
+                    match self.fn_mode(*callee, index) {
+                        Mode::Sink => self.consume(arg),
+                        Mode::Read => self.place(arg),
+                    }
+                }
+            }
+            ExprKind::Builtin { builtin, args } => {
+                let (params, _) = builtin.signature();
+                for (index, arg) in args.iter().enumerate() {
+                    let mode = params.get(index).map_or(Mode::Read, |(_, mode)| *mode);
+                    match mode {
+                        Mode::Sink => self.consume(arg),
+                        Mode::Read => self.place(arg),
+                    }
+                }
+            }
+            // A constructor's payload is stored: the aggregate owns what it was built from, so
+            // every argument is a whole-value use.
+            ExprKind::Construct { args, .. } | ExprKind::SpawnReactor { args, .. } => {
                 for arg in args {
                     self.value(arg);
                 }
@@ -397,9 +445,9 @@ impl Moves<'_> {
         union(frame, &moved);
     }
 
-    /// Report every affine local the loop moved without declaring. `summary` is everything
-    /// that can reach the back edge or the exit; only affine locals ever hold `Some`, so the
-    /// move set needs no separate check. The advice: `x = f(x)` inside the body is legal — the
+    /// Report every local the loop moved without declaring. `summary` is everything that can
+    /// reach the back edge or the exit; only locals a move or a `sink` took ever hold `Some`,
+    /// so the move set needs no separate check. The advice: `x = f(x)` inside the body is legal — the
     /// name owns again at the bottom of the pass — and a value each pass should own outright is
     /// declared inside the loop.
     fn escaped_moves(
@@ -422,13 +470,20 @@ impl Moves<'_> {
                 Ty::Task(_) => task_advice(),
                 _ => "declare it inside the loop if each pass should have its own".to_string(),
             };
+            let rule = if self.program.affine(&local.ty) {
+                format!(
+                    "a `{ty}` has one owner; the first pass of the loop hands it over, and the next would find it gone"
+                )
+            } else {
+                format!(
+                    "a `{ty}` copies, but the first pass of the loop hands it to a `sink` parameter, and the next would find the name gone"
+                )
+            };
             self.errors.push(
                 Diagnostic::new(*at, format!("`{name}` cannot be moved inside a loop"))
                     .label("moved here")
                     .secondary(local.span, "…but it was declared outside the loop")
-                    .note(format!(
-                        "a `{ty}` has one owner; the first pass of the loop hands it over, and the next would find it gone"
-                    ))
+                    .note(rule)
                     .note(advice),
             );
         }
@@ -436,6 +491,17 @@ impl Moves<'_> {
 
     fn moves(&self, id: LocalId) -> bool {
         self.program.affine(&self.locals[id.index()].ty)
+    }
+
+    /// What the callee declared (or inference settled) for one argument position. Out-of-range
+    /// reads as `Read`: a lifted body's mode row is shorter than its arity, and its parameters
+    /// are reactor members, which are never affine.
+    fn fn_mode(&self, callee: FnId, index: usize) -> Mode {
+        self.param_modes
+            .get(callee.index())
+            .and_then(|modes| modes.get(index))
+            .copied()
+            .unwrap_or(Mode::Read)
     }
 
     /// Report a use of something that is not there any more. `false` means it was already reported
@@ -447,6 +513,22 @@ impl Moves<'_> {
         let local = &self.locals[id.index()];
         let name = local.name.clone();
         let ty = self.program.ty_name(&local.ty);
+        // An ordinary local is only ever marked moved by a `sink` position — its values copy, so
+        // nothing else takes them — and the diagnostic should say that rather than "one owner".
+        if !self.program.affine(&local.ty) {
+            self.errors.push(
+                Diagnostic::new(span, format!("`{name}` was given away"))
+                    .label("used here")
+                    .secondary(moved, "given here")
+                    .note(format!(
+                        "a `{ty}` copies, but it was handed to a `sink` parameter, and the name does not survive that"
+                    ))
+                    .note(format!(
+                        "`let kept = {name}` before the call keeps a copy under a name of its own"
+                    )),
+            );
+            return false;
+        }
         // What to write instead depends on what was lost. A borrow is the answer for everything
         // except a task, which has to be built again because running it twice is what was wanted
         // and is not what `&` would give; a matchable value also gets the match spelling, because

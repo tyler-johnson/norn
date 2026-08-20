@@ -891,10 +891,16 @@ impl Checker {
             self.traits[trait_id.index()].name,
             self.program.ty_name(&receiver)
         );
+        let modes = self.traits[trait_id.index()].methods[position]
+            .modes
+            .clone();
         let id = FnId(self.program.fns.len() as u32);
         self.fn_owner.push(self.current);
         self.fn_bounds.push(Vec::new());
         self.signatures.push((params.clone(), ret.clone()));
+        // The trait's declared modes, pinned like an impl's: a stub is bodiless twice over.
+        self.param_modes.push(modes);
+        self.mode_pinned.push(vec![true; params.len()]);
         self.program.fns.push(FnDef {
             name,
             type_params: Vec::new(),
@@ -1045,6 +1051,12 @@ impl Checker {
         self.fn_owner.push(self.fn_owner[template.index()]);
         self.fn_bounds.push(Vec::new());
         self.signatures.push((params.clone(), ret.clone()));
+        // The template's *written* modes: at every point an instance can be requested, inference
+        // has not run, so this row is exactly the written sinks — the rest fills per instance.
+        self.param_modes
+            .push(self.param_modes[template.index()].clone());
+        self.mode_pinned
+            .push(self.mode_pinned[template.index()].clone());
         self.program.fns.push(FnDef {
             name,
             type_params: Vec::new(),

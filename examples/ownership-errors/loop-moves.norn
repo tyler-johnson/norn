@@ -35,7 +35,7 @@ task fn moves_in_the_condition(conn: Connection) -> () {
     }
 }
 
-fn consumes(conn: Connection) -> Bool {
+fn consumes(conn: sink Connection) -> Bool {
     true
 }
 

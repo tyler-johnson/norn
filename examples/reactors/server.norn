@@ -50,7 +50,9 @@ task fn echo(conn: Connection, gate: Gate) -> ()
     await send(gate.closed, ())
 }
 
-task fn accept_loop(listener: Listener, gate: Gate) -> ()
+// The accept loop never closes the listener itself — cancellation at the end of `main`'s scope
+// is its closer — so ownership is declared: `sink` says the spawned loop owns the socket.
+task fn accept_loop(listener: sink Listener, gate: Gate) -> ()
     uses { net.io }
 {
     loop {

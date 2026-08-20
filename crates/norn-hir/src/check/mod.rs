@@ -30,6 +30,7 @@ mod item;
 mod moves;
 mod ns;
 mod reactor;
+mod sink;
 mod traits;
 mod turns;
 mod ty;
@@ -321,6 +322,17 @@ struct Checker {
     /// Signatures, resolved before any body is checked so that functions may call one another
     /// regardless of declaration order.
     signatures: Vec<(Vec<(String, Ty)>, Ty)>,
+    /// Each function's parameter modes, in lockstep with `signatures` — pushed at every site
+    /// that appends one. Until `infer_sinks` runs these are the *written* modes: `sink T` is
+    /// `Sink`, everything else `Read`; inference flips a `Read` to `Sink` where a concrete body
+    /// consumes the parameter. `check_moves` reads the settled table and nothing downstream
+    /// learns modes exist.
+    param_modes: Vec<Vec<Mode>>,
+    /// Which of `param_modes`' entries are declared rather than inferable, in the same lockstep.
+    /// A written `sink` pins `Sink`; a trait's contract pins an impl method's whole row —
+    /// bodiless declarations cannot be flipped by a body, so an impl that consumes a read-pinned
+    /// parameter is an error at the impl, never a silent flip.
+    mode_pinned: Vec<Vec<bool>>,
     locals: Vec<LocalDef>,
     scopes: Vec<Vec<(String, LocalId)>>,
     ret: Ty,

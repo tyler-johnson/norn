@@ -464,7 +464,7 @@ impl Checker {
         }
 
         let mut checked = Vec::with_capacity(params.len());
-        for (arg, param) in args.iter().zip(&params) {
+        for (arg, (param, _)) in args.iter().zip(&params) {
             // `print` is the one builtin that takes a value of any type at all, spelled as an
             // expectation of `Ty::Error`, which every type fits.
             let wanted = if param.is_error() { None } else { Some(param) };

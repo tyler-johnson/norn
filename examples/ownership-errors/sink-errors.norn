@@ -1,0 +1,52 @@
+// Modes (BOOTSTRAP §8 item 5): reads are unmarked and take nothing; `sink` — written as an
+// assertion or inferred from a body that consumes — is what hands a value over. Each function
+// here is wrong in exactly one way.
+
+struct Token {
+    id: I64
+}
+
+// A written `sink` is assertive: the caller's name dies at the call whether or not the body
+// keeps anything — `redeem` only reads a field, and the revocation stands regardless.
+fn redeem(token: sink Token) -> I64 {
+    token.id
+}
+
+fn spends_twice() -> I64 {
+    let token = Token(id: 7)
+    redeem(token) + redeem(token)
+}
+
+// `shutdown` never writes `sink`, but its body closes the connection, so the mode is inferred:
+// handing a connection to it is handing it over, exactly as if `tcp_close` were called here.
+task fn shutdown(conn: Connection) -> ()
+    uses { net.io }
+{
+    await tcp_close(conn)
+}
+
+task fn closes_then_reads(conn: Connection) -> Result<(), IoError>
+    uses { net.io }
+{
+    await shutdown(conn)
+    let data = await tcp_read(&conn)?
+    Ok(())
+}
+
+// `peek` only reads, so a task built from it cannot own the connection — and a spawned task
+// outlives the call that built it, so reading is not enough: the child would still be using a
+// value the parent owns.
+task fn peek(conn: Connection) -> ()
+    uses { net.io }
+{
+    let data = await tcp_read(&conn)
+    ()
+}
+
+task fn spawns_a_reader(conn: Connection) -> ()
+    uses { net.io }
+{
+    scope {
+        spawn peek(conn)
+    }
+}
