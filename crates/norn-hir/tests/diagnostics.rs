@@ -242,6 +242,44 @@ fn port(config: &Config) -> I64 {
     );
 }
 
+/// `&Self` receivers: a trait may declare that a method only reads, the impl spells the same
+/// mode, and the call site auto-borrows an owned receiver — so the name survives the call, pinned
+/// here ahead of the flip that makes the difference observable. The generic case pins the
+/// stub/mono interaction: the stub's identity stays the owned Self while its parameter carries
+/// the `Ref`.
+#[test]
+fn a_borrowed_receiver_leaves_the_value_owned() {
+    accepted(
+        "a `&Self` method is declared, implemented, and called twice",
+        "\
+trait Describe {
+    fn describe(value: &Self) -> String
+}
+
+struct Config {
+    host: String
+}
+
+impl Describe for Config {
+    fn describe(value: &Self) -> String {
+        value.host
+    }
+}
+
+fn show<T: Describe>(x: T) -> String {
+    x.describe()
+}
+
+fn main() -> () {
+    let config = Config(host: \"localhost\")
+    print(config.describe())
+    print(config.describe())
+    print(show(config))
+}
+",
+    );
+}
+
 /// Generic *types* land ahead of the corpus that dogfoods them — std/list and the run example
 /// arrive later in the item 7 wave — so the acceptance side is pinned here: instantiation by
 /// annotation, by expectation, by field inference, through patterns, and inside reactor state.

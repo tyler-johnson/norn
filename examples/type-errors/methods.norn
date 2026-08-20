@@ -48,3 +48,19 @@ fn main() {
     // Two traits provide `shout` for I64, and a method call cannot say which.
     let d = 3.shout()
 }
+
+trait Consume {
+    fn consume(value: Self) -> String
+}
+
+impl Consume for User {
+    fn consume(value: Self) -> String {
+        value.name
+    }
+}
+
+// A method that takes `Self` consumes its receiver, and a borrow has nothing to give away:
+// only a `&Self` method can be called through one.
+fn takes_borrowed(user: &User) -> String {
+    user.consume()
+}
