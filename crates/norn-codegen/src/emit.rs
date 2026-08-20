@@ -1329,6 +1329,8 @@ impl Emitter<'_> {
                         bindings.join(", ")
                     ));
                 }
+                // A read through a `Shared`: `cur` is `&Rc<Repr>`, and one deref lands `&Repr`.
+                Proj::Deref => out.push_str(" let cur = &**cur;"),
             }
             ty = step_ty;
         }
@@ -1347,7 +1349,7 @@ impl Emitter<'_> {
         let mut out = format!("{{ let cur = {base}.as_mut().unwrap();");
         for (position, proj) in place.proj.iter().enumerate() {
             let Proj::Field(index) = proj else {
-                panic!("a write projected through an enum");
+                panic!("a write projected through an enum or a shared value");
             };
             let step_ty = self.program.ty_of_proj(&ty, proj);
             if position + 1 == place.proj.len() {

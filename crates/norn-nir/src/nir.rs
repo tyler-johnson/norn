@@ -60,6 +60,7 @@ impl Program {
             {
                 (**err).clone()
             }
+            (Ty::Shared(inner), Proj::Deref) => (**inner).clone(),
             (ty, proj) => panic!("cannot project {proj:?} out of {ty:?}"),
         }
     }
@@ -219,15 +220,23 @@ pub enum Instr {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Proj {
     Field(usize),
-    Downcast { variant: usize, field: usize },
+    Downcast {
+        variant: usize,
+        field: usize,
+    },
+    /// Reads through a `Shared`. Read paths only, like `Downcast`: an assignment left-hand side
+    /// is checker-restricted to struct-field chains, and a shared value is immutable.
+    Deref,
 }
 
 impl Proj {
     /// The payload index, however the step is typed. Consumers whose values store fields as one
-    /// flat vec regardless of variant — the interpreter — index by this alone.
+    /// flat vec regardless of variant — the interpreter — index by this alone; they match a
+    /// `Deref` step before asking.
     pub fn index(&self) -> usize {
         match self {
             Proj::Field(index) | Proj::Downcast { field: index, .. } => *index,
+            Proj::Deref => panic!("a deref has no payload index"),
         }
     }
 }
@@ -259,6 +268,15 @@ impl Place {
     pub fn downcast(&self, variant: usize, field: usize) -> Place {
         let mut proj = self.proj.clone();
         proj.push(Proj::Downcast { variant, field });
+        Place {
+            local: self.local,
+            proj,
+        }
+    }
+
+    pub fn deref(&self) -> Place {
+        let mut proj = self.proj.clone();
+        proj.push(Proj::Deref);
         Place {
             local: self.local,
             proj,
@@ -568,6 +586,8 @@ fn print_place(program: &Program, function: &Function, place: &Place) -> String 
             Proj::Downcast { variant, field } => {
                 out.push_str(&format!(".{field}@{}", program.variant_name(&ty, *variant)))
             }
+            // A read through a `Shared`: `_3.*.0`.
+            Proj::Deref => out.push_str(".*"),
         }
         ty = program.ty_of_proj(&ty, proj);
     }

@@ -381,8 +381,16 @@ impl Lowerer<'_> {
             hir::ExprKind::Str(v) => Operand::Const(Const::Str(v.as_str().into())),
             hir::ExprKind::Local(id) => Operand::Copy(Place::local(id.index())),
             hir::ExprKind::Field { base, index } => {
-                let base = self.expr_place(base);
-                Operand::Copy(base.field(*index))
+                // Field access strips every `Shared` layer of the base — the checker's rule,
+                // restated here as deref projections. The base expression kept its `Shared`
+                // type, which is what says how many layers to peel.
+                let mut place = self.expr_place(base);
+                let mut base_ty = &base.ty;
+                while let hir::Ty::Shared(inner) = base_ty {
+                    place = place.deref();
+                    base_ty = inner;
+                }
+                Operand::Copy(place.field(*index))
             }
             hir::ExprKind::Unary { op, expr } => {
                 let operand = self.expr(expr);
@@ -630,7 +638,15 @@ impl Lowerer<'_> {
     fn place(&mut self, expr: &hir::Expr) -> Place {
         match &expr.kind {
             hir::ExprKind::Local(id) => Place::local(id.index()),
-            hir::ExprKind::Field { base, index } => self.place(base).field(*index),
+            hir::ExprKind::Field { base, index } => {
+                // No deref peel here: `check_assignable` refused a `Shared`-typed base, so a
+                // write never traverses one.
+                debug_assert!(
+                    !matches!(base.ty.owned(), hir::Ty::Shared(_)),
+                    "a write projected through a shared value survived checking"
+                );
+                self.place(base).field(*index)
+            }
             _ => Place::local(self.temp(expr.ty.clone())),
         }
     }

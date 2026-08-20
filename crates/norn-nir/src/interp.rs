@@ -38,6 +38,10 @@ pub enum Value {
     Bytes(Rc<[u8]>),
     Struct(usize, Rc<Vec<Value>>),
     Variant(usize, usize, Rc<Vec<Value>>),
+    /// `shared(x)`: an immutable refcounted payload. Renders transparently — sharing is a
+    /// representation choice, invisible in output — and no operator reaches it, so the variant
+    /// name can only surface on an unreachable-coercion trap path.
+    Shared(Rc<Value>),
     /// A computation that has not run. `await` and `spawn` are what start it.
     Task(Rc<TaskValue>),
     /// A handle into the runtime's resource table.
@@ -482,6 +486,13 @@ impl Interpreter<'_> {
                     }
                 }
             }
+            Builtin::Shared => Value::Shared(Rc::new(args[0].clone())),
+            Builtin::Unshare => {
+                let Value::Shared(inner) = &args[0] else {
+                    return Err(self.trap(frame, "`unshare` of something that is not shared"));
+                };
+                (**inner).clone()
+            }
             Builtin::Latest => {
                 let Value::Signal(reactor, export) = &args[0] else {
                     return Err(self.trap(frame, "`latest` of something that is not a signal"));
@@ -698,6 +709,13 @@ impl Interpreter<'_> {
     /// its own text — `print` should not add quotes — while nested inside an aggregate it is
     /// quoted, because there the reader needs to see where it starts and ends.
     pub fn render(&self, value: &Value) -> String {
+        // A `Shared` renders as its payload at every depth — sharing is a representation
+        // choice, invisible in output — so the peel comes before the top-level string test:
+        // `print(shared("hi"))` prints raw text, exactly as `print("hi")` does.
+        let mut value = value;
+        while let Value::Shared(inner) = value {
+            value = inner;
+        }
         match value {
             Value::Str(v) => v.to_string(),
             other => self.render_nested(other),
@@ -719,6 +737,7 @@ impl Interpreter<'_> {
             Value::Bool(v) => v.to_string(),
             Value::Str(v) => format!("{:?}", &**v),
             Value::Bytes(v) => format!("<bytes {}>", v.len()),
+            Value::Shared(inner) => self.render_nested(inner),
             Value::Task(task) => {
                 let name = match &task.kind {
                     TaskKind::Fn(id, _) => self.program.fns[*id].name.as_str(),
@@ -906,12 +925,14 @@ fn read_operand(frame: &Frame, operand: &Operand) -> Value {
 fn read_place(frame: &Frame, place: &Place) -> Value {
     let mut value = &frame.locals[place.local];
     // A `Downcast` reads by its payload index alone: tagged values store every variant's fields
-    // in the same flat vec, so the variant it carries is for typed consumers, not for us.
+    // in the same flat vec, so the variant it carries is for typed consumers, not for us. A
+    // `Deref` steps through a `Shared`.
     for proj in &place.proj {
-        value = match value {
-            Value::Struct(_, fields) | Value::Variant(_, _, fields) => &fields[proj.index()],
+        value = match (value, proj) {
+            (Value::Shared(inner), Proj::Deref) => inner,
+            (Value::Struct(_, fields) | Value::Variant(_, _, fields), _) => &fields[proj.index()],
             // Only reachable if lowering produced a projection the checker did not sanction.
-            other => return other.clone(),
+            (other, _) => return other.clone(),
         };
     }
     value.clone()
@@ -920,14 +941,17 @@ fn read_place(frame: &Frame, place: &Place) -> Value {
 fn write_place(frame: &mut Frame, place: &Place, value: Value) {
     let mut slot = &mut frame.locals[place.local];
     for proj in &place.proj {
-        slot = match slot {
-            Value::Struct(_, fields) | Value::Variant(_, _, fields) => {
-                &mut Rc::make_mut(fields)[proj.index()]
-            }
-            other => {
-                *other = value;
-                return;
-            }
+        slot = match proj {
+            Proj::Deref => unreachable!("a write projected through a shared value"),
+            _ => match slot {
+                Value::Struct(_, fields) | Value::Variant(_, _, fields) => {
+                    &mut Rc::make_mut(fields)[proj.index()]
+                }
+                other => {
+                    *other = value;
+                    return;
+                }
+            },
         };
     }
     *slot = value;
