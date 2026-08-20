@@ -43,13 +43,13 @@
                     (arg (str "the request head exceeds 8192 bytes"))))))
             (call (path parse) (arg (path data)) (arg (path end))))))))
   (fn header export
-    (params (param req Request) (param name String))
+    (params (param req (ref Request)) (param name String))
     (ret (ty Option String))
     (block
       (let wanted (call (path bytes) (arg (path name))))
       (call
         (path lookup)
-        (arg (path req.headers))
+        (arg (unary & (path req.headers)))
         (arg
           (call
             (path lower)
@@ -347,7 +347,10 @@
           (assign (path cursor) (path brk))))
       (if
         (binary >
-          (call (path named) (arg (path headers)) (arg (str "transfer-encoding")))
+          (call
+            (path named)
+            (arg (unary & (path headers)))
+            (arg (str "transfer-encoding")))
           (int 0))
         (block
           (return
@@ -356,7 +359,10 @@
               (arg
                 (str "Transfer-Encoding is not supported; bodies are Content-Length"))))))
       (let lengths
-        (call (path named) (arg (path headers)) (arg (str "content-length"))))
+        (call
+          (path named)
+          (arg (unary & (path headers)))
+          (arg (str "content-length"))))
       (if
         (binary > (path lengths) (int 1))
         (block
@@ -369,7 +375,10 @@
         (binary == (path lengths) (int 1))
         (block
           (match
-            (call (path lookup) (arg (path headers)) (arg (str "content-length")))
+            (call
+              (path lookup)
+              (arg (unary & (path headers)))
+              (arg (str "content-length")))
             (arm
               (construct Some (arg (bind value)))
               (match
@@ -592,7 +601,7 @@
           (assign (path i) (binary + (path i) (int 1)))))
       (call (path text_unchecked) (arg (path out)))))
   (fn named
-    (params (param headers (ty List Header)) (param name String))
+    (params (param headers (ref (ty List Header))) (param name String))
     (ret I64)
     (block
       (match
@@ -606,10 +615,12 @@
               (block
                 (binary +
                   (int 1)
-                  (call (path named) (arg (path rest)) (arg (path name)))))
-              (else (block (call (path named) (arg (path rest)) (arg (path name)))))))))))
+                  (call (path named) (arg (unary & (path rest))) (arg (path name)))))
+              (else
+                (block
+                  (call (path named) (arg (unary & (path rest))) (arg (path name)))))))))))
   (fn lookup
-    (params (param headers (ty List Header)) (param name String))
+    (params (param headers (ref (ty List Header))) (param name String))
     (ret (ty Option String))
     (block
       (match
@@ -622,7 +633,8 @@
               (binary == (path h.name) (path name))
               (block (call (path Some) (arg (path h.value))))
               (else
-                (block (call (path lookup) (arg (path rest)) (arg (path name)))))))))))
+                (block
+                  (call (path lookup) (arg (unary & (path rest))) (arg (path name)))))))))))
   (fn reason
     (params (param status I64))
     (ret String)
@@ -679,9 +691,9 @@ export fn head(data: Bytes) -> HeadParse {
     }
 }
 
-export fn header(req: Request, name: String) -> Option<String> {
+export fn header(req: &Request, name: String) -> Option<String> {
     let wanted = bytes(name)
-    lookup(req.headers, lower(wanted, 0, bytes_len(wanted)))
+    lookup(&req.headers, lower(wanted, 0, bytes_len(wanted)))
 }
 
 export fn response_head(status: I64, content_length: I64) -> String {
@@ -814,16 +826,16 @@ fn parse(data: Bytes, end: I64) -> HeadParse {
         }
         cursor = brk
     }
-    if named(headers, "transfer-encoding") > 0 {
+    if named(&headers, "transfer-encoding") > 0 {
         return HeadParse.Invalid("Transfer-Encoding is not supported; bodies are Content-Length")
     }
-    let lengths = named(headers, "content-length")
+    let lengths = named(&headers, "content-length")
     if lengths > 1 {
         return HeadParse.Invalid("Content-Length appears twice")
     }
     let mut content_length = 0
     if lengths == 1 {
-        match lookup(headers, "content-length") {
+        match lookup(&headers, "content-length") {
             Some(value) => match to_int(value) {
                 Some(n) => {
                     if n < 0 {
@@ -935,27 +947,27 @@ fn lower(data: Bytes, from: I64, stop: I64) -> String {
     text_unchecked(out)
 }
 
-fn named(headers: List<Header>, name: String) -> I64 {
+fn named(headers: &List<Header>, name: String) -> I64 {
     match headers {
         List.Nil => 0
         List.Cons(h, rest) => {
             if h.name == name {
-                1 + named(rest, name)
+                1 + named(&rest, name)
             } else {
-                named(rest, name)
+                named(&rest, name)
             }
         }
     }
 }
 
-fn lookup(headers: List<Header>, name: String) -> Option<String> {
+fn lookup(headers: &List<Header>, name: String) -> Option<String> {
     match headers {
         List.Nil => None
         List.Cons(h, rest) => {
             if h.name == name {
                 Some(h.value)
             } else {
-                lookup(rest, name)
+                lookup(&rest, name)
             }
         }
     }

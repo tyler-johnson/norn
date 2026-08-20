@@ -693,7 +693,7 @@ fn http.head #5(_0/data: Bytes) -> HeadParse
     _4 = _13
     goto b1
 
-fn http.header #6(_0/req: Request, _1/name: String) -> Option<String>
+fn http.header #6(_0/req: &Request, _1/name: String) -> Option<String>
     local _2/wanted: Bytes
     local _3: Bytes
     local _4: I64
@@ -1755,7 +1755,7 @@ fn http.lower #23(_0/data: Bytes, _1/from: I64, _2/stop: I64) -> String
     _4/i = _16
     goto b1
 
-fn http.named #24(_0/headers: List<Header>, _1/name: String) -> I64
+fn http.named #24(_0/headers: &List<Header>, _1/name: String) -> I64
     local _2/h: Header
     local _3/rest: List<Header>
     local _4: I64
@@ -1801,7 +1801,7 @@ fn http.named #24(_0/headers: List<Header>, _1/name: String) -> I64
     _4 = _5
     goto b1
 
-fn http.lookup #25(_0/headers: List<Header>, _1/name: String) -> Option<String>
+fn http.lookup #25(_0/headers: &List<Header>, _1/name: String) -> Option<String>
     local _2/h: Header
     local _3/rest: List<Header>
     local _4: Option<String>
@@ -1908,7 +1908,7 @@ fn http.reason #26(_0/status: I64) -> String
     _1 = ""
     goto b1
 
-inert fn list.length #27(_0/items: List) -> I64
+inert fn list.length #27(_0/items: &List) -> I64
   b0:
     return ()
 
@@ -1920,31 +1920,31 @@ inert fn list.append #29(_0/items: List, _1/tail: List) -> List
   b0:
     return ()
 
-inert fn list.reverse #30(_0/items: List) -> List
+inert fn list.reverse #30(_0/items: &List) -> List
   b0:
     return ()
 
-inert fn list.walk #31(_0/items: List, _1/out: List) -> List
+inert fn list.walk #31(_0/items: &List, _1/out: List) -> List
   b0:
     return ()
 
-inert fn list.take #32(_0/items: List, _1/count: I64) -> List
+inert fn list.take #32(_0/items: &List, _1/count: I64) -> List
   b0:
     return ()
 
-inert fn list.drop #33(_0/items: List, _1/count: I64) -> List
+inert fn list.drop #33(_0/items: &List, _1/count: I64) -> List
   b0:
     return ()
 
-inert fn list.nth #34(_0/items: List, _1/index: I64) -> Option<T>
+inert fn list.nth #34(_0/items: &List, _1/index: I64) -> Option<T>
   b0:
     return ()
 
-inert fn list.contains #35(_0/items: List, _1/wanted: T) -> Bool
+inert fn list.contains #35(_0/items: &List, _1/wanted: T) -> Bool
   b0:
     return ()
 
-inert fn list.join #36(_0/items: List, _1/separator: String) -> String
+inert fn list.join #36(_0/items: &List, _1/separator: String) -> String
   b0:
     return ()
 

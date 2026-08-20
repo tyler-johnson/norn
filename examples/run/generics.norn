@@ -40,18 +40,20 @@ fn describe<T: Eq + Display>(value: T, fallback: T) -> String {
 }
 
 fn main() {
+    // std/list borrows what it walks, so one `numbers` serves every read — including a borrow
+    // of a call's result, `&reverse(&numbers)`, which lives exactly as long as the `join`.
     let numbers = List.Cons(1, List.Cons(2, List.Cons(3, List.Nil)))
-    print(length(numbers))
-    print(join(reverse(numbers), ", "))
-    print(join(take(numbers, 2), "-"))
-    print(contains(numbers, 3))
-    match nth(numbers, 1) {
+    print(length(&numbers))
+    print(join(&reverse(&numbers), ", "))
+    print(join(&take(&numbers, 2), "-"))
+    print(contains(&numbers, 3))
+    match nth(&numbers, 1) {
         Some(value) => print(value)
         None => print("missing")
     }
 
     let colors = List.Cons(Color.Red, List.Cons(Color.Blue, List.Nil))
-    print(join(colors, "/"))
+    print(join(&colors, "/"))
 
     let pair = Pair(first: 7, second: "seven")
     print(swap(pair).first)

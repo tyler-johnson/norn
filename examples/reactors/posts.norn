@@ -51,6 +51,17 @@ enum Delta {
     Erase(I64)
 }
 
+// The copy spelling a derive would emit: a match through a borrow binds copies, and rebuilding
+// the variant from them is what "duplicate this value" means written out. Turn-callable — it is
+// pure and does bounded work — which is exactly where the partition needs it: one delta, two
+// owners (the journal and the delivery).
+fn dup(delta: &Delta) -> Delta {
+    match delta {
+        Delta.Put(post) => Delta.Put(post)
+        Delta.Erase(id) => Delta.Erase(id)
+    }
+}
+
 // One list of index entries, one journal of deltas — `List<Post>` and `List<Delta>`, written as
 // the instances they are now that item 7's generics exist. This pair was two hand-monomorphized
 // enums until then, and the derive would have had to emit that expansion per collection.
@@ -67,11 +78,15 @@ reactor PostPartition(index: ByAuthor) {
     state acked: I64 = 0
 
     on put(post: Post) [capacity: 64, overflow: wait] {
-        journal = List.Cons(Delta.Put(post), journal)
+        let delta = Delta.Put(post)
+        journal = List.Cons(dup(&delta), journal)
         seq = seq + 1
-        after deliver(Delta.Put(post), index) -> delivered
+        after deliver(delta, index) -> delivered
     }
 
+    // No `dup` here, and the asymmetry is the lesson: `id` is an I64, which copies, so building
+    // `Delta.Erase(id)` twice is two constructions from one copied scalar — where `put`'s Post
+    // moves into its first `Delta.Put(post)` and is gone.
     on erase(id: I64) [capacity: 64, overflow: wait] {
         journal = List.Cons(Delta.Erase(id), journal)
         seq = seq + 1
@@ -119,7 +134,9 @@ reactor ByAuthor(subscriber: Subscriber) {
         total = result.count
         revision = revision + 1
         after notify(revision, subscriber) -> notified
-        match queued {
+        // Through a borrow, because the `List.Cons` arm still hands `queued` itself to `apply`:
+        // the match only asks which case holds, and `&` is how a match asks without taking.
+        match &queued {
             List.Cons(_, _) => {
                 after apply(rows, queued) -> applied
                 queued = List.Nil
@@ -141,7 +158,9 @@ reactor ByAuthor(subscriber: Subscriber) {
 // land, where it is legal — the reactor above only ever does O(1) work per turn.
 task fn apply(entries: List<Post>, batch: List<Delta>) -> Indexed {
     let merged = apply_all(entries, batch)
-    Indexed(entries: merged, count: length(merged))
+    // Measured through a borrow first, because the constructor then takes `merged` whole.
+    let total = length(&merged)
+    Indexed(entries: merged, count: total)
 }
 
 fn apply_all(entries: List<Post>, batch: List<Delta>) -> List<Post> {
@@ -153,7 +172,12 @@ fn apply_all(entries: List<Post>, batch: List<Delta>) -> List<Post> {
 
 fn apply_one(entries: List<Post>, delta: Delta) -> List<Post> {
     match delta {
-        Delta.Put(post) => insert(post, remove(post.id, entries))
+        // The clear happens first, while `post` is still here to read its id off; the insert
+        // then takes `post` whole as its genuinely last use.
+        Delta.Put(post) => {
+            let cleared = remove(post.id, entries)
+            insert(post, cleared)
+        }
         Delta.Erase(id) => remove(id, entries)
     }
 }
@@ -276,7 +300,7 @@ task fn main() -> ()
     await sleep(50)
 
     print("alice, newest first:")
-    print(render(take(by_author("alice", latest(index.entries)), 20)))
+    print(render(take(&by_author("alice", latest(index.entries)), 20)))
     print("indexed: " + to_string(latest(index.count)))
     print("watched: " + to_string(latest(subscriber.seen)) + " changes, at version " + to_string(latest(subscriber.last)))
     match find(1, latest(posts.history)) {

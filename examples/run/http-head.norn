@@ -76,11 +76,12 @@ fn main() -> () {
     let get = bytes("GET /x HTTP/1.1\r\nHost: localhost\r\nX-Tag: one\r\nX-Tag: two\r\n\r\n")
     match head(get) {
         HeadParse.Complete(req, _) => {
-            match header(req, "HOST") {
+            // `header` borrows the request, which is what lets one `req` answer twice.
+            match header(&req, "HOST") {
                 Some(value) => print("host: " + value)
                 None => print("no host")
             }
-            match header(req, "x-tag") {
+            match header(&req, "x-tag") {
                 Some(value) => print("x-tag: " + value)
                 None => print("no x-tag")
             }

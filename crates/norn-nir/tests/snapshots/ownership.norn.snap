@@ -1,138 +1,108 @@
 === nir ===
-struct Sensor #0 (label: String, reading: Result<F64, String>, calibration: Option<Option<String>>)
-struct Job #1 (name: String, work: Task<I64>, payload: Bytes)
+struct Account #0 (owner: String, balance: I64)
 enum Option #0 (None, Some(?))
 enum Result #1 (Ok(?), Err(?))
 enum IoError #2 (NotFound, Denied, InUse, Refused, Closed, Other(String))
-enum Signal #3 (Quiet, Pulse(width: F64, mark: ()), Pair(I64, I64))
+enum Weather #3 (Clear, Rain(I64))
 enum List #4 (Nil, Cons(T, List))
 enum List<I64> #5 (Nil, Cons(I64, List<I64>))
 
-task fn answer #0() -> I64
+fn deposit #0(_0/account: Account, _1/amount: I64) -> Account
+    local _2: I64
+    local _3: Account
   b0:
-    return 42
+    _2 = _0/account.1 add.i _1/amount
+    _3 = Account(_0/account.0, _2)
+    return _3
 
-task fn main #1() -> ()
-    local _0/flat: Option<Option<String>>
-    local _1/empty: Option<I64>
-    local _2/failed: Result<I64, String>
-    local _3/numbers: List<I64>
-    local _4: ()
-    local _5: F64
-    local _6: ()
+fn main #1() -> ()
+    local _0/account: Account
+    local _1/running: Account
+    local _2/n: I64
+    local _3/sky: Weather
+    local _4/mm: I64
+    local _5/readings: List<I64>
+    local _6: Account
     local _7: ()
     local _8: ()
-    local _9: F64
+    local _9: String
     local _10: ()
-    local _11: F64
+    local _11: String
     local _12: ()
-    local _13: ()
-    local _14: Option<String>
-    local _15: ()
-    local _16: Option<String>
-    local _17: Option<Option<String>>
+    local _13: Bool
+    local _14: Account
+    local _15: I64
+    local _16: ()
+    local _17: Weather
     local _18: ()
-    local _19: Option<String>
-    local _20: Option<Option<String>>
+    local _19: ()
+    local _20: ()
     local _21: ()
-    local _22: Option<I64>
-    local _23: ()
-    local _24: Result<I64, String>
-    local _25: ()
-    local _26: Signal
+    local _22: ()
+    local _23: List<I64>
+    local _24: List<I64>
+    local _25: List<I64>
+    local _26: I64
     local _27: ()
-    local _28: Signal
-    local _29: Option<Signal>
-    local _30: ()
-    local _31: F64
-    local _32: Signal
-    local _33: ()
-    local _34: I64
-    local _35: Signal
-    local _36: ()
-    local _37: IoError
-    local _38: ()
-    local _39: Result<F64, String>
-    local _40: Option<String>
-    local _41: Option<Option<String>>
-    local _42: Sensor
-    local _43: ()
-    local _44: Result<F64, String>
-    local _45: Option<Option<String>>
-    local _46: Sensor
-    local _47: ()
-    local _48: List<I64>
-    local _49: List<I64>
-    local _50: List<I64>
-    local _51: List<I64>
-    local _52: ()
-    local _53: Bytes
-    local _54: ()
-    local _55: Task<I64>
-    local _56: Bytes
-    local _57: Job
-    local _58: ()
+    local _28: String
+    local _29: ()
   b0:
-    _4 = builtin print(0.5)
-    _5 = neg 0.0
-    _6 = builtin print(_5)
-    _7 = builtin print(1e300)
-    _8 = builtin print(1e21)
-    _9 = 0.0 div.f 0.0
+    _6 = Account("ada", 10)
+    _0/account = _6
+    _7 = builtin print(_0/account.0)
+    _8 = builtin print(_0/account.0)
+    _9 = call Describe.describe for Account#15(_0/account)
     _10 = builtin print(_9)
-    _11 = 1.0 div.f 0.0
+    _11 = call Describe.describe for Account#15(_0/account)
     _12 = builtin print(_11)
-    _13 = builtin print("he said \"hi\"")
-    _14 = Option.Some("he said \"hi\"")
-    _15 = builtin print(_14)
-    _16 = Option.Some("deep")
-    _17 = Option.Some(_16)
-    _18 = builtin print(_17)
-    _19 = Option.None()
-    _20 = Option.Some(_19)
-    _0/flat = _20
-    _21 = builtin print(_0/flat)
-    _22 = Option.None()
-    _1/empty = _22
-    _23 = builtin print(_1/empty)
-    _24 = Result.Err("boom")
-    _2/failed = _24
-    _25 = builtin print(_2/failed)
-    _26 = Signal.Quiet()
+    _1/running = _0/account
+    _2/n = 0
+    goto b1
+  b1:
+    _13 = _2/n lt 3
+    branch _13 ? b3 : b2
+  b2:
+    _16 = builtin print(_1/running.1)
+    _17 = Weather.Rain(12)
+    _3/sky = _17
+    goto b5
+  b3:
+    _14 = call deposit#0(_1/running, 5)
+    _1/running = _14
+    _15 = _2/n add.i 1
+    _2/n = _15
+    goto b1
+  b4:
+    _21 = builtin print(_3/sky)
+    _22 = builtin print(_3/sky)
+    _23 = List<I64>.Nil()
+    _24 = List<I64>.Cons(9, _23)
+    _25 = List<I64>.Cons(7, _24)
+    _5/readings = _25
+    _26 = call list.length<I64>#17(_5/readings)
     _27 = builtin print(_26)
-    _28 = Signal.Quiet()
-    _29 = Option.Some(_28)
-    _30 = builtin print(_29)
-    _31 = neg 0.0
-    _32 = Signal.Pulse(_31, ())
-    _33 = builtin print(_32)
-    _34 = neg 2
-    _35 = Signal.Pair(1, _34)
-    _36 = builtin print(_35)
-    _37 = IoError.NotFound()
-    _38 = builtin print(_37)
-    _39 = Result.Ok(0.5)
-    _40 = Option.None()
-    _41 = Option.Some(_40)
-    _42 = Sensor("s1", _39, _41)
-    _43 = builtin print(_42)
-    _44 = Result.Err("cold")
-    _45 = Option.None()
-    _46 = Sensor("s2", _44, _45)
-    _47 = builtin print(_46)
-    _48 = List<I64>.Nil()
-    _49 = List<I64>.Cons(3, _48)
-    _50 = List<I64>.Cons(2, _49)
-    _51 = List<I64>.Cons(1, _50)
-    _3/numbers = _51
-    _52 = builtin print(_3/numbers)
-    _53 = builtin bytes("norn")
-    _54 = builtin print(_53)
-    _55 = task answer#0()
-    _56 = builtin bytes("x")
-    _57 = Job("meaning", _55, _56)
-    _58 = builtin print(_57)
-    return _58
+    _28 = call list.join<I64>#18(_5/readings, ", ")
+    _29 = builtin print(_28)
+    return _29
+  b5:
+    switch tag _3/sky [1 => b9] else b6
+  b6:
+    switch tag _3/sky [0 => b11] else b7
+  b7:
+    trap "no match arm applied"
+  b8:
+    _19 = builtin print(_4/mm)
+    _18 = _19
+    goto b4
+  b9:
+    _4/mm = _3/sky.0@Rain
+    goto b8
+  b10:
+    _20 = builtin print("clear")
+    _18 = _20
+    goto b4
+  b11:
+    goto b10
 
 inert fn list.length #2(_0/items: &List) -> I64
   b0:
@@ -427,38 +397,127 @@ fn fmt.digit #14(_0/n: I64) -> String
     _1 = "?"
     goto b1
 
-fn fmt.Display.to_string for I64 #15(_0/value: I64) -> String
+fn Describe.describe for Account #15(_0/value: &Account) -> String
+    local _1: String
+    local _2: String
+    local _3: String
+  b0:
+    _1 = _0/value.0 concat " holds "
+    _2 = call fmt.to_string#12(_0/value.1)
+    _3 = _1 concat _2
+    return _3
+
+fn fmt.Display.to_string for I64 #16(_0/value: I64) -> String
     local _1: String
   b0:
     _1 = call fmt.to_string#12(_0/value)
     return _1
 
-inert fn fmt.Display.to_string for T #16(_0: ?) -> String
+fn list.length<I64> #17(_0/items: &List<I64>) -> I64
+    local _1/rest: List<I64>
+    local _2: I64
+    local _3: I64
+    local _4: I64
+  b0:
+    goto b2
+  b1:
+    return _2
+  b2:
+    switch tag _0/items [0 => b6] else b3
+  b3:
+    switch tag _0/items [1 => b8] else b4
+  b4:
+    trap "no match arm applied"
+  b5:
+    _2 = 0
+    goto b1
+  b6:
+    goto b5
+  b7:
+    _3 = call list.length<I64>#17(_1/rest)
+    _4 = 1 add.i _3
+    _2 = _4
+    goto b1
+  b8:
+    goto b9
+  b9:
+    _1/rest = _0/items.1@Cons
+    goto b7
+
+fn list.join<I64> #18(_0/items: &List<I64>, _1/separator: String) -> String
+    local _2/head: I64
+    local _3/rest: List<I64>
+    local _4: String
+    local _5: String
+    local _6: String
+    local _7: String
+    local _8: String
+    local _9: String
+    local _10: String
+  b0:
+    goto b2
+  b1:
+    return _4
+  b2:
+    switch tag _0/items [0 => b6] else b3
+  b3:
+    switch tag _0/items [1 => b8] else b4
+  b4:
+    trap "no match arm applied"
+  b5:
+    _4 = ""
+    goto b1
+  b6:
+    goto b5
+  b7:
+    goto b11
+  b8:
+    _2/head = _0/items.0@Cons
+    goto b9
+  b9:
+    _3/rest = _0/items.1@Cons
+    goto b7
+  b10:
+    _4 = _5
+    goto b1
+  b11:
+    switch tag _3/rest [0 => b15] else b12
+  b12:
+    switch tag _3/rest [1 => b17] else b13
+  b13:
+    trap "no match arm applied"
+  b14:
+    _6 = call fmt.Display.to_string for I64#16(_2/head)
+    _5 = _6
+    goto b10
+  b15:
+    goto b14
+  b16:
+    _7 = call fmt.Display.to_string for I64#16(_2/head)
+    _8 = _7 concat _1/separator
+    _9 = call list.join<I64>#18(_3/rest, _1/separator)
+    _10 = _8 concat _9
+    _5 = _10
+    goto b10
+  b17:
+    goto b18
+  b18:
+    goto b16
+
+inert fn fmt.Display.to_string for T #19(_0: ?) -> String
   b0:
     return ()
 
 === output ===
-0.5
--0.0
-1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000.0
-1000000000000000000000.0
-NaN.0
-inf
-he said "hi"
-Some("he said \"hi\"")
-Some(Some("deep"))
-Some(None)
-None
-Err("boom")
-Signal.Quiet
-Some(Signal.Quiet)
-Signal.Pulse(width: -0.0, mark: ())
-Signal.Pair(1, -2)
-IoError.NotFound
-Sensor(label: "s1", reading: Ok(0.5), calibration: Some(None))
-Sensor(label: "s2", reading: Err("cold"), calibration: None)
-List<I64>.Cons(1, List<I64>.Cons(2, List<I64>.Cons(3, List<I64>.Nil)))
-<bytes 4>
-Job(name: "meaning", work: <task answer>, payload: <bytes 1>)
+ada
+ada
+ada holds 10
+ada holds 10
+25
+12
+Weather.Rain(12)
+Weather.Rain(12)
+2
+7, 9
 === result ===
 ()

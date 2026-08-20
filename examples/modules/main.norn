@@ -24,7 +24,7 @@ task fn main() -> ()
     uses { clock }
 {
     let report = Report(label: "width", value: 12)
-    print(describe(report))
+    print(describe(&report))
     print(report.value)
 
     print(strings.shout("modules"))

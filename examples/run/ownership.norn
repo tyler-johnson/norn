@@ -1,0 +1,71 @@
+// Ownership's legal lane (BOOTSTRAP §8 item 6c): every way to use a value that does NOT give it
+// away, in one program. A struct, enum, Option, or Result moves when used as a value — the same
+// rule a Connection always had — and this file is the vocabulary that lives well under it: field
+// reads copy, `&` reads without taking, `match &x` binds copies, a `&Self` method leaves its
+// receiver owned, assignment revives a name, and std/list borrows what it walks.
+
+import { List, length, join } from "std/list"
+import { to_string } from "std/fmt"
+
+struct Account {
+    owner: String
+    balance: I64
+}
+
+enum Weather {
+    Clear
+    Rain(I64)
+}
+
+trait Describe {
+    fn describe(value: &Self) -> String
+}
+
+impl Describe for Account {
+    fn describe(value: &Self) -> String {
+        value.owner + " holds " + to_string(value.balance)
+    }
+}
+
+// Take by value, return the successor: the v0 idiom for changing an owned value.
+fn deposit(account: Account, amount: I64) -> Account {
+    Account(owner: account.owner, balance: account.balance + amount)
+}
+
+fn main() {
+    // Field reads copy — reading `owner` twice takes nothing, because the struct stays whole.
+    let account = Account(owner: "ada", balance: 10)
+    print(account.owner)
+    print(account.owner)
+
+    // A `&Self` method reads its receiver, so the name survives the call — and the next one.
+    print(account.describe())
+    print(account.describe())
+
+    // `x = deposit(x, n)` moves the value out and puts the result back: the name owns again at
+    // the bottom of every pass, which is what makes the move legal in a loop.
+    let mut running = account
+    let mut n = 0
+    while n < 3 {
+        running = deposit(running, 5)
+        n = n + 1
+    }
+    print(running.balance)
+
+    // `match &x` asks which case holds without taking the value; the binding is a copy.
+    let sky = Weather.Rain(12)
+    match &sky {
+        Weather.Rain(mm) => print(mm)
+        Weather.Clear => print("clear")
+    }
+
+    // `print(&x)` is the non-consuming spelling, byte-identical to what the move prints —
+    // and the plain `print(sky)` after it is the value's genuinely last use.
+    print(&sky)
+    print(sky)
+
+    // std/list borrows what it walks: one list serves every read.
+    let readings = List.Cons(7, List.Cons(9, List.Nil))
+    print(length(&readings))
+    print(join(&readings, ", "))
+}

@@ -139,7 +139,7 @@ task fn main #1() -> ()
     _35 = builtin print(_34)
     return _35
 
-fn fmt.describe #2(_0/report: Report) -> String
+fn fmt.describe #2(_0/report: &Report) -> String
     local _1: String
   b0:
     _1 = call fmt.pad#4(_0/report.0)

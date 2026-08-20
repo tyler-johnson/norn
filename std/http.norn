@@ -68,10 +68,11 @@ export fn head(data: Bytes) -> HeadParse {
 }
 
 // Case-insensitive lookup. Parsing lowercased the stored names and prepended, so folding the
-// asked-for name is all that is left, and the first match is the newest appearance.
-export fn header(req: Request, name: String) -> Option<String> {
+// asked-for name is all that is left, and the first match is the newest appearance. The request
+// is only read, so it is only borrowed: asking for two headers is two calls on one `req`.
+export fn header(req: &Request, name: String) -> Option<String> {
     let wanted = bytes(name)
-    lookup(req.headers, lower(wanted, 0, bytes_len(wanted)))
+    lookup(&req.headers, lower(wanted, 0, bytes_len(wanted)))
 }
 
 // The response head, byte for byte. Every response declares its length and closes the
@@ -234,16 +235,16 @@ fn parse(data: Bytes, end: I64) -> HeadParse {
         cursor = brk
     }
 
-    if named(headers, "transfer-encoding") > 0 {
+    if named(&headers, "transfer-encoding") > 0 {
         return HeadParse.Invalid("Transfer-Encoding is not supported; bodies are Content-Length")
     }
-    let lengths = named(headers, "content-length")
+    let lengths = named(&headers, "content-length")
     if lengths > 1 {
         return HeadParse.Invalid("Content-Length appears twice")
     }
     let mut content_length = 0
     if lengths == 1 {
-        match lookup(headers, "content-length") {
+        match lookup(&headers, "content-length") {
             Some(value) => match to_int(value) {
                 Some(n) => {
                     if n < 0 {
@@ -368,28 +369,29 @@ fn lower(data: Bytes, from: I64, stop: I64) -> String {
 
 // Walks are recursive because a cons list is: the depth is bounded by the head cap. These stay
 // local rather than moving to std/list, because they compare an element's *field* — a `Header`'s
-// name — and element-field functions live beside the fields they read.
-fn named(headers: List<Header>, name: String) -> I64 {
+// name — and element-field functions live beside the fields they read. Both only read, so both
+// borrow — the std/list policy, kept by the walks that could not move there.
+fn named(headers: &List<Header>, name: String) -> I64 {
     match headers {
         List.Nil => 0
         List.Cons(h, rest) => {
             if h.name == name {
-                1 + named(rest, name)
+                1 + named(&rest, name)
             } else {
-                named(rest, name)
+                named(&rest, name)
             }
         }
     }
 }
 
-fn lookup(headers: List<Header>, name: String) -> Option<String> {
+fn lookup(headers: &List<Header>, name: String) -> Option<String> {
     match headers {
         List.Nil => None
         List.Cons(h, rest) => {
             if h.name == name {
                 Some(h.value)
             } else {
-                lookup(rest, name)
+                lookup(&rest, name)
             }
         }
     }
