@@ -2,9 +2,9 @@ use super::*;
 
 impl Checker {
     /// Pass six: what a moved value's single owner means for a body that has already typed.
-    /// Ordinary values move (BOOTSTRAP §8 item 6c): the tracked set is `Ty::moves` — structs,
-    /// enums, Option, Result, resources, and tasks — so `consume(body); log(body)` is the same
-    /// error double-close always was.
+    /// Ordinary values copy (BOOTSTRAP §8 item 5): the tracked set is `Program::affine` —
+    /// resources, tasks, and any aggregate reaching one — so `close(conn); read(conn)` is the
+    /// error double-close always was, and a struct of two I64s is used as often as it is named.
     ///
     /// It runs over typed HIR rather than inside `check_fns` because it needs both halves of what
     /// checking produced — types, to know which values move, and spans, to say where — and needs to
@@ -84,7 +84,7 @@ fn rooted_at_local(expr: &Expr) -> bool {
 /// One function body's worth of ownership, tracked as it is walked.
 ///
 /// `moved[local]` is `None` while the name still holds its value and `Some(span)` once it does not,
-/// remembering where it went so the diagnostic can show both ends. Only move-typed locals ever
+/// remembering where it went so the diagnostic can show both ends. Only affine locals ever
 /// change state; everything else is copied, and copying is not an event.
 struct Moves<'p> {
     program: &'p Program,
@@ -123,8 +123,7 @@ impl Moves<'_> {
             // A field read copies — single ownership applies to whole values, so reading `p.x`
             // takes nothing — unless the field's own type is *affine*: a copied descriptor would
             // be a second owner, and a `match` is how a resource-holding aggregate is taken
-            // apart. The gate is deliberately `affine`, not `moves`: contents are exactly what a
-            // field read is about.
+            // apart.
             ExprKind::Field { base, index } => {
                 if self.program.affine(&expr.ty) {
                     self.out_of_field(base, *index, expr.span);
@@ -398,11 +397,11 @@ impl Moves<'_> {
         union(frame, &moved);
     }
 
-    /// Report every move-typed local the loop moved without declaring. `summary` is everything
-    /// that can reach the back edge or the exit; only move-typed locals ever hold `Some`, so the
-    /// move set needs no separate check. The advice holds for ordinary values as it did for
-    /// resources: `x = f(x)` inside the body is legal — the name owns again at the bottom of the
-    /// pass — and a value each pass should own outright is declared inside the loop.
+    /// Report every affine local the loop moved without declaring. `summary` is everything
+    /// that can reach the back edge or the exit; only affine locals ever hold `Some`, so the
+    /// move set needs no separate check. The advice: `x = f(x)` inside the body is legal — the
+    /// name owns again at the bottom of the pass — and a value each pass should own outright is
+    /// declared inside the loop.
     fn escaped_moves(
         &mut self,
         entry: &[Option<Span>],
@@ -436,7 +435,7 @@ impl Moves<'_> {
     }
 
     fn moves(&self, id: LocalId) -> bool {
-        self.locals[id.index()].ty.moves()
+        self.program.affine(&self.locals[id.index()].ty)
     }
 
     /// Report a use of something that is not there any more. `false` means it was already reported

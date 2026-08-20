@@ -22,9 +22,9 @@ fn reactor_errors_are_reported() {
     rejected("reactor-errors");
 }
 
-/// The ownership rules. `&` is one character, and getting it wrong in either direction is one
-/// character from correct, so these snapshots are mostly about whether the wording tells you which
-/// way the value was going.
+/// The ownership rules. Ordinary values copy; only affine values — resources, tasks, and
+/// aggregates reaching one — move, so these snapshots are mostly about whether the wording tells
+/// you where the value went and how to keep it.
 #[test]
 fn ownership_errors_are_reported() {
     rejected("ownership-errors");
