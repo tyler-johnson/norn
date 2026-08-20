@@ -10,7 +10,7 @@
     (variant Invalid (tuple String))
     (variant Io (fields (field code I64) (field message String))))
   (fn display_name export
-    (params (param profile (ref Profile)))
+    (params (param profile Profile))
     (ret String)
     (block (return (path profile.display_name))))
   (fn describe
@@ -96,7 +96,7 @@ export enum LoadError {
     Io { code: I64, message: String }
 }
 
-export fn display_name(profile: &Profile) -> String {
+export fn display_name(profile: Profile) -> String {
     return profile.display_name
 }
 

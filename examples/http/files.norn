@@ -22,7 +22,7 @@ task fn upload(conn: Connection, req: Request) -> Result<(), IoError>
     uses { net.io, fs.write }
 {
     let sink = await file_create("." + req.path)?
-    let saved = await save_body(&conn, req, sink)?
+    let saved = await save_body(conn, req, sink)?
     await respond_empty(conn, 204)
 }
 
@@ -52,12 +52,12 @@ task fn route(conn: Connection, req: Request) -> Result<(), IoError>
 task fn serve(conn: Connection) -> ()
     uses { net.io, fs.read, fs.write }
 {
-    match await read_request(&conn) {
+    match await read_request(conn) {
         Ok(req) => match await route(conn, req) {
             Ok(_) => ()
             Err(_) => ()
         }
-        // The connection was only borrowed, so it is still owned here; the scope closes it.
+        // The connection was only read, so it is still owned here; the scope closes it.
         Err(_) => ()
     }
 }
@@ -67,7 +67,7 @@ task fn accept_loop(listener: sink Listener) -> ()
 {
     scope {
         loop {
-            match await tcp_accept(&listener) {
+            match await tcp_accept(listener) {
                 Ok(conn) => spawn serve(conn)
                 Err(_) => break
             }
@@ -79,7 +79,7 @@ task fn main() -> Result<(), IoError>
     uses { clock, net.listen, net.io, fs.read, fs.write }
 {
     let listener = await tcp_listen(0)?
-    print(to_string(listener_port(&listener)))
+    print(to_string(listener_port(listener)))
     scope {
         spawn accept_loop(listener)
         await sleep(500)

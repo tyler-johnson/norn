@@ -134,7 +134,7 @@ task fn main #1() -> ()
     _58 = builtin print(_57)
     return _58
 
-inert fn list.length #2(_0/items: &List) -> I64
+inert fn list.length #2(_0/items: List) -> I64
   b0:
     return ()
 
@@ -146,31 +146,31 @@ inert fn list.append #4(_0/items: List, _1/tail: List) -> List
   b0:
     return ()
 
-inert fn list.reverse #5(_0/items: &List) -> List
+inert fn list.reverse #5(_0/items: List) -> List
   b0:
     return ()
 
-inert fn list.walk #6(_0/items: &List, _1/out: List) -> List
+inert fn list.walk #6(_0/items: List, _1/out: List) -> List
   b0:
     return ()
 
-inert fn list.take #7(_0/items: &List, _1/count: I64) -> List
+inert fn list.take #7(_0/items: List, _1/count: I64) -> List
   b0:
     return ()
 
-inert fn list.drop #8(_0/items: &List, _1/count: I64) -> List
+inert fn list.drop #8(_0/items: List, _1/count: I64) -> List
   b0:
     return ()
 
-inert fn list.nth #9(_0/items: &List, _1/index: I64) -> Option<T>
+inert fn list.nth #9(_0/items: List, _1/index: I64) -> Option<T>
   b0:
     return ()
 
-inert fn list.contains #10(_0/items: &List, _1/wanted: T) -> Bool
+inert fn list.contains #10(_0/items: List, _1/wanted: T) -> Bool
   b0:
     return ()
 
-inert fn list.join #11(_0/items: &List, _1/separator: String) -> String
+inert fn list.join #11(_0/items: List, _1/separator: String) -> String
   b0:
     return ()
 

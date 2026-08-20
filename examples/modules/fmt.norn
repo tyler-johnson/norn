@@ -12,7 +12,7 @@ export enum Shape {
 }
 
 // Borrowed, because describing a report only reads it — the caller keeps the value.
-export fn describe(report: &Report) -> String {
+export fn describe(report: Report) -> String {
     pad(report.label)
 }
 

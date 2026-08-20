@@ -43,13 +43,13 @@
                     (arg (str "the request head exceeds 8192 bytes"))))))
             (call (path parse) (arg (path data)) (arg (path end))))))))
   (fn header export
-    (params (param req (ref Request)) (param name String))
+    (params (param req Request) (param name String))
     (ret (ty Option String))
     (block
       (let wanted (call (path bytes) (arg (path name))))
       (call
         (path lookup)
-        (arg (unary & (path req.headers)))
+        (arg (path req.headers))
         (arg
           (call
             (path lower)
@@ -74,7 +74,7 @@
           (call (path to_string) (arg (path content_length))))
         (str "\r\nConnection: close\r\n\r\n"))))
   (fn read_request export task
-    (params (param conn (ref Connection)))
+    (params (param conn Connection))
     (ret (ty Result Request IoError))
     (uses net.io)
     (block
@@ -123,7 +123,7 @@
                     (path gathered)
                     (try (await (call (path tcp_read) (arg (path conn))))))))))))))
   (fn respond export task
-    (params (param conn Connection) (param status I64) (param body String))
+    (params (param conn sink Connection) (param status I64) (param body String))
     (ret (ty Result unit IoError))
     (uses net.io)
     (block
@@ -132,7 +132,7 @@
         (await
           (call
             (path tcp_write)
-            (arg (unary & (path conn)))
+            (arg (path conn))
             (arg
               (binary +
                 (call
@@ -146,14 +146,17 @@
       (await (call (path tcp_close) (arg (path conn))))
       (path outcome)))
   (fn respond_empty export task
-    (params (param conn Connection) (param status I64))
+    (params (param conn sink Connection) (param status I64))
     (ret (ty Result unit IoError))
     (uses net.io)
     (block
       (await
         (call (path respond) (arg (path conn)) (arg (path status)) (arg (str ""))))))
   (fn respond_flow export task
-    (params (param conn Connection) (param status I64) (param body (ty Flow Bytes)))
+    (params
+      (param conn sink Connection)
+      (param status I64)
+      (param body sink (ty Flow Bytes)))
     (ret (ty Result unit IoError))
     (uses net.io)
     (block
@@ -161,17 +164,14 @@
         (await
           (call
             (path stream)
-            (arg (unary & (path conn)))
-            (arg (unary & (path body)))
+            (arg (path conn))
+            (arg (path body))
             (arg (path status)))))
       (await (call (path flow_close) (arg (path body))))
       (await (call (path tcp_close) (arg (path conn))))
       (path outcome)))
   (fn stream task
-    (params
-      (param conn (ref Connection))
-      (param body (ref (ty Flow Bytes)))
-      (param status I64))
+    (params (param conn Connection) (param body (ty Flow Bytes)) (param status I64))
     (ret (ty Result unit IoError))
     (uses net.io)
     (block
@@ -196,24 +196,17 @@
             (block (return (call (path Ok) (arg unit)))))
           (try (await (call (path tcp_write) (arg (path conn)) (arg (path chunk)))))))))
   (fn save_body export task
-    (params (param conn (ref Connection)) (param req Request) (param sink File))
+    (params (param conn Connection) (param req Request) (param sink sink File))
     (ret (ty Result I64 IoError))
     (uses net.io)
     (block
       (let outcome
         (await
-          (call
-            (path receive)
-            (arg (path conn))
-            (arg (unary & (path sink)))
-            (arg (path req)))))
+          (call (path receive) (arg (path conn)) (arg (path sink)) (arg (path req)))))
       (await (call (path file_close) (arg (path sink))))
       (path outcome)))
   (fn receive task
-    (params
-      (param conn (ref Connection))
-      (param sink (ref File))
-      (param req Request))
+    (params (param conn Connection) (param sink File) (param req Request))
     (ret (ty Result I64 IoError))
     (uses net.io)
     (block
@@ -347,10 +340,7 @@
           (assign (path cursor) (path brk))))
       (if
         (binary >
-          (call
-            (path named)
-            (arg (unary & (path headers)))
-            (arg (str "transfer-encoding")))
+          (call (path named) (arg (path headers)) (arg (str "transfer-encoding")))
           (int 0))
         (block
           (return
@@ -359,10 +349,7 @@
               (arg
                 (str "Transfer-Encoding is not supported; bodies are Content-Length"))))))
       (let lengths
-        (call
-          (path named)
-          (arg (unary & (path headers)))
-          (arg (str "content-length"))))
+        (call (path named) (arg (path headers)) (arg (str "content-length"))))
       (if
         (binary > (path lengths) (int 1))
         (block
@@ -375,10 +362,7 @@
         (binary == (path lengths) (int 1))
         (block
           (match
-            (call
-              (path lookup)
-              (arg (unary & (path headers)))
-              (arg (str "content-length")))
+            (call (path lookup) (arg (path headers)) (arg (str "content-length")))
             (arm
               (construct Some (arg (bind value)))
               (match
@@ -601,7 +585,7 @@
           (assign (path i) (binary + (path i) (int 1)))))
       (call (path text_unchecked) (arg (path out)))))
   (fn named
-    (params (param headers (ref (ty List Header))) (param name String))
+    (params (param headers (ty List Header)) (param name String))
     (ret I64)
     (block
       (match
@@ -615,12 +599,10 @@
               (block
                 (binary +
                   (int 1)
-                  (call (path named) (arg (unary & (path rest))) (arg (path name)))))
-              (else
-                (block
-                  (call (path named) (arg (unary & (path rest))) (arg (path name)))))))))))
+                  (call (path named) (arg (path rest)) (arg (path name)))))
+              (else (block (call (path named) (arg (path rest)) (arg (path name)))))))))))
   (fn lookup
-    (params (param headers (ref (ty List Header))) (param name String))
+    (params (param headers (ty List Header)) (param name String))
     (ret (ty Option String))
     (block
       (match
@@ -633,8 +615,7 @@
               (binary == (path h.name) (path name))
               (block (call (path Some) (arg (path h.value))))
               (else
-                (block
-                  (call (path lookup) (arg (unary & (path rest))) (arg (path name)))))))))))
+                (block (call (path lookup) (arg (path rest)) (arg (path name)))))))))))
   (fn reason
     (params (param status I64))
     (ret String)
@@ -691,16 +672,16 @@ export fn head(data: Bytes) -> HeadParse {
     }
 }
 
-export fn header(req: &Request, name: String) -> Option<String> {
+export fn header(req: Request, name: String) -> Option<String> {
     let wanted = bytes(name)
-    lookup(&req.headers, lower(wanted, 0, bytes_len(wanted)))
+    lookup(req.headers, lower(wanted, 0, bytes_len(wanted)))
 }
 
 export fn response_head(status: I64, content_length: I64) -> String {
     "HTTP/1.1 " + to_string(status) + " " + reason(status) + "\r\nContent-Length: " + to_string(content_length) + "\r\nConnection: close\r\n\r\n"
 }
 
-export task fn read_request(conn: &Connection) -> Result<Request, IoError>
+export task fn read_request(conn: Connection) -> Result<Request, IoError>
     uses { net.io }
 {
     let mut gathered = bytes("")
@@ -724,31 +705,31 @@ export task fn read_request(conn: &Connection) -> Result<Request, IoError>
     }
 }
 
-export task fn respond(conn: Connection, status: I64, body: String) -> Result<(), IoError>
+export task fn respond(conn: sink Connection, status: I64, body: String) -> Result<(), IoError>
     uses { net.io }
 {
     let payload = bytes(body)
-    let outcome = await tcp_write(&conn, bytes(response_head(status, bytes_len(payload))) + payload)
+    let outcome = await tcp_write(conn, bytes(response_head(status, bytes_len(payload))) + payload)
     await tcp_close(conn)
     outcome
 }
 
-export task fn respond_empty(conn: Connection, status: I64) -> Result<(), IoError>
+export task fn respond_empty(conn: sink Connection, status: I64) -> Result<(), IoError>
     uses { net.io }
 {
     await respond(conn, status, "")
 }
 
-export task fn respond_flow(conn: Connection, status: I64, body: Flow<Bytes>) -> Result<(), IoError>
+export task fn respond_flow(conn: sink Connection, status: I64, body: sink Flow<Bytes>) -> Result<(), IoError>
     uses { net.io }
 {
-    let outcome = await stream(&conn, &body, status)
+    let outcome = await stream(conn, body, status)
     await flow_close(body)
     await tcp_close(conn)
     outcome
 }
 
-task fn stream(conn: &Connection, body: &Flow<Bytes>, status: I64) -> Result<(), IoError>
+task fn stream(conn: Connection, body: Flow<Bytes>, status: I64) -> Result<(), IoError>
     uses { net.io }
 {
     await tcp_write(conn, bytes(response_head(status, flow_len(body))))?
@@ -761,15 +742,15 @@ task fn stream(conn: &Connection, body: &Flow<Bytes>, status: I64) -> Result<(),
     }
 }
 
-export task fn save_body(conn: &Connection, req: Request, sink: File) -> Result<I64, IoError>
+export task fn save_body(conn: Connection, req: Request, sink: sink File) -> Result<I64, IoError>
     uses { net.io }
 {
-    let outcome = await receive(conn, &sink, req)
+    let outcome = await receive(conn, sink, req)
     await file_close(sink)
     outcome
 }
 
-task fn receive(conn: &Connection, sink: &File, req: Request) -> Result<I64, IoError>
+task fn receive(conn: Connection, sink: File, req: Request) -> Result<I64, IoError>
     uses { net.io }
 {
     await file_write(sink, req.leftover)?
@@ -826,16 +807,16 @@ fn parse(data: Bytes, end: I64) -> HeadParse {
         }
         cursor = brk
     }
-    if named(&headers, "transfer-encoding") > 0 {
+    if named(headers, "transfer-encoding") > 0 {
         return HeadParse.Invalid("Transfer-Encoding is not supported; bodies are Content-Length")
     }
-    let lengths = named(&headers, "content-length")
+    let lengths = named(headers, "content-length")
     if lengths > 1 {
         return HeadParse.Invalid("Content-Length appears twice")
     }
     let mut content_length = 0
     if lengths == 1 {
-        match lookup(&headers, "content-length") {
+        match lookup(headers, "content-length") {
             Some(value) => match to_int(value) {
                 Some(n) => {
                     if n < 0 {
@@ -947,27 +928,27 @@ fn lower(data: Bytes, from: I64, stop: I64) -> String {
     text_unchecked(out)
 }
 
-fn named(headers: &List<Header>, name: String) -> I64 {
+fn named(headers: List<Header>, name: String) -> I64 {
     match headers {
         List.Nil => 0
         List.Cons(h, rest) => {
             if h.name == name {
-                1 + named(&rest, name)
+                1 + named(rest, name)
             } else {
-                named(&rest, name)
+                named(rest, name)
             }
         }
     }
 }
 
-fn lookup(headers: &List<Header>, name: String) -> Option<String> {
+fn lookup(headers: List<Header>, name: String) -> Option<String> {
     match headers {
         List.Nil => None
         List.Cons(h, rest) => {
             if h.name == name {
                 Some(h.value)
             } else {
-                lookup(&rest, name)
+                lookup(rest, name)
             }
         }
     }

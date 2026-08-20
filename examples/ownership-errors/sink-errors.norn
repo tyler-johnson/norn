@@ -29,7 +29,7 @@ task fn closes_then_reads(conn: Connection) -> Result<(), IoError>
     uses { net.io }
 {
     await shutdown(conn)
-    let data = await tcp_read(&conn)?
+    let data = await tcp_read(conn)?
     Ok(())
 }
 
@@ -39,7 +39,7 @@ task fn closes_then_reads(conn: Connection) -> Result<(), IoError>
 task fn peek(conn: Connection) -> ()
     uses { net.io }
 {
-    let data = await tcp_read(&conn)
+    let data = await tcp_read(conn)
     ()
 }
 

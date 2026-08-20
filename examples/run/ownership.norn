@@ -1,8 +1,9 @@
-// Ownership's legal lane (BOOTSTRAP §8 item 6c): every way to use a value that does NOT give it
-// away, in one program. A struct, enum, Option, or Result moves when used as a value — the same
-// rule a Connection always had — and this file is the vocabulary that lives well under it: field
-// reads copy, `&` reads without taking, `match &x` binds copies, a `&Self` method leaves its
-// receiver owned, assignment revives a name, and std/list borrows what it walks.
+// Ownership's legal lane (BOOTSTRAP §8 item 5): reads are unmarked. An ordinary value copies —
+// using one is never giving it away — and only what reaches a resource moves, so the marks live
+// where the semantics do: in signatures, where `sink` is the one word that hands a value over.
+// This file is the everyday vocabulary that needs no word at all: field reads copy, passing a
+// value reads it, `match x` asks without taking, a `Self` method reads its receiver, and
+// assignment writes a name.
 
 import { List, length, join } from "std/list"
 import { to_string } from "std/fmt"
@@ -18,16 +19,17 @@ enum Weather {
 }
 
 trait Describe {
-    fn describe(value: &Self) -> String
+    fn describe(value: Self) -> String
 }
 
 impl Describe for Account {
-    fn describe(value: &Self) -> String {
+    fn describe(value: Self) -> String {
         value.owner + " holds " + to_string(value.balance)
     }
 }
 
-// Take by value, return the successor: the v0 idiom for changing an owned value.
+// Take a copy, return the successor: `x = deposit(x, n)` writes the new value over the old.
+// (Changing a value in place is the `mut` wave's story, declared in the signature like `sink`.)
 fn deposit(account: Account, amount: I64) -> Account {
     Account(owner: account.owner, balance: account.balance + amount)
 }
@@ -38,12 +40,13 @@ fn main() {
     print(account.owner)
     print(account.owner)
 
-    // A `&Self` method reads its receiver, so the name survives the call — and the next one.
+    // A method reads its receiver — `Self` is a read like any other parameter — so the name
+    // survives the call, and the next one.
     print(account.describe())
     print(account.describe())
 
-    // `x = deposit(x, n)` moves the value out and puts the result back: the name owns again at
-    // the bottom of every pass, which is what makes the move legal in a loop.
+    // The revive idiom: the name owns the successor at the bottom of every pass, which is what
+    // keeps it legal in a loop.
     let mut running = account
     let mut n = 0
     while n < 3 {
@@ -52,20 +55,19 @@ fn main() {
     }
     print(running.balance)
 
-    // `match &x` asks which case holds without taking the value; the binding is a copy.
+    // `match x` asks which case holds; the bindings are copies, and `sky` is still whole after.
     let sky = Weather.Rain(12)
-    match &sky {
+    match sky {
         Weather.Rain(mm) => print(mm)
         Weather.Clear => print("clear")
     }
 
-    // `print(&x)` is the non-consuming spelling, byte-identical to what the move prints —
-    // and the plain `print(sky)` after it is the value's genuinely last use.
-    print(&sky)
+    // Printing reads too: twice is two looks at one value.
+    print(sky)
     print(sky)
 
-    // std/list borrows what it walks: one list serves every read.
+    // Reads are unmarked in std/list as well: one list serves every walk.
     let readings = List.Cons(7, List.Cons(9, List.Nil))
-    print(length(&readings))
-    print(join(&readings, ", "))
+    print(length(readings))
+    print(join(readings, ", "))
 }

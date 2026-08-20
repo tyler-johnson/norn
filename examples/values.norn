@@ -16,7 +16,7 @@ export enum LoadError {
     Io { code: I64, message: String }
 }
 
-export fn display_name(profile: &Profile) -> String {
+export fn display_name(profile: Profile) -> String {
     return profile.display_name
 }
 

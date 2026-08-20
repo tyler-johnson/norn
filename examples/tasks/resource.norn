@@ -12,7 +12,7 @@
 task fn wait_for_client(listener: sink Listener) -> ()
     uses { net.io }
 {
-    match await tcp_accept(&listener) {
+    match await tcp_accept(listener) {
         Ok(_) => print("a client arrived")
         Err(_) => print("the listener failed")
     }

@@ -30,10 +30,10 @@ fn main #2() -> ()
     local _7: List<I64>
     local _8: I64
     local _9: ()
-    local _10: &List<I64>
+    local _10: List<I64>
     local _11: String
     local _12: ()
-    local _13: &List<I64>
+    local _13: List<I64>
     local _14: String
     local _15: ()
     local _16: Bool
@@ -112,7 +112,7 @@ fn main #2() -> ()
   b8:
     goto b7
 
-inert fn list.length #3(_0/items: &List) -> I64
+inert fn list.length #3(_0/items: List) -> I64
   b0:
     return ()
 
@@ -124,31 +124,31 @@ inert fn list.append #5(_0/items: List, _1/tail: List) -> List
   b0:
     return ()
 
-inert fn list.reverse #6(_0/items: &List) -> List
+inert fn list.reverse #6(_0/items: List) -> List
   b0:
     return ()
 
-inert fn list.walk #7(_0/items: &List, _1/out: List) -> List
+inert fn list.walk #7(_0/items: List, _1/out: List) -> List
   b0:
     return ()
 
-inert fn list.take #8(_0/items: &List, _1/count: I64) -> List
+inert fn list.take #8(_0/items: List, _1/count: I64) -> List
   b0:
     return ()
 
-inert fn list.drop #9(_0/items: &List, _1/count: I64) -> List
+inert fn list.drop #9(_0/items: List, _1/count: I64) -> List
   b0:
     return ()
 
-inert fn list.nth #10(_0/items: &List, _1/index: I64) -> Option<T>
+inert fn list.nth #10(_0/items: List, _1/index: I64) -> Option<T>
   b0:
     return ()
 
-inert fn list.contains #11(_0/items: &List, _1/wanted: T) -> Bool
+inert fn list.contains #11(_0/items: List, _1/wanted: T) -> Bool
   b0:
     return ()
 
-inert fn list.join #12(_0/items: &List, _1/separator: String) -> String
+inert fn list.join #12(_0/items: List, _1/separator: String) -> String
   b0:
     return ()
 
@@ -438,7 +438,7 @@ inert fn fmt.Display.to_string for T #18(_0: ?) -> String
   b0:
     return ()
 
-fn list.length<I64> #19(_0/items: &List<I64>) -> I64
+fn list.length<I64> #19(_0/items: List<I64>) -> I64
     local _1/rest: List<I64>
     local _2: I64
     local _3: I64
@@ -469,7 +469,7 @@ fn list.length<I64> #19(_0/items: &List<I64>) -> I64
     _1/rest = _0/items.1@Cons
     goto b7
 
-fn list.reverse<I64> #20(_0/items: &List<I64>) -> List<I64>
+fn list.reverse<I64> #20(_0/items: List<I64>) -> List<I64>
     local _1: List<I64>
     local _2: List<I64>
   b0:
@@ -477,7 +477,7 @@ fn list.reverse<I64> #20(_0/items: &List<I64>) -> List<I64>
     _2 = call list.walk<I64>#28(_0/items, _1)
     return _2
 
-fn list.join<I64> #21(_0/items: &List<I64>, _1/separator: String) -> String
+fn list.join<I64> #21(_0/items: List<I64>, _1/separator: String) -> String
     local _2/head: I64
     local _3/rest: List<I64>
     local _4: String
@@ -537,7 +537,7 @@ fn list.join<I64> #21(_0/items: &List<I64>, _1/separator: String) -> String
   b18:
     goto b16
 
-fn list.take<I64> #22(_0/items: &List<I64>, _1/count: I64) -> List<I64>
+fn list.take<I64> #22(_0/items: List<I64>, _1/count: I64) -> List<I64>
     local _2/head: I64
     local _3/rest: List<I64>
     local _4: List<I64>
@@ -587,7 +587,7 @@ fn list.take<I64> #22(_0/items: &List<I64>, _1/count: I64) -> List<I64>
     _3/rest = _0/items.1@Cons
     goto b10
 
-fn list.contains<I64> #23(_0/items: &List<I64>, _1/wanted: I64) -> Bool
+fn list.contains<I64> #23(_0/items: List<I64>, _1/wanted: I64) -> Bool
     local _2/head: I64
     local _3/rest: List<I64>
     local _4: Bool
@@ -627,7 +627,7 @@ fn list.contains<I64> #23(_0/items: &List<I64>, _1/wanted: I64) -> Bool
     _4 = _5
     goto b1
 
-fn list.nth<I64> #24(_0/items: &List<I64>, _1/index: I64) -> Option<I64>
+fn list.nth<I64> #24(_0/items: List<I64>, _1/index: I64) -> Option<I64>
     local _2/head: I64
     local _3/rest: List<I64>
     local _4: Option<I64>
@@ -675,7 +675,7 @@ fn list.nth<I64> #24(_0/items: &List<I64>, _1/index: I64) -> Option<I64>
     _4 = _6
     goto b1
 
-fn list.join<Color> #25(_0/items: &List<Color>, _1/separator: String) -> String
+fn list.join<Color> #25(_0/items: List<Color>, _1/separator: String) -> String
     local _2/head: Color
     local _3/rest: List<Color>
     local _4: String
@@ -758,7 +758,7 @@ fn describe<I64> #27(_0/value: I64, _1/fallback: I64) -> String
   b3:
     return _2
 
-fn list.walk<I64> #28(_0/items: &List<I64>, _1/out: List<I64>) -> List<I64>
+fn list.walk<I64> #28(_0/items: List<I64>, _1/out: List<I64>) -> List<I64>
     local _2/head: I64
     local _3/rest: List<I64>
     local _4: List<I64>

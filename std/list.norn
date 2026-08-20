@@ -3,14 +3,14 @@
 // This is the structure-only surface: what a linked list is and how it is walked. The functions
 // that take *behaviour* — map, filter, fold — wait for M7's closures, and functions that compare
 // an element's fields stay beside the fields they read, in the module that declares the element.
-// Arguments are subject-first — `take(&items, 3)`, never `take(3, &items)` — so a pipeline reads
+// Arguments are subject-first — `take(items, 3)`, never `take(3, items)` — so a pipeline reads
 // in the order it runs.
 //
-// The ownership policy, stated as API: borrow what you walk, own what you store. Every function
-// that only reads a list takes it as `&List<T>` — std/list never takes a list it only reads — so
-// a caller keeps its list across `length`, `join`, and the rest. What a result is built from is
-// taken owned: `append`'s arguments become the result's spine, and `walk`'s accumulator is the
-// result under construction — the constructor-payload rule, worn as a signature.
+// The ownership policy dissolved into the language: reads are unmarked, and a list of ordinary
+// elements is itself ordinary — walking one takes nothing, so a caller keeps its list across
+// `length`, `join`, and the rest without a mark on either end. What a result is built from is
+// stored: `append`'s arguments become the result's spine, and `walk`'s accumulator is the result
+// under construction — the constructor-payload rule, no longer visible in any signature.
 
 import { Display } from "std/fmt"
 
@@ -19,10 +19,10 @@ export enum List<T> {
     Cons(T, List<T>)
 }
 
-export fn length<T>(items: &List<T>) -> I64 {
+export fn length<T>(items: List<T>) -> I64 {
     match items {
         List.Nil => 0
-        List.Cons(_, rest) => 1 + length(&rest)
+        List.Cons(_, rest) => 1 + length(rest)
     }
 }
 
@@ -38,69 +38,66 @@ export fn append<T>(items: List<T>, tail: List<T>) -> List<T> {
     }
 }
 
-export fn reverse<T>(items: &List<T>) -> List<T> {
+export fn reverse<T>(items: List<T>) -> List<T> {
     walk(items, List.Nil)
 }
 
 // The accumulator spelling, private: `reverse` is the name the intent has.
-fn walk<T>(items: &List<T>, out: List<T>) -> List<T> {
+fn walk<T>(items: List<T>, out: List<T>) -> List<T> {
     match items {
         List.Nil => out
-        List.Cons(head, rest) => walk(&rest, List.Cons(head, out))
+        List.Cons(head, rest) => walk(rest, List.Cons(head, out))
     }
 }
 
-export fn take<T>(items: &List<T>, count: I64) -> List<T> {
+export fn take<T>(items: List<T>, count: I64) -> List<T> {
     if count <= 0 {
         List.Nil
     } else {
         match items {
             List.Nil => List.Nil
-            List.Cons(head, rest) => List.Cons(head, take(&rest, count - 1))
+            List.Cons(head, rest) => List.Cons(head, take(rest, count - 1))
         }
     }
 }
 
-// Match-first, so the borrowed spine is only ever read: the kept suffix is rebuilt from the
-// bindings rather than returned whole, which is the same list.
-export fn drop<T>(items: &List<T>, count: I64) -> List<T> {
+export fn drop<T>(items: List<T>, count: I64) -> List<T> {
     match items {
         List.Nil => List.Nil
         List.Cons(head, rest) => if count <= 0 {
             List.Cons(head, rest)
         } else {
-            drop(&rest, count - 1)
+            drop(rest, count - 1)
         }
     }
 }
 
-export fn nth<T>(items: &List<T>, index: I64) -> Option<T> {
+export fn nth<T>(items: List<T>, index: I64) -> Option<T> {
     match items {
         List.Nil => None
         List.Cons(head, rest) => if index == 0 {
             Some(head)
         } else {
-            nth(&rest, index - 1)
+            nth(rest, index - 1)
         }
     }
 }
 
-// `wanted` is used on every step of the walk — legal because `Eq` holds only for the scalar
-// types, which copy.
-export fn contains<T: Eq>(items: &List<T>, wanted: T) -> Bool {
+// `wanted` is used on every step of the walk — `Eq` holds only for the scalar types, and
+// everything ordinary copies.
+export fn contains<T: Eq>(items: List<T>, wanted: T) -> Bool {
     match items {
         List.Nil => false
-        List.Cons(head, rest) => head == wanted || contains(&rest, wanted)
+        List.Cons(head, rest) => head == wanted || contains(rest, wanted)
     }
 }
 
-// `separator` is used once per element — a String, which copies.
-export fn join<T: Display>(items: &List<T>, separator: String) -> String {
+export fn join<T: Display>(items: List<T>, separator: String) -> String {
     match items {
         List.Nil => ""
-        List.Cons(head, rest) => match &rest {
+        List.Cons(head, rest) => match rest {
             List.Nil => head.to_string()
-            List.Cons(_, _) => head.to_string() + separator + join(&rest, separator)
+            List.Cons(_, _) => head.to_string() + separator + join(rest, separator)
         }
     }
 }

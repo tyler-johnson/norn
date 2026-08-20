@@ -16,7 +16,7 @@ task fn main() -> Result<(), IoError>
 
     scope {
         let inner = await tcp_listen(0)?
-        print(compare(listener_port(&outer), listener_port(&inner)))
+        print(compare(listener_port(outer), listener_port(inner)))
         await sleep(1)
     }
 

@@ -40,30 +40,24 @@ fn show(point: Point) -> String {
     "(" + to_string(point.x) + ", " + to_string(point.y) + ")"
 }
 
-// Constructor payloads own what they are handed, so a Point used on many lines is rebuilt per
-// site rather than named once: a moved value is rebuilt, not resurrected.
-fn origin() -> Point {
-    Point(x: 0, y: 0)
-}
-
-fn corner() -> Point {
-    Point(x: 3, y: 4)
-}
-
 fn main() {
-    print(describe(Shape.Empty))
-    print(describe(Shape.Dot(origin())))
-    print(describe(Shape.Dot(corner())))
-    print(describe(Shape.Segment(origin(), corner())))
-    print(describe(Shape.Circle(centre: corner(), radius: 0)))
-    print(describe(Shape.Circle(centre: origin(), radius: 12)))
+    // Ordinary values copy, so one point serves every site that mentions it.
+    let origin = Point(x: 0, y: 0)
+    let corner = Point(x: 3, y: 4)
 
-    print(size(Shape.Circle(centre: origin(), radius: 500)))
-    print(size(Shape.Circle(centre: origin(), radius: 50)))
-    print(size(Shape.Circle(centre: origin(), radius: 5)))
-    print(size(Shape.Dot(corner())))
-    print(size(Shape.Segment(origin(), corner())))
+    print(describe(Shape.Empty))
+    print(describe(Shape.Dot(origin)))
+    print(describe(Shape.Dot(corner)))
+    print(describe(Shape.Segment(origin, corner)))
+    print(describe(Shape.Circle(centre: corner, radius: 0)))
+    print(describe(Shape.Circle(centre: origin, radius: 12)))
+
+    print(size(Shape.Circle(centre: origin, radius: 500)))
+    print(size(Shape.Circle(centre: origin, radius: 50)))
+    print(size(Shape.Circle(centre: origin, radius: 5)))
+    print(size(Shape.Dot(corner)))
+    print(size(Shape.Segment(origin, corner)))
 
     // Values print in the syntax that builds them.
-    print(Shape.Circle(centre: corner(), radius: 7))
+    print(Shape.Circle(centre: corner, radius: 7))
 }

@@ -16,7 +16,7 @@ import { read_request, respond } from "std/http"
 task fn serve(conn: Connection) -> ()
     uses { net.io }
 {
-    match await read_request(&conn) {
+    match await read_request(conn) {
         Ok(_) => match await respond(conn, 200, "hello from norn\n") {
             Ok(_) => ()
             Err(_) => ()
@@ -31,7 +31,7 @@ task fn accept_loop(listener: sink Listener) -> ()
 {
     scope {
         loop {
-            match await tcp_accept(&listener) {
+            match await tcp_accept(listener) {
                 Ok(conn) => spawn serve(conn)
                 Err(_) => break
             }
@@ -43,7 +43,7 @@ task fn main() -> Result<(), IoError>
     uses { clock, net.listen, net.io }
 {
     let listener = await tcp_listen(0)?
-    print(to_string(listener_port(&listener)))
+    print(to_string(listener_port(listener)))
     scope {
         spawn accept_loop(listener)
         await sleep(200)

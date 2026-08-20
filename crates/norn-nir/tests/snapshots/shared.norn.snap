@@ -167,7 +167,7 @@ fn main #2() -> ()
   b9:
     goto b8
 
-inert fn list.length #3(_0/items: &List) -> I64
+inert fn list.length #3(_0/items: List) -> I64
   b0:
     return ()
 
@@ -179,31 +179,31 @@ inert fn list.append #5(_0/items: List, _1/tail: List) -> List
   b0:
     return ()
 
-inert fn list.reverse #6(_0/items: &List) -> List
+inert fn list.reverse #6(_0/items: List) -> List
   b0:
     return ()
 
-inert fn list.walk #7(_0/items: &List, _1/out: List) -> List
+inert fn list.walk #7(_0/items: List, _1/out: List) -> List
   b0:
     return ()
 
-inert fn list.take #8(_0/items: &List, _1/count: I64) -> List
+inert fn list.take #8(_0/items: List, _1/count: I64) -> List
   b0:
     return ()
 
-inert fn list.drop #9(_0/items: &List, _1/count: I64) -> List
+inert fn list.drop #9(_0/items: List, _1/count: I64) -> List
   b0:
     return ()
 
-inert fn list.nth #10(_0/items: &List, _1/index: I64) -> Option<T>
+inert fn list.nth #10(_0/items: List, _1/index: I64) -> Option<T>
   b0:
     return ()
 
-inert fn list.contains #11(_0/items: &List, _1/wanted: T) -> Bool
+inert fn list.contains #11(_0/items: List, _1/wanted: T) -> Bool
   b0:
     return ()
 
-inert fn list.join #12(_0/items: &List, _1/separator: String) -> String
+inert fn list.join #12(_0/items: List, _1/separator: String) -> String
   b0:
     return ()
 

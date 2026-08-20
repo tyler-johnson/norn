@@ -13,16 +13,17 @@
 
 // Deliver everything the flow promises into the sink, then close both ends — completion and
 // failure alike consume them, so nothing can legally touch either again and the closes happen
-// here rather than at task teardown. The borrowing split with `transfer` is what makes that
-// eager close reachable on the error path: a `?` in this body would return before the closes.
-export task fn pipe(flow: Flow<Bytes>, sink: File) -> Result<I64, IoError> {
-    let outcome = await transfer(&flow, &sink)
+// here rather than at task teardown: `sink` is written on both, the pinned public contract. The
+// read-mode split with `transfer` is what makes that eager close reachable on the error path:
+// a `?` in this body would return before the closes.
+export task fn pipe(flow: sink Flow<Bytes>, sink: sink File) -> Result<I64, IoError> {
+    let outcome = await transfer(flow, sink)
     await flow_close(flow)
     await file_close(sink)
     outcome
 }
 
-task fn transfer(flow: &Flow<Bytes>, sink: &File) -> Result<I64, IoError> {
+task fn transfer(flow: Flow<Bytes>, sink: File) -> Result<I64, IoError> {
     let mut moved = 0
     loop {
         let chunk = await flow_next(flow)?

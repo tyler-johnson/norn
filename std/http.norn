@@ -1,15 +1,15 @@
 // HTTP/1.1 on the wire, in Norn: the head parsed into an ordinary struct, responses rendered as
 // strings, and a Connection driven with the byte intrinsics. The Request *resource* dissolved
 // with the eight http_* builtins when this landed — reading a request no longer flips a socket
-// into another kind of thing. `read_request` borrows the connection and hands back plain data,
+// into another kind of thing. `read_request` reads the connection and hands back plain data,
 // so the old double-take trap (`request_body` twice) is gone with the resource, and a head that
 // fails to parse no longer eagerly closes the socket — the owning scope does.
 //
 // Import by named items: `import { read_request, respond, Request } from "std/http"`.
 //
-// The respond family consumes the Connection: every v0 response says `Connection: close`, so
-// answering and closing are one act, and answering twice is a move error rather than a protocol
-// bug. The parser keeps the runtime parser's rules — `\r\n\r\n` terminator, the 8192-byte cap,
+// The respond family declares `sink` on the Connection: every v0 response says
+// `Connection: close`, so answering and closing are one act, and answering twice is a move
+// error rather than a protocol bug. The parser keeps the runtime parser's rules — `\r\n\r\n` terminator, the 8192-byte cap,
 // `METHOD PATH HTTP/1.1` with single spaces, `Content-Length` framing only — with deltas that
 // are deliberate and pinned by examples/run/http-head.norn: heads must be ASCII rather than
 // UTF-8; duplicate headers resolve last-wins; a malformed head surfaces the violated rule as
@@ -69,10 +69,10 @@ export fn head(data: Bytes) -> HeadParse {
 
 // Case-insensitive lookup. Parsing lowercased the stored names and prepended, so folding the
 // asked-for name is all that is left, and the first match is the newest appearance. The request
-// is only read, so it is only borrowed: asking for two headers is two calls on one `req`.
-export fn header(req: &Request, name: String) -> Option<String> {
+// is only read, and reading takes nothing: asking for two headers is two calls on one `req`.
+export fn header(req: Request, name: String) -> Option<String> {
     let wanted = bytes(name)
-    lookup(&req.headers, lower(wanted, 0, bytes_len(wanted)))
+    lookup(req.headers, lower(wanted, 0, bytes_len(wanted)))
 }
 
 // The response head, byte for byte. Every response declares its length and closes the
@@ -83,11 +83,11 @@ export fn response_head(status: I64, content_length: I64) -> String {
 }
 
 // Gather bytes off the connection until the head completes, then hand back plain data. The
-// connection is only borrowed: a malformed head is an `Err` naming the violated rule, and the
+// connection is only read: a malformed head is an `Err` naming the violated rule, and the
 // socket stays with its owner. `leftover` collects any body bytes that arrived alongside the
 // head, truncated to the declared length so a pipelined next request — which every response's
 // `Connection: close` has already declined — is dropped rather than mistaken for body.
-export task fn read_request(conn: &Connection) -> Result<Request, IoError>
+export task fn read_request(conn: Connection) -> Result<Request, IoError>
     uses { net.io }
 {
     let mut gathered = bytes("")
@@ -114,35 +114,35 @@ export task fn read_request(conn: &Connection) -> Result<Request, IoError>
 // Send a whole response — head and body in one buffer, the runtime's partial-write cursor doing
 // the chunking — and close the connection. Closing on the failure path too is why the write is
 // awaited into a value rather than `?`-returned: nothing here leaks a close to task teardown.
-export task fn respond(conn: Connection, status: I64, body: String) -> Result<(), IoError>
+export task fn respond(conn: sink Connection, status: I64, body: String) -> Result<(), IoError>
     uses { net.io }
 {
     let payload = bytes(body)
-    let outcome = await tcp_write(&conn, bytes(response_head(status, bytes_len(payload))) + payload)
+    let outcome = await tcp_write(conn, bytes(response_head(status, bytes_len(payload))) + payload)
     await tcp_close(conn)
     outcome
 }
 
-export task fn respond_empty(conn: Connection, status: I64) -> Result<(), IoError>
+export task fn respond_empty(conn: sink Connection, status: I64) -> Result<(), IoError>
     uses { net.io }
 {
     await respond(conn, status, "")
 }
 
 // A response whose body is a flow: the head goes out first, declaring the flow's remaining
-// length, then chunks ride `flow_next` into `tcp_write`. Both handles are owned here and closed
-// on every path — the borrowing `stream` helper is what keeps a mid-body failure from leaving
+// length, then chunks ride `flow_next` into `tcp_write`. Both handles are sunk here and closed
+// on every path — the read-mode `stream` helper is what keeps a mid-body failure from leaving
 // either to task teardown, the same split as std/flow's `pipe`.
-export task fn respond_flow(conn: Connection, status: I64, body: Flow<Bytes>) -> Result<(), IoError>
+export task fn respond_flow(conn: sink Connection, status: I64, body: sink Flow<Bytes>) -> Result<(), IoError>
     uses { net.io }
 {
-    let outcome = await stream(&conn, &body, status)
+    let outcome = await stream(conn, body, status)
     await flow_close(body)
     await tcp_close(conn)
     outcome
 }
 
-task fn stream(conn: &Connection, body: &Flow<Bytes>, status: I64) -> Result<(), IoError>
+task fn stream(conn: Connection, body: Flow<Bytes>, status: I64) -> Result<(), IoError>
     uses { net.io }
 {
     await tcp_write(conn, bytes(response_head(status, flow_len(body))))?
@@ -156,19 +156,19 @@ task fn stream(conn: &Connection, body: &Flow<Bytes>, status: I64) -> Result<(),
 }
 
 // Stream a request's body into a file, yielding how many bytes landed. The connection is only
-// borrowed — responding afterwards is the caller's move — while the sink is consumed and closed
+// read — responding afterwards is the caller's move — while the sink is consumed and closed
 // on every path. One chunk local per iteration is the demand claim's new home: nothing beyond a
 // single read is ever held, and the slice keeps a final over-full read from writing past the
 // declared length.
-export task fn save_body(conn: &Connection, req: Request, sink: File) -> Result<I64, IoError>
+export task fn save_body(conn: Connection, req: Request, sink: sink File) -> Result<I64, IoError>
     uses { net.io }
 {
-    let outcome = await receive(conn, &sink, req)
+    let outcome = await receive(conn, sink, req)
     await file_close(sink)
     outcome
 }
 
-task fn receive(conn: &Connection, sink: &File, req: Request) -> Result<I64, IoError>
+task fn receive(conn: Connection, sink: File, req: Request) -> Result<I64, IoError>
     uses { net.io }
 {
     await file_write(sink, req.leftover)?
@@ -235,16 +235,16 @@ fn parse(data: Bytes, end: I64) -> HeadParse {
         cursor = brk
     }
 
-    if named(&headers, "transfer-encoding") > 0 {
+    if named(headers, "transfer-encoding") > 0 {
         return HeadParse.Invalid("Transfer-Encoding is not supported; bodies are Content-Length")
     }
-    let lengths = named(&headers, "content-length")
+    let lengths = named(headers, "content-length")
     if lengths > 1 {
         return HeadParse.Invalid("Content-Length appears twice")
     }
     let mut content_length = 0
     if lengths == 1 {
-        match lookup(&headers, "content-length") {
+        match lookup(headers, "content-length") {
             Some(value) => match to_int(value) {
                 Some(n) => {
                     if n < 0 {
@@ -369,29 +369,29 @@ fn lower(data: Bytes, from: I64, stop: I64) -> String {
 
 // Walks are recursive because a cons list is: the depth is bounded by the head cap. These stay
 // local rather than moving to std/list, because they compare an element's *field* — a `Header`'s
-// name — and element-field functions live beside the fields they read. Both only read, so both
-// borrow — the std/list policy, kept by the walks that could not move there.
-fn named(headers: &List<Header>, name: String) -> I64 {
+// name — and element-field functions live beside the fields they read. Both only read, and a
+// read is unmarked — the std/list policy, kept by the walks that could not move there.
+fn named(headers: List<Header>, name: String) -> I64 {
     match headers {
         List.Nil => 0
         List.Cons(h, rest) => {
             if h.name == name {
-                1 + named(&rest, name)
+                1 + named(rest, name)
             } else {
-                named(&rest, name)
+                named(rest, name)
             }
         }
     }
 }
 
-fn lookup(headers: &List<Header>, name: String) -> Option<String> {
+fn lookup(headers: List<Header>, name: String) -> Option<String> {
     match headers {
         List.Nil => None
         List.Cons(h, rest) => {
             if h.name == name {
                 Some(h.value)
             } else {
-                lookup(&rest, name)
+                lookup(rest, name)
             }
         }
     }

@@ -77,11 +77,11 @@ fn main() -> () {
     match head(get) {
         HeadParse.Complete(req, _) => {
             // `header` borrows the request, which is what lets one `req` answer twice.
-            match header(&req, "HOST") {
+            match header(req, "HOST") {
                 Some(value) => print("host: " + value)
                 None => print("no host")
             }
-            match header(&req, "x-tag") {
+            match header(req, "x-tag") {
                 Some(value) => print("x-tag: " + value)
                 None => print("no x-tag")
             }

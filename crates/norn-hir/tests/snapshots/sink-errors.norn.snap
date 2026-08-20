@@ -13,8 +13,8 @@ error: `token` was given away
 error: `conn` has already been moved
   --> sink-errors.norn:32:31
    |
-32 |     let data = await tcp_read(&conn)?
-   |                               ^^^^^ used here
+32 |     let data = await tcp_read(conn)?
+   |                               ^^^^ used here
   --> sink-errors.norn:31:20
    |
 31 |     await shutdown(conn)

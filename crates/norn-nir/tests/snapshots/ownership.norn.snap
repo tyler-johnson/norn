@@ -104,7 +104,7 @@ fn main #1() -> ()
   b11:
     goto b10
 
-inert fn list.length #2(_0/items: &List) -> I64
+inert fn list.length #2(_0/items: List) -> I64
   b0:
     return ()
 
@@ -116,31 +116,31 @@ inert fn list.append #4(_0/items: List, _1/tail: List) -> List
   b0:
     return ()
 
-inert fn list.reverse #5(_0/items: &List) -> List
+inert fn list.reverse #5(_0/items: List) -> List
   b0:
     return ()
 
-inert fn list.walk #6(_0/items: &List, _1/out: List) -> List
+inert fn list.walk #6(_0/items: List, _1/out: List) -> List
   b0:
     return ()
 
-inert fn list.take #7(_0/items: &List, _1/count: I64) -> List
+inert fn list.take #7(_0/items: List, _1/count: I64) -> List
   b0:
     return ()
 
-inert fn list.drop #8(_0/items: &List, _1/count: I64) -> List
+inert fn list.drop #8(_0/items: List, _1/count: I64) -> List
   b0:
     return ()
 
-inert fn list.nth #9(_0/items: &List, _1/index: I64) -> Option<T>
+inert fn list.nth #9(_0/items: List, _1/index: I64) -> Option<T>
   b0:
     return ()
 
-inert fn list.contains #10(_0/items: &List, _1/wanted: T) -> Bool
+inert fn list.contains #10(_0/items: List, _1/wanted: T) -> Bool
   b0:
     return ()
 
-inert fn list.join #11(_0/items: &List, _1/separator: String) -> String
+inert fn list.join #11(_0/items: List, _1/separator: String) -> String
   b0:
     return ()
 
@@ -397,7 +397,7 @@ fn fmt.digit #14(_0/n: I64) -> String
     _1 = "?"
     goto b1
 
-fn Describe.describe for Account #15(_0/value: &Account) -> String
+fn Describe.describe for Account #15(_0/value: Account) -> String
     local _1: String
     local _2: String
     local _3: String
@@ -413,7 +413,7 @@ fn fmt.Display.to_string for I64 #16(_0/value: I64) -> String
     _1 = call fmt.to_string#12(_0/value)
     return _1
 
-fn list.length<I64> #17(_0/items: &List<I64>) -> I64
+fn list.length<I64> #17(_0/items: List<I64>) -> I64
     local _1/rest: List<I64>
     local _2: I64
     local _3: I64
@@ -444,7 +444,7 @@ fn list.length<I64> #17(_0/items: &List<I64>) -> I64
     _1/rest = _0/items.1@Cons
     goto b7
 
-fn list.join<I64> #18(_0/items: &List<I64>, _1/separator: String) -> String
+fn list.join<I64> #18(_0/items: List<I64>, _1/separator: String) -> String
     local _2/head: I64
     local _3/rest: List<I64>
     local _4: String

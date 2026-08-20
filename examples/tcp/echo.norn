@@ -15,8 +15,8 @@ import { to_string } from "std/fmt"
 task fn echo(conn: Connection) -> ()
     uses { net.io }
 {
-    match await tcp_read(&conn) {
-        Ok(text) => match await tcp_write(&conn, text) {
+    match await tcp_read(conn) {
+        Ok(text) => match await tcp_write(conn, text) {
             Ok(_) => ()
             Err(_) => ()
         }
@@ -30,7 +30,7 @@ task fn accept_loop(listener: sink Listener) -> ()
 {
     scope {
         loop {
-            match await tcp_accept(&listener) {
+            match await tcp_accept(listener) {
                 // The connection moves into the child, which is then what owns and closes it. The
                 // scope wrapping the loop is what that child may not outlive.
                 Ok(conn) => spawn echo(conn)
@@ -44,7 +44,7 @@ task fn main() -> Result<(), IoError>
     uses { clock, net.listen, net.io }
 {
     let listener = await tcp_listen(0)?
-    print(to_string(listener_port(&listener)))
+    print(to_string(listener_port(listener)))
     scope {
         spawn accept_loop(listener)
         await sleep(200)

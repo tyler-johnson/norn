@@ -90,7 +90,7 @@ fn describe #0(_0/shape: Shape) -> String
     _16 = _0/shape.1@Circle eq 0
     branch _16 ? b19 : b7
   b22:
-    _17 = call fmt.to_string#6(_5/radius)
+    _17 = call fmt.to_string#4(_5/radius)
     _18 = "circle of radius " concat _17
     _19 = _18 concat " at "
     _20 = call show#2(_4/centre)
@@ -174,127 +174,97 @@ fn show #2(_0/point: Point) -> String
     local _5: String
     local _6: String
   b0:
-    _1 = call fmt.to_string#6(_0/point.0)
+    _1 = call fmt.to_string#4(_0/point.0)
     _2 = "(" concat _1
     _3 = _2 concat ", "
-    _4 = call fmt.to_string#6(_0/point.1)
+    _4 = call fmt.to_string#4(_0/point.1)
     _5 = _3 concat _4
     _6 = _5 concat ")"
     return _6
 
-fn origin #3() -> Point
-    local _0: Point
-  b0:
-    _0 = Point(0, 0)
-    return _0
-
-fn corner #4() -> Point
-    local _0: Point
-  b0:
-    _0 = Point(3, 4)
-    return _0
-
-fn main #5() -> ()
-    local _0: Shape
-    local _1: String
-    local _2: ()
+fn main #3() -> ()
+    local _0/origin: Point
+    local _1/corner: Point
+    local _2: Point
     local _3: Point
     local _4: Shape
     local _5: String
     local _6: ()
-    local _7: Point
-    local _8: Shape
-    local _9: String
-    local _10: ()
-    local _11: Point
-    local _12: Point
+    local _7: Shape
+    local _8: String
+    local _9: ()
+    local _10: Shape
+    local _11: String
+    local _12: ()
     local _13: Shape
     local _14: String
     local _15: ()
-    local _16: Point
-    local _17: Shape
-    local _18: String
-    local _19: ()
-    local _20: Point
-    local _21: Shape
-    local _22: String
-    local _23: ()
-    local _24: Point
+    local _16: Shape
+    local _17: String
+    local _18: ()
+    local _19: Shape
+    local _20: String
+    local _21: ()
+    local _22: Shape
+    local _23: String
+    local _24: ()
     local _25: Shape
     local _26: String
     local _27: ()
-    local _28: Point
-    local _29: Shape
-    local _30: String
-    local _31: ()
-    local _32: Point
-    local _33: Shape
-    local _34: String
-    local _35: ()
-    local _36: Point
+    local _28: Shape
+    local _29: String
+    local _30: ()
+    local _31: Shape
+    local _32: String
+    local _33: ()
+    local _34: Shape
+    local _35: String
+    local _36: ()
     local _37: Shape
-    local _38: String
-    local _39: ()
-    local _40: Point
-    local _41: Point
-    local _42: Shape
-    local _43: String
-    local _44: ()
-    local _45: Point
-    local _46: Shape
-    local _47: ()
+    local _38: ()
   b0:
-    _0 = Shape.Empty()
-    _1 = call describe#0(_0)
-    _2 = builtin print(_1)
-    _3 = call origin#3()
-    _4 = Shape.Dot(_3)
+    _2 = Point(0, 0)
+    _0/origin = _2
+    _3 = Point(3, 4)
+    _1/corner = _3
+    _4 = Shape.Empty()
     _5 = call describe#0(_4)
     _6 = builtin print(_5)
-    _7 = call corner#4()
-    _8 = Shape.Dot(_7)
-    _9 = call describe#0(_8)
-    _10 = builtin print(_9)
-    _11 = call origin#3()
-    _12 = call corner#4()
-    _13 = Shape.Segment(_11, _12)
+    _7 = Shape.Dot(_0/origin)
+    _8 = call describe#0(_7)
+    _9 = builtin print(_8)
+    _10 = Shape.Dot(_1/corner)
+    _11 = call describe#0(_10)
+    _12 = builtin print(_11)
+    _13 = Shape.Segment(_0/origin, _1/corner)
     _14 = call describe#0(_13)
     _15 = builtin print(_14)
-    _16 = call corner#4()
-    _17 = Shape.Circle(_16, 0)
-    _18 = call describe#0(_17)
-    _19 = builtin print(_18)
-    _20 = call origin#3()
-    _21 = Shape.Circle(_20, 12)
-    _22 = call describe#0(_21)
-    _23 = builtin print(_22)
-    _24 = call origin#3()
-    _25 = Shape.Circle(_24, 500)
+    _16 = Shape.Circle(_1/corner, 0)
+    _17 = call describe#0(_16)
+    _18 = builtin print(_17)
+    _19 = Shape.Circle(_0/origin, 12)
+    _20 = call describe#0(_19)
+    _21 = builtin print(_20)
+    _22 = Shape.Circle(_0/origin, 500)
+    _23 = call size#1(_22)
+    _24 = builtin print(_23)
+    _25 = Shape.Circle(_0/origin, 50)
     _26 = call size#1(_25)
     _27 = builtin print(_26)
-    _28 = call origin#3()
-    _29 = Shape.Circle(_28, 50)
-    _30 = call size#1(_29)
-    _31 = builtin print(_30)
-    _32 = call origin#3()
-    _33 = Shape.Circle(_32, 5)
-    _34 = call size#1(_33)
-    _35 = builtin print(_34)
-    _36 = call corner#4()
-    _37 = Shape.Dot(_36)
-    _38 = call size#1(_37)
-    _39 = builtin print(_38)
-    _40 = call origin#3()
-    _41 = call corner#4()
-    _42 = Shape.Segment(_40, _41)
-    _43 = call size#1(_42)
-    _44 = builtin print(_43)
-    _45 = call corner#4()
-    _46 = Shape.Circle(_45, 7)
-    _47 = builtin print(_46)
-    return _47
+    _28 = Shape.Circle(_0/origin, 5)
+    _29 = call size#1(_28)
+    _30 = builtin print(_29)
+    _31 = Shape.Dot(_1/corner)
+    _32 = call size#1(_31)
+    _33 = builtin print(_32)
+    _34 = Shape.Segment(_0/origin, _1/corner)
+    _35 = call size#1(_34)
+    _36 = builtin print(_35)
+    _37 = Shape.Circle(_1/corner, 7)
+    _38 = builtin print(_37)
+    return _38
 
-fn fmt.to_string #6(_0/n: I64) -> String
+fn fmt.to_string #4(_0/n: I64) -> String
     local _1/rest: I64
     local _2/out: String
     local _3: I64
@@ -323,7 +293,7 @@ fn fmt.to_string #6(_0/n: I64) -> String
   b3:
     _1/rest = _3
     _6 = _1/rest rem.i 10
-    _7 = call fmt.digit#8(_6)
+    _7 = call fmt.digit#6(_6)
     _2/out = _7
     goto b4
   b4:
@@ -336,7 +306,7 @@ fn fmt.to_string #6(_0/n: I64) -> String
     _9 = _1/rest div.i 10
     _1/rest = _9
     _10 = _1/rest rem.i 10
-    _11 = call fmt.digit#8(_10)
+    _11 = call fmt.digit#6(_10)
     _12 = _11 concat _2/out
     _2/out = _12
     goto b4
@@ -350,7 +320,7 @@ fn fmt.to_string #6(_0/n: I64) -> String
   b9:
     return _13
 
-fn fmt.to_int #7(_0/s: String) -> Option<I64>
+fn fmt.to_int #5(_0/s: String) -> Option<I64>
     local _1/data: Bytes
     local _2/len: I64
     local _3/i: I64
@@ -465,7 +435,7 @@ fn fmt.to_int #7(_0/s: String) -> Option<I64>
   b20:
     return _29
 
-fn fmt.digit #8(_0/n: I64) -> String
+fn fmt.digit #6(_0/n: I64) -> String
     local _1: String
     local _2: Bool
     local _3: Bool
@@ -547,10 +517,10 @@ fn fmt.digit #8(_0/n: I64) -> String
     _1 = "?"
     goto b1
 
-fn fmt.Display.to_string for I64 #9(_0/value: I64) -> String
+fn fmt.Display.to_string for I64 #7(_0/value: I64) -> String
     local _1: String
   b0:
-    _1 = call fmt.to_string#6(_0/value)
+    _1 = call fmt.to_string#4(_0/value)
     return _1
 
 === output ===
