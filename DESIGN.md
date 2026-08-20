@@ -599,7 +599,7 @@ let payload = packet.slice(32, packet.len)
 
 There is no general-purpose `Shared<Mutable<T>>`. Shared mutation requires a reactor, an explicitly atomic type, or an opt-in lock from a low-level concurrency package.
 
-> **`Bytes` arrived in M6; `Shared<T>` still waits.** Sharing is an answer to the cost of copying, and v0's ordinary values are copied freely by an engine that clones — there is nothing yet that could tell a share from a copy. `Flow<Bytes>` gave `Bytes` work to do, so it exists, but its slices *copy*: the zero-copy `slice` sketched above, like `Shared<T>` itself, arrives with the backend that gives values layout, which is the first thing that makes the difference measurable (`BOOTSTRAP.md` §8 item 6). Affine ownership of operating-system resources, described above, is implemented in full.
+> **Both halves of this section arrived with `BOOTSTRAP.md` §8 item 6b (2026-08-19).** The zero-copy `slice` sketched above is spelled `bytes_slice(packet, 0, 32)` in v0 and is O(1) exactly as promised — natively; the reference interpreter copies, unobservably, and the differential oracle holds the two to the same bytes. `shared(x)` builds a `Shared<T>` today: immutable, refcounted, readable through field access, copied back out with `unshare`, refused an affine payload, and legal across reactor boundaries. What v0 does not yet have is the payoff sharing exists for — ordinary values still copy freely until §8 item 6c makes them move — and the non-atomic-upgraded-to-atomic representation refinement waits with the multithreaded runtime. Affine ownership of operating-system resources, described above, is implemented in full.
 
 
 ### Reactive graphs: reactor-local arenas

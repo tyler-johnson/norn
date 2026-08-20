@@ -473,8 +473,8 @@ Ordered roughly by when it becomes worth doing, not by importance:
 6. **Move checking for ordinary values, and `Shared<T>`.** Both wait on a typed value
    representation — and the representation landed first, as its own wave: **6a, typed NIR and a
    typed backend (2026-08-19), zero surface change.** The item decomposes as 6a (landed), 6b
-   (`Shared<T>`, `Bytes` views, `+` on `Bytes`), and 6c (ordinary-value moves, taking item 5's
-   read half with them).
+   (landed — `Shared<T>`, `Bytes` views, `+` on `Bytes`), and 6c (ordinary-value moves, taking
+   item 5's read half with them).
 
    What 6a did. NIR carries `hir::Ty` end to end — `Function.tys` in lockstep with `locals`, plus
    `ret` and an `inert` flag for the generics drain's neutered defs; typed layouts; typed reactor
@@ -506,10 +506,36 @@ Ordered roughly by when it becomes worth doing, not by importance:
    writes) runs in ~0.96s under M5's dynamic backend and ~0.073s under the typed one — 13× —
    with identical output.
 
-   Still waiting here, now 6b's: zero-copy `Bytes` views — M6's `bytes_slice` copies, and so does
-   the proto-std gate's `bytes_concat`, because a clone-everything representation cannot make
-   sharing observable — and `+` on `Bytes`, which is only worth having once concatenation has a
-   cost model to answer to. The model now exists. 6c is the move checking itself.
+   **6b landed 2026-08-19: `Shared<T>`, `Bytes` views, and `+` on `Bytes`.** The byte view is the
+   backend's alone — a shared buffer plus the window this value sees of it, slice-of-slice
+   composing offsets, only `+` allocating — while the reference interpreter keeps its copying
+   `Rc<[u8]>` deliberately: the divergence is unobservable, every trap interpolating computed
+   numbers (the view's length, never the buffer's — a new differential case slices a slice out of
+   range to pin exactly that), so the oracle referees a genuine representation divergence for
+   bytes as 6a made it do for aggregates. `+` on Bytes is the old `BinOp::Concat` type-dispatched,
+   and `bytes_concat` dissolved by the bytes_text migration — the second builtin gone, the first
+   into an operator. The cost is stated where it lives: concatenation allocates a fresh buffer,
+   permanently. The measurement: a 64 KiB buffer sliced 400,000 times runs ~1.22s under copying
+   slices and ~0.009s under views — ~136×, identical output.
+
+   `Shared<T>` is a compiler-owned structural generic like Option — `Ty::Shared`, spelled
+   `Shared<T>`, unwritable as a declaration — built by the pure builtin `shared(x)` and copied
+   back out by `unshare(s)`, one layer per call. Field access reads through every Shared layer
+   (a checker peel restated by lowering as `Proj::Deref`, printed `.*`), writes through one are
+   refused, and `match` on a shared enum spells `match unshare(xs)` until 6c's borrows earn
+   something better. Sharing is observationally invisible: rendering delegates to the payload at
+   every depth, top-level raw-text rule included, and `==` stays refused. The affine defense is
+   three-fold — the creation site, the `Shared<File>` spelling, and a mono-time re-check closing
+   the `fn wrap<T>(x: T) -> Shared<T>` leak, the one re-check in a walk that is otherwise a
+   substitution. Natively a Shared is `Rc<{payload}>`, unboxed in field position (no
+   `Rc<Rc<T>>`), with one boundary `Value` variant per instantiation wrapped and unwrapped by
+   static type at the same nine seams — `send(input, shared(cfg))` crosses reactors with no
+   per-seam code. examples/run/shared.norn and examples/reactors/board.norn are the executable
+   spec. The payoff is deliberately structural: 6a already made copies memcpy-cheap, so a
+   Shared's win today is refcount traffic, and its real work begins when 6c makes ordinary
+   values move.
+
+   Still waiting here: 6c — the move checking itself, taking item 5's read half with it.
 7. **Generics and traits — landed.** The gate on the general standard library, shipped as one
    wave (2026-08-19) because each half is the other's first consumer: bounds need traits to
    name, and a trait's worth shows first on a type parameter. Item 12 records what "collections"
@@ -696,8 +722,10 @@ Ordered roughly by when it becomes worth doing, not by importance:
     §11 wants the incremental kind, which is a propagation property and not a second type. `List<T>`
     is the cons list's name — `DESIGN.md`'s core semantics already writes `List<EffectRequest>`,
     so the name was load-bearing before the library existed, and std/list now spells it — which
-    leaves the contiguous one's spelling the open question. That half additionally waits on item 6: a clone-everything representation
-    cannot price a buffer honestly, the same reason zero-copy `Bytes` slices wait there. Whatever
+    leaves the contiguous one's spelling the open question. That half's pricing gate has lifted —
+    item 6b's typed views price a buffer honestly, the same wave that made `Bytes` slices
+    zero-copy — so what the contiguous sequence waits on now is its mutation story:
+    `push(&mut buf, x)` wants item 5's write half, which follows 6c. Whatever
     lands must make finiteness structural, because `for` earns its way into a turn only by being
     bounded by the data (`DESIGN.md` §14).
     What never dissolves is a small intrinsic layer at the syscall boundary, which is also where
