@@ -638,10 +638,11 @@ impl Checker {
             return self.error_expr(span);
         }
 
-        // Field access strips every `Shared` layer of the base — the same rule lowering applies
-        // when it pushes deref projections. The base keeps its `Shared` type; that preserved
-        // truth is what lowering reads.
-        let mut base_ty = &base.ty;
+        // Field access reads through a borrow — `&T` and `T` are the same values — and then
+        // strips every `Shared` layer of the base, the same rule lowering applies when it pushes
+        // deref projections. A `Ref` is only ever outermost, so one peel is enough; the base
+        // keeps its own type, and the borrow is erased before lowering reads it.
+        let mut base_ty = base.ty.owned();
         while let Ty::Shared(inner) = base_ty {
             base_ty = inner;
         }

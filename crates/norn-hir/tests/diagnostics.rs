@@ -146,6 +146,102 @@ task fn main(session: Session) -> ()
     );
 }
 
+/// The read half of borrowing (BOOTSTRAP §8 item 6c): field access and `match` reach through a
+/// `&`, and what a pattern binds is an owned copy. Pinned inline because the corpus that dogfoods
+/// these lands with the corpus migration, and the rules should hold before it does.
+#[test]
+fn a_borrow_reads_without_taking() {
+    // A borrowed scrutinee with payload bindings: the pattern types against the pointee, and the
+    // bindings are owned copies.
+    accepted(
+        "a match reaches through a borrowed parameter",
+        "\
+enum Verdict {
+    Pass
+    Fail(String)
+}
+
+fn describe(verdict: &Verdict) -> String {
+    match verdict {
+        Verdict.Pass => \"pass\"
+        Verdict.Fail(reason) => reason
+    }
+}
+",
+    );
+
+    // `match &x` on an owned local reads it, so the name is still there afterwards.
+    accepted(
+        "a match through `&` leaves the value owned",
+        "\
+enum Verdict {
+    Pass
+    Fail(String)
+}
+
+fn main() -> () {
+    let verdict = Verdict.Fail(\"missing\")
+    match &verdict {
+        Verdict.Pass => print(\"pass\")
+        Verdict.Fail(reason) => print(reason)
+    }
+    match verdict {
+        Verdict.Pass => print(\"pass\")
+        Verdict.Fail(reason) => print(reason)
+    }
+}
+",
+    );
+
+    // One top-level peel is provably enough for nested patterns — a `Ty::Ref` is unspellable in
+    // any field — so exhaustiveness still resolves at OPTION under the borrow.
+    accepted(
+        "a nested pattern under a borrow is exhaustive at the pointee",
+        "\
+enum List<T> {
+    Nil
+    Cons(T, List<T>)
+}
+
+fn first(maybe: &Option<List<I64>>) -> I64 {
+    match maybe {
+        Some(List.Cons(head, _)) => head
+        Some(List.Nil) => 0
+        None => -1
+    }
+}
+",
+    );
+
+    // A scalar behind a borrow keeps the scalar's rule: a catch-all arm is what completes it.
+    accepted(
+        "a match on a borrowed scalar keeps the catch-all rule",
+        "\
+fn describe(n: &I64) -> String {
+    match n {
+        0 => \"zero\"
+        _ => \"nonzero\"
+    }
+}
+",
+    );
+
+    // Field access reads through a borrowed struct.
+    accepted(
+        "a field read reaches through a borrowed parameter",
+        "\
+struct Config {
+    host: String
+    port: I64
+}
+
+fn port(config: &Config) -> I64 {
+    config.port
+}
+",
+    );
+}
+
 /// Generic *types* land ahead of the corpus that dogfoods them — std/list and the run example
 /// arrive later in the item 7 wave — so the acceptance side is pinned here: instantiation by
 /// annotation, by expectation, by field inference, through patterns, and inside reactor state.

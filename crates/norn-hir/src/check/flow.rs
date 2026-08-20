@@ -216,7 +216,28 @@ impl Checker {
         span: Span,
     ) -> Expr {
         let scrutinee = self.check_expr(scrutinee, None);
-        let scrutinee_ty = scrutinee.ty.clone();
+        // A `match` through a borrow reads the value and binds copies, so the pointee may not
+        // reach a resource: a resource has one owner, and a binding here would be a second. The
+        // test is the recursive `affine`, not the shallow move set — `&Option<Connection>` must
+        // trip it just as `&Connection` does.
+        if scrutinee.ty.is_ref() && self.program.affine(scrutinee.ty.owned()) {
+            let name = self.program.ty_name(scrutinee.ty.owned());
+            self.push(
+                Diagnostic::new(
+                    scrutinee.span,
+                    format!("a borrowed `{name}` cannot be taken apart"),
+                )
+                .label("a `match` through `&` binds copies")
+                .note(format!(
+                    "a `{name}` reaches a resource, and a resource has one owner — a binding here would be a second"
+                ))
+                .note("match the owned value instead: drop the `&`, or take the parameter by value"),
+            );
+            return self.error_expr(span);
+        }
+        // The pattern, the bindings, and exhaustiveness are all questions about the pointee:
+        // `&T` and `T` are the same values, and what a pattern binds is an owned copy.
+        let scrutinee_ty = scrutinee.ty.owned().clone();
         if arms.is_empty() {
             self.error(span, "a `match` needs at least one arm");
             return Expr {
