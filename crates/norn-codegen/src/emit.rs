@@ -1246,6 +1246,10 @@ impl Emitter<'_> {
                     ctx.cx_stmt("latest")
                 )
             }
+            // A shared value is one `Rc`; unsharing clones the payload back out — Rc bumps and a
+            // memcpy, the ordinary pre-move copy.
+            Builtin::Shared => format!("Rc::new({})", arg(0)),
+            Builtin::Unshare => format!("(*({})).clone()", arg(0)),
             Builtin::Bytes => format!("Bytes::from_slice(({}).as_bytes())", arg(0)),
             Builtin::BytesLen => format!("(({}).len() as i64)", arg(0)),
             Builtin::BytesSlice => {

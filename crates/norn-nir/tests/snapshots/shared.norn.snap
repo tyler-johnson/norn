@@ -1,0 +1,491 @@
+=== nir ===
+struct Config #0 (host: String, port: I64)
+struct App #1 (name: String, cfg: Shared<Config>)
+enum Option #0 (None, Some(?))
+enum Result #1 (Ok(?), Err(?))
+enum IoError #2 (NotFound, Denied, InUse, Refused, Closed, Other(String))
+enum List #3 (Nil, Cons(T, List))
+enum List<Shared<I64>> #4 (Nil, Cons(Shared<I64>, List<Shared<I64>>))
+enum List<I64> #5 (Nil, Cons(I64, List<I64>))
+
+inert fn peek #0(_0/x: Shared<T>) -> Shared<T>
+  b0:
+    return ()
+
+fn total #1(_0/xs: List<Shared<I64>>, _1/acc: I64) -> I64
+    local _2/head: Shared<I64>
+    local _3/tail: List<Shared<I64>>
+    local _4: I64
+    local _5: I64
+    local _6: I64
+    local _7: I64
+  b0:
+    goto b2
+  b1:
+    return _4
+  b2:
+    switch tag _0/xs [1 => b6] else b3
+  b3:
+    switch tag _0/xs [0 => b9] else b4
+  b4:
+    trap "no match arm applied"
+  b5:
+    _5 = builtin unshare(_2/head)
+    _6 = _1/acc add.i _5
+    _7 = call total#1(_3/tail, _6)
+    _4 = _7
+    goto b1
+  b6:
+    _2/head = _0/xs.0@Cons
+    goto b7
+  b7:
+    _3/tail = _0/xs.1@Cons
+    goto b5
+  b8:
+    _4 = _1/acc
+    goto b1
+  b9:
+    goto b8
+
+fn main #2() -> ()
+    local _0/cfg: Shared<Config>
+    local _1/app: App
+    local _2/doubled: Shared<Shared<Config>>
+    local _3/inner: Shared<Config>
+    local _4/peeked: Shared<I64>
+    local _5/xs: List<Shared<I64>>
+    local _6/held: Shared<List<I64>>
+    local _7/head: I64
+    local _8: Config
+    local _9: Shared<Config>
+    local _10: ()
+    local _11: ()
+    local _12: App
+    local _13: ()
+    local _14: Config
+    local _15: Shared<Config>
+    local _16: ()
+    local _17: Shared<String>
+    local _18: ()
+    local _19: Shared<I64>
+    local _20: ()
+    local _21: ()
+    local _22: Config
+    local _23: Shared<Config>
+    local _24: Shared<Shared<Config>>
+    local _25: ()
+    local _26: Shared<Config>
+    local _27: ()
+    local _28: Shared<I64>
+    local _29: Shared<I64>
+    local _30: I64
+    local _31: ()
+    local _32: Shared<I64>
+    local _33: Shared<I64>
+    local _34: Shared<I64>
+    local _35: List<Shared<I64>>
+    local _36: List<Shared<I64>>
+    local _37: List<Shared<I64>>
+    local _38: List<Shared<I64>>
+    local _39: I64
+    local _40: ()
+    local _41: List<I64>
+    local _42: List<I64>
+    local _43: Shared<List<I64>>
+    local _44: ()
+    local _45: List<I64>
+    local _46: ()
+    local _47: ()
+  b0:
+    _8 = Config("localhost", 8080)
+    _9 = builtin shared(_8)
+    _0/cfg = _9
+    _10 = builtin print(_0/cfg.*.0)
+    _11 = builtin print(_0/cfg.*.1)
+    _12 = App("norn", _0/cfg)
+    _1/app = _12
+    _13 = builtin print(_1/app.1.*.0)
+    _14 = Config("elsewhere", 9090)
+    _15 = builtin shared(_14)
+    _1/app.1 = _15
+    _16 = builtin print(_1/app.1.*.1)
+    _17 = builtin shared("hi")
+    _18 = builtin print(_17)
+    _19 = builtin shared(3)
+    _20 = builtin print(_19)
+    _21 = builtin print(_1/app)
+    _22 = Config("deep", 1)
+    _23 = builtin shared(_22)
+    _24 = builtin shared(_23)
+    _2/doubled = _24
+    _25 = builtin print(_2/doubled.*.*.0)
+    _26 = builtin unshare(_2/doubled)
+    _3/inner = _26
+    _27 = builtin print(_3/inner.*.1)
+    _28 = builtin shared(42)
+    _29 = call peek<I64>#17(_28)
+    _4/peeked = _29
+    _30 = builtin unshare(_4/peeked)
+    _31 = builtin print(_30)
+    _32 = builtin shared(1)
+    _33 = builtin shared(2)
+    _34 = builtin shared(3)
+    _35 = List<Shared<I64>>.Nil()
+    _36 = List<Shared<I64>>.Cons(_34, _35)
+    _37 = List<Shared<I64>>.Cons(_33, _36)
+    _38 = List<Shared<I64>>.Cons(_32, _37)
+    _5/xs = _38
+    _39 = call total#1(_5/xs, 0)
+    _40 = builtin print(_39)
+    _41 = List<I64>.Nil()
+    _42 = List<I64>.Cons(10, _41)
+    _43 = builtin shared(_42)
+    _6/held = _43
+    _45 = builtin unshare(_6/held)
+    goto b2
+  b1:
+    return _44
+  b2:
+    switch tag _45 [1 => b6] else b3
+  b3:
+    switch tag _45 [0 => b9] else b4
+  b4:
+    trap "no match arm applied"
+  b5:
+    _46 = builtin print(_7/head)
+    _44 = _46
+    goto b1
+  b6:
+    _7/head = _45.0@Cons
+    goto b7
+  b7:
+    goto b5
+  b8:
+    _47 = builtin print(0)
+    _44 = _47
+    goto b1
+  b9:
+    goto b8
+
+inert fn list.length #3(_0/items: List) -> I64
+  b0:
+    return ()
+
+inert fn list.empty #4() -> List
+  b0:
+    return ()
+
+inert fn list.append #5(_0/items: List, _1/tail: List) -> List
+  b0:
+    return ()
+
+inert fn list.reverse #6(_0/items: List) -> List
+  b0:
+    return ()
+
+inert fn list.walk #7(_0/items: List, _1/out: List) -> List
+  b0:
+    return ()
+
+inert fn list.take #8(_0/items: List, _1/count: I64) -> List
+  b0:
+    return ()
+
+inert fn list.drop #9(_0/items: List, _1/count: I64) -> List
+  b0:
+    return ()
+
+inert fn list.nth #10(_0/items: List, _1/index: I64) -> Option<T>
+  b0:
+    return ()
+
+inert fn list.contains #11(_0/items: List, _1/wanted: T) -> Bool
+  b0:
+    return ()
+
+inert fn list.join #12(_0/items: List, _1/separator: String) -> String
+  b0:
+    return ()
+
+fn fmt.to_string #13(_0/n: I64) -> String
+    local _1/rest: I64
+    local _2/out: String
+    local _3: I64
+    local _4: Bool
+    local _5: I64
+    local _6: I64
+    local _7: String
+    local _8: Bool
+    local _9: I64
+    local _10: I64
+    local _11: String
+    local _12: String
+    local _13: String
+    local _14: Bool
+    local _15: String
+  b0:
+    _4 = _0/n lt 0
+    branch _4 ? b1 : b2
+  b1:
+    _5 = 0 sub.i _0/n
+    _3 = _5
+    goto b3
+  b2:
+    _3 = _0/n
+    goto b3
+  b3:
+    _1/rest = _3
+    _6 = _1/rest rem.i 10
+    _7 = call fmt.digit#15(_6)
+    _2/out = _7
+    goto b4
+  b4:
+    _8 = _1/rest gt 9
+    branch _8 ? b6 : b5
+  b5:
+    _14 = _0/n lt 0
+    branch _14 ? b7 : b8
+  b6:
+    _9 = _1/rest div.i 10
+    _1/rest = _9
+    _10 = _1/rest rem.i 10
+    _11 = call fmt.digit#15(_10)
+    _12 = _11 concat _2/out
+    _2/out = _12
+    goto b4
+  b7:
+    _15 = "-" concat _2/out
+    _13 = _15
+    goto b9
+  b8:
+    _13 = _2/out
+    goto b9
+  b9:
+    return _13
+
+fn fmt.to_int #14(_0/s: String) -> Option<I64>
+    local _1/data: Bytes
+    local _2/len: I64
+    local _3/i: I64
+    local _4/negative: Bool
+    local _5/value: I64
+    local _6/b: I64
+    local _7: Bytes
+    local _8: I64
+    local _9: ()
+    local _10: Bool
+    local _11: Option<I64>
+    local _12: ()
+    local _13: I64
+    local _14: Bool
+    local _15: ()
+    local _16: Bool
+    local _17: Option<I64>
+    local _18: Bool
+    local _19: I64
+    local _20: ()
+    local _21: Bool
+    local _22: Bool
+    local _23: Bool
+    local _24: Option<I64>
+    local _25: I64
+    local _26: I64
+    local _27: I64
+    local _28: I64
+    local _29: Option<I64>
+    local _30: I64
+    local _31: Option<I64>
+    local _32: Option<I64>
+  b0:
+    _7 = builtin bytes(_0/s)
+    _1/data = _7
+    _8 = builtin bytes_len(_1/data)
+    _2/len = _8
+    _3/i = 0
+    _4/negative = false
+    _10 = _2/len eq 0
+    branch _10 ? b1 : b2
+  b1:
+    _11 = Option.None()
+    return _11
+  b2:
+    _9 = ()
+    goto b3
+  b3:
+    _13 = builtin bytes_at(_1/data, 0)
+    _14 = _13 eq 45
+    branch _14 ? b4 : b5
+  b4:
+    _4/negative = true
+    _3/i = 1
+    _12 = ()
+    goto b6
+  b5:
+    _12 = ()
+    goto b6
+  b6:
+    _16 = _3/i eq _2/len
+    branch _16 ? b7 : b8
+  b7:
+    _17 = Option.None()
+    return _17
+  b8:
+    _15 = ()
+    goto b9
+  b9:
+    _5/value = 0
+    goto b10
+  b10:
+    _18 = _3/i lt _2/len
+    branch _18 ? b12 : b11
+  b11:
+    branch _4/negative ? b18 : b19
+  b12:
+    _19 = builtin bytes_at(_1/data, _3/i)
+    _6/b = _19
+    _22 = _6/b lt 48
+    _21 = _22
+    branch _21 ? b14 : b13
+  b13:
+    _23 = _6/b gt 57
+    _21 = _23
+    goto b14
+  b14:
+    branch _21 ? b15 : b16
+  b15:
+    _24 = Option.None()
+    return _24
+  b16:
+    _20 = ()
+    goto b17
+  b17:
+    _25 = _5/value mul.i 10
+    _26 = _6/b sub.i 48
+    _27 = _25 add.i _26
+    _5/value = _27
+    _28 = _3/i add.i 1
+    _3/i = _28
+    goto b10
+  b18:
+    _30 = 0 sub.i _5/value
+    _31 = Option.Some(_30)
+    _29 = _31
+    goto b20
+  b19:
+    _32 = Option.Some(_5/value)
+    _29 = _32
+    goto b20
+  b20:
+    return _29
+
+fn fmt.digit #15(_0/n: I64) -> String
+    local _1: String
+    local _2: Bool
+    local _3: Bool
+    local _4: Bool
+    local _5: Bool
+    local _6: Bool
+    local _7: Bool
+    local _8: Bool
+    local _9: Bool
+    local _10: Bool
+    local _11: Bool
+  b0:
+    goto b2
+  b1:
+    return _1
+  b2:
+    _2 = _0/n eq 0
+    branch _2 ? b13 : b3
+  b3:
+    _3 = _0/n eq 1
+    branch _3 ? b14 : b4
+  b4:
+    _4 = _0/n eq 2
+    branch _4 ? b15 : b5
+  b5:
+    _5 = _0/n eq 3
+    branch _5 ? b16 : b6
+  b6:
+    _6 = _0/n eq 4
+    branch _6 ? b17 : b7
+  b7:
+    _7 = _0/n eq 5
+    branch _7 ? b18 : b8
+  b8:
+    _8 = _0/n eq 6
+    branch _8 ? b19 : b9
+  b9:
+    _9 = _0/n eq 7
+    branch _9 ? b20 : b10
+  b10:
+    _10 = _0/n eq 8
+    branch _10 ? b21 : b11
+  b11:
+    _11 = _0/n eq 9
+    branch _11 ? b22 : b12
+  b12:
+    goto b23
+  b13:
+    _1 = "0"
+    goto b1
+  b14:
+    _1 = "1"
+    goto b1
+  b15:
+    _1 = "2"
+    goto b1
+  b16:
+    _1 = "3"
+    goto b1
+  b17:
+    _1 = "4"
+    goto b1
+  b18:
+    _1 = "5"
+    goto b1
+  b19:
+    _1 = "6"
+    goto b1
+  b20:
+    _1 = "7"
+    goto b1
+  b21:
+    _1 = "8"
+    goto b1
+  b22:
+    _1 = "9"
+    goto b1
+  b23:
+    _1 = "?"
+    goto b1
+
+fn fmt.Display.to_string for I64 #16(_0/value: I64) -> String
+    local _1: String
+  b0:
+    _1 = call fmt.to_string#13(_0/value)
+    return _1
+
+fn peek<I64> #17(_0/x: Shared<I64>) -> Shared<I64>
+  b0:
+    return _0/x
+
+inert fn fmt.Display.to_string for T #18(_0: ?) -> String
+  b0:
+    return ()
+
+=== output ===
+localhost
+8080
+localhost
+9090
+hi
+3
+App(name: "norn", cfg: Config(host: "elsewhere", port: 9090))
+deep
+1
+42
+6
+10
+=== result ===
+()

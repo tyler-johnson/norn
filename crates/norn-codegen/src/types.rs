@@ -169,6 +169,9 @@ impl<'p> Registry<'p> {
             Ty::Enum(id) => format!("e{}", id.index()),
             Ty::Option(_) | Ty::Result(..) => format!("e{}", self.synthetic_id(ty)),
             Ty::Task(_) => "task".into(),
+            // Payload-distinguishing, unlike `task`: the renderer delegates to the payload's, so
+            // every instantiation needs its own key. Composes for nesting (`shared_shared_i64`).
+            Ty::Shared(inner) => format!("shared_{}", self.key(inner)),
             Ty::Resource(Resource::Listener) => "res_listener".into(),
             Ty::Resource(Resource::Connection) => "res_connection".into(),
             Ty::Resource(Resource::File) => "res_file".into(),
@@ -195,6 +198,9 @@ impl<'p> Registry<'p> {
             Ty::Enum(id) => format!("E{}", id.index()),
             Ty::Option(_) | Ty::Result(..) => format!("E{}", self.synthetic_id(ty)),
             Ty::Task(_) => "Rc<TaskVal>".into(),
+            // Already a pointer, so `boxed()` excludes it: a `Shared` field stores this same
+            // `Rc` inline rather than double-boxing.
+            Ty::Shared(inner) => format!("Rc<{}>", self.repr(inner)),
             // The kind is part of the static type, so the value is the id alone.
             Ty::Resource(_) => "ResourceId".into(),
             Ty::Reactor(_) => "ReactorId".into(),
@@ -371,6 +377,14 @@ impl<'p> Registry<'p> {
         for name in self.aggregate_names() {
             let _ = writeln!(out, "    {name}({name}),");
         }
+        // One variant per interned `Shared` instantiation — a shared value crosses the same
+        // seams any value does (`send(input, shared(cfg))`), and the payload type differs per
+        // instantiation. `keys` is push-ordered by the deterministic walk.
+        for (key, ty) in &self.keys {
+            if matches!(ty, Ty::Shared(_)) {
+                let _ = writeln!(out, "    {}({}),", camel(key), self.repr(ty));
+            }
+        }
         let _ = writeln!(out, "}}");
         let _ = writeln!(out);
 
@@ -449,6 +463,18 @@ impl<'p> Registry<'p> {
                 "v",
             );
         }
+        for (key, ty) in &self.keys {
+            if matches!(ty, Ty::Shared(_)) {
+                let name = camel(key);
+                pair(
+                    key,
+                    &self.repr(ty),
+                    &format!("Value::{name}(v)"),
+                    &format!("Value::{name}(v)"),
+                    "v",
+                );
+            }
+        }
     }
 
     fn enum_decl(&self, out: &mut String, id: usize, variants: &[VariantLayout]) {
@@ -483,9 +509,15 @@ impl<'p> Registry<'p> {
     fn renderer(&self, out: &mut String, key: &str, ty: &Ty) {
         let repr = self.repr(ty);
         // Only a top-level string renders as its own raw text; everything else renders nested.
+        // A `Shared` is transparent at both depths by delegation to the payload's renderer —
+        // which is what carries the raw-text rule through `print(shared("hi"))`.
         if matches!(ty, Ty::Str) {
             let _ = writeln!(out, "fn render_top_str(v: &Rc<str>) -> String {{");
             let _ = writeln!(out, "    v.to_string()");
+            let _ = writeln!(out, "}}");
+        } else if let Ty::Shared(inner) = ty {
+            let _ = writeln!(out, "fn render_top_{key}(v: &{repr}) -> String {{");
+            let _ = writeln!(out, "    render_top_{}(&**v)", self.key(inner));
             let _ = writeln!(out, "}}");
         } else {
             let _ = writeln!(out, "fn render_top_{key}(v: &{repr}) -> String {{");
@@ -536,6 +568,9 @@ impl<'p> Registry<'p> {
             // Option and Result print unqualified.
             Ty::Option(_) | Ty::Result(..) => {
                 self.variants_renderer(out, &self.repr(ty), "", &synthetic_variants(ty));
+            }
+            Ty::Shared(inner) => {
+                let _ = writeln!(out, "    render_{}(&**v)", self.key(inner));
             }
             other => panic!("no renderer for {other:?}"),
         }
@@ -619,11 +654,29 @@ pub fn enum_inert(def: &EnumLayout) -> bool {
         .any(|variant| variant.fields.iter().any(|field| unreal(&field.ty)))
 }
 
+/// A boundary variant name from a render key: `shared_s3` → `SharedS3`. Injective because keys
+/// are built from a closed alphabet of fixed atoms, and the aggregate convention (`S3` ⇒ key
+/// `s3`) inverts through it exactly.
+fn camel(key: &str) -> String {
+    key.split('_')
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(first) => first.to_ascii_uppercase().to_string() + chars.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect()
+}
+
 fn unreal(ty: &Ty) -> bool {
     match ty {
         Ty::Param { .. } | Ty::Error => true,
+        // Load-bearing recursion: a template field `Shared<T>` is `Shared(Param)`, and without
+        // this arm the entry would be walked as real and `key()` would panic on the payload.
         Ty::Option(inner)
         | Ty::Task(inner)
+        | Ty::Shared(inner)
         | Ty::Ref(inner)
         | Ty::Input(inner)
         | Ty::Signal(inner)

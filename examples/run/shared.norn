@@ -1,0 +1,70 @@
+// Shared<T>: immutable refcounted sharing (BOOTSTRAP §8 item 6b). `shared(x)` wraps a copy of
+// its argument, field access reads through the wrapper, and `unshare(s)` copies the payload
+// back out — the spelling `match` on a shared enum uses. Sharing is a representation choice:
+// natively a Shared is one `Rc` and copying it is one refcount bump, but every observable byte
+// is the payload's, so nothing printed here says "shared" anywhere.
+
+import { List } from "std/list"
+
+struct Config {
+    host: String
+    port: I64
+}
+
+struct App {
+    name: String
+    cfg: Shared<Config>
+}
+
+fn peek<T>(x: Shared<T>) -> Shared<T> {
+    return x
+}
+
+fn total(xs: List<Shared<I64>>, acc: I64) -> I64 {
+    match xs {
+        List.Cons(head, tail) => total(tail, acc + unshare(head))
+        List.Nil => acc
+    }
+}
+
+fn main() -> () {
+    // Field access reads through the wrapper.
+    let cfg = shared(Config(host: "localhost", port: 8080))
+    print(cfg.host)
+    print(cfg.port)
+
+    // A Shared-typed field: stored without double-boxing, read with a mid-chain deref, and
+    // replaceable as a whole — it is the projection *through* one that cannot be written.
+    let mut app = App(name: "norn", cfg: cfg)
+    print(app.cfg.host)
+    app.cfg = shared(Config(host: "elsewhere", port: 9090))
+    print(app.cfg.port)
+
+    // Transparent rendering, the top-level raw-text rule included: `print(shared("hi"))`
+    // prints exactly what `print("hi")` does, and an aggregate shows its shared field's payload
+    // in place.
+    print(shared("hi"))
+    print(shared(3))
+    print(app)
+
+    // Sharing composes structurally; field access peels every layer, `unshare` exactly one.
+    let doubled = shared(shared(Config(host: "deep", port: 1)))
+    print(doubled.host)
+    let inner = unshare(doubled)
+    print(inner.port)
+
+    // Inference sees through the wrapper — `peek` binds T = I64 from its argument —
+    let peeked = peek(shared(42))
+    print(unshare(peeked))
+
+    // — and instantiations compose: a list of shared numbers, folded by copying each out.
+    let xs = List.Cons(shared(1), List.Cons(shared(2), List.Cons(shared(3), List.Nil)))
+    print(total(xs, 0))
+
+    // Match on a shared enum spells the copy-out.
+    let held = shared(List.Cons(10, List.Nil))
+    match unshare(held) {
+        List.Cons(head, _) => print(head)
+        List.Nil => print(0)
+    }
+}

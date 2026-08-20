@@ -1,0 +1,38 @@
+// A shared value crossing every reactor seam: a constructor argument, an input message, a state
+// slot, an exported signal read back with `latest` — and a field read through the wrapper inside
+// a node body. The boundary wraps and unwraps by static type at each seam, and every byte
+// printed is the payload's: sharing is a representation choice, invisible in output.
+
+struct Snapshot {
+    label: String
+    total: I64
+}
+
+reactor Board(seed: Shared<Snapshot>) {
+    input publish: Shared<Snapshot> [capacity: 4, overflow: reject]
+
+    state current: Shared<Snapshot> = seed
+
+    // A pure node body dereferencing a shared value.
+    signal headline = current.label
+
+    on publish(next) {
+        current = next
+    }
+
+    export signal view = current
+    export signal title = headline
+}
+
+task fn main() -> ()
+    uses { clock }
+{
+    let board = spawn reactor Board(seed: shared(Snapshot(label: "start", total: 0)))
+    print(latest(board.title))
+    await send(board.publish, shared(Snapshot(label: "grown", total: 42)))
+    await sleep(10)
+    print(latest(board.title))
+    let snap = latest(board.view)
+    print(snap.total)
+    print(latest(board.view))
+}

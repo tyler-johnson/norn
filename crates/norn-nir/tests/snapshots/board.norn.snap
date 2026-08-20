@@ -1,0 +1,128 @@
+=== nir ===
+struct Snapshot #0 (label: String, total: I64)
+enum Option #0 (None, Some(?))
+enum Result #1 (Ok(?), Err(?))
+enum IoError #2 (NotFound, Denied, InUse, Refused, Closed, Other(String))
+
+reactor Board #0(Shared<Snapshot>)
+    node 0 seed: Shared<Snapshot> param slot 0 arg 0 <- []
+    node 1 current: Shared<Snapshot> state slot 1 init Board.current.init#2 <- [seed]
+    node 2 headline: String signal Board.headline#3 <- [current]
+    node 3 view: Shared<Snapshot> signal Board.view#4 export <- [current]
+    node 4 title: String signal Board.title#5 export <- [headline]
+    order [seed, current, headline, view, title]
+    input 0 publish: Shared<Snapshot> capacity 4 overflow reject handler Board.on.publish#1
+        plan [current, headline, view, title]
+    exports [view, title]
+
+task fn main #0() -> ()
+    local _0/board: Board
+    local _1/snap: Shared<Snapshot>
+    local _2: Snapshot
+    local _3: Shared<Snapshot>
+    local _4: Board
+    local _5: Signal<String>
+    local _6: String
+    local _7: ()
+    local _8: Input<Shared<Snapshot>>
+    local _9: Snapshot
+    local _10: Shared<Snapshot>
+    local _11: Task<()>
+    local _12: ()
+    local _13: Task<()>
+    local _14: ()
+    local _15: Signal<String>
+    local _16: String
+    local _17: ()
+    local _18: Signal<Shared<Snapshot>>
+    local _19: Shared<Snapshot>
+    local _20: ()
+    local _21: Signal<Shared<Snapshot>>
+    local _22: Shared<Snapshot>
+    local _23: ()
+  b0:
+    _2 = Snapshot("start", 0)
+    _3 = builtin shared(_2)
+    _4 = spawn reactor Board#0(_3)
+    _0/board = _4
+    _5 = export 1 of _0/board
+    _6 = builtin latest(_5)
+    _7 = builtin print(_6)
+    _8 = input 0 of _0/board
+    _9 = Snapshot("grown", 42)
+    _10 = builtin shared(_9)
+    _11 = task builtin send(_8, _10)
+    await _11 -> _12, resume b1
+  b1:
+    _13 = task builtin sleep(10)
+    await _13 -> _14, resume b2
+  b2:
+    _15 = export 1 of _0/board
+    _16 = builtin latest(_15)
+    _17 = builtin print(_16)
+    _18 = export 0 of _0/board
+    _19 = builtin latest(_18)
+    _1/snap = _19
+    _20 = builtin print(_1/snap.*.1)
+    _21 = export 0 of _0/board
+    _22 = builtin latest(_21)
+    _23 = builtin print(_22)
+    return _23
+
+fn Board.on.publish #1(_0/next: Shared<Snapshot>, _1/seed: Shared<Snapshot>, _2/current: Shared<Snapshot>) -> ()
+  b0:
+    _2/current = _0/next
+    set slot 1 = _2/current
+    return ()
+
+fn Board.current.init #2(_0/seed: Shared<Snapshot>) -> Shared<Snapshot>
+  b0:
+    return _0/seed
+
+fn Board.headline #3(_0/current: Shared<Snapshot>) -> String
+  b0:
+    return _0/current.*.0
+
+fn Board.view #4(_0/current: Shared<Snapshot>) -> Shared<Snapshot>
+  b0:
+    return _0/current
+
+fn Board.title #5(_0/headline: String) -> String
+  b0:
+    return _0/headline
+
+=== graph ===
+reactor Board #0(Shared<Snapshot>)
+    node 0 seed: Shared<Snapshot> param slot 0 arg 0 <- []
+    node 1 current: Shared<Snapshot> state slot 1 init Board.current.init#2 <- [seed]
+    node 2 headline: String signal Board.headline#3 <- [current]
+    node 3 view: Shared<Snapshot> signal Board.view#4 export <- [current]
+    node 4 title: String signal Board.title#5 export <- [headline]
+    order [seed, current, headline, view, title]
+    input 0 publish: Shared<Snapshot> capacity 4 overflow reject handler Board.on.publish#1
+        plan [current, headline, view, title]
+    exports [view, title]
+
+=== output ===
+start
+grown
+42
+Snapshot(label: "grown", total: 42)
+=== result ===
+()
+=== trace ===
+0ms t0 spawn main root
+0ms t0 resume
+0ms R0 create Board in t0
+0ms R0 publish 0
+0ms t0 park timer 10ms
+0ms R0 turn 0 publish
+0ms R0 commit current
+0ms R0 recompute headline
+0ms R0 recompute view
+0ms R0 recompute title
+0ms R0 publish 1
+10ms -- clock
+10ms t0 resume
+10ms R0 stop
+10ms t0 done
