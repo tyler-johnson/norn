@@ -151,7 +151,8 @@ Alternatives considered:
   and any struct or enum that reaches one. Ordinary values stay copyable, because nothing in v0 can
   observe the difference — the interpreter clones, and the native backend that would make a copy
   cost something is M5. Move checking for ordinary values arrives with it, and until then
-  `print(p); print(p)` is legal.
+  `print(p); print(p)` is legal. (Landed: §8 item 6c, 2026-08-19 — `print(p); print(p)` on a
+  struct is now the predicted compile error, and `print(&p)` is the spelling that looks twice.)
 
   `Shared<T>` is deferred for the same reason: with ordinary values copyable it is a representation
   choice with no observable effect, and an inert type in the language is worse than an absent one.
@@ -318,8 +319,10 @@ closing on error propagation.
 
 Nothing a reactor holds may be affine — a slot is the durable state projection §14 asks for and a
 descriptor cannot be written down and restored, and an input declared `overflow: drop_oldest` would
-leak a socket every time its mailbox filled. `Shared<T>` and ordinary-value moves are deferred to
-M5; see §4.
+leak a socket every time its mailbox filled. `Shared<T>` and ordinary-value moves were deferred to
+M5; see §4 — both since landed by §8 item 6, whose 6c wave extends this milestone's done-when to
+ordinary values: use-after-move on a struct is now the same compile error it always was on a
+Connection.
 
 *Done when:* use-after-move and double-close are compile errors, and a cancelled request is
 observably leak-free.
@@ -470,11 +473,20 @@ Ordered roughly by when it becomes worth doing, not by importance:
 5. **Borrow checking.** Until then, `&T` as a non-escaping parameter only, and no `&mut` at all.
    Partial moves wait here too: M4 rejects moving out of a field rather than tracking it, because a
    half-moved struct has no name in this language and `match` already takes one apart.
+
+   **The read half landed with item 6c (2026-08-19).** A `&T` parameter is now usable, not just
+   passable: field access reads through a borrow, `match` on a borrowed scrutinee types against
+   the pointee and binds owned copies (refused whole when the pointee reaches a resource — a
+   copied descriptor would be a second owner), and a trait may declare `value: &Self`, the call
+   site auto-borrowing an owned receiver. All of it positional still — no named borrows, no ref
+   returns or fields, and the borrow erased before NIR. **What remains as this item is the write
+   half:** `&mut`, first consumer `push(&mut buf, x)`, plus everything that needs real analysis —
+   naming, returning, and storing borrows.
 6. **Move checking for ordinary values, and `Shared<T>`.** Both wait on a typed value
    representation — and the representation landed first, as its own wave: **6a, typed NIR and a
-   typed backend (2026-08-19), zero surface change.** The item decomposes as 6a (landed), 6b
-   (landed — `Shared<T>`, `Bytes` views, `+` on `Bytes`), and 6c (ordinary-value moves, taking
-   item 5's read half with them).
+   typed backend (2026-08-19), zero surface change.** The item decomposed as 6a, 6b (`Shared<T>`,
+   `Bytes` views, `+` on `Bytes`), and 6c (ordinary-value moves, taking item 5's read half with
+   them) — all three landed 2026-08-19, and the item is closed.
 
    What 6a did. NIR carries `hir::Ty` end to end — `Function.tys` in lockstep with `locals`, plus
    `ret` and an `inert` flag for the generics drain's neutered defs; typed layouts; typed reactor
@@ -535,7 +547,39 @@ Ordered roughly by when it becomes worth doing, not by importance:
    Shared's win today is refcount traffic, and its real work begins when 6c makes ordinary
    values move.
 
-   Still waiting here: 6c — the move checking itself, taking item 5's read half with it.
+   **6c landed 2026-08-19: ordinary values move, taking item 5's read half with them — the item
+   closes.** The wave is purely static — no runtime, NIR-shape, interpreter, or codegen semantic
+   change; the differential oracle and every trace stayed byte-identical — and the deliverable is
+   checker semantics plus a corpus that lives well under them. `consume(body); log(body)` is now
+   the real error DESIGN.md §7 always showed, and §4's `print(p); print(p)` prediction landed as
+   written.
+
+   The predicate is `Ty::moves()` beside `Program::affine`, and the split is the invariant: a
+   struct, enum, Option, or Result moves on whole-value use whatever it holds — the outermost
+   constructor alone, no recursion — while `affine` keeps answering the sharing/holding question
+   through contents for its five callers. The copy set is named: scalars, `Str`, `Bytes`,
+   `Shared`, handles, borrows, and `Param`/`Never`/`Error`. Everything else in pass six
+   generalized as written: branch joins, the loop rule, assign-revive (`x = f(x)`, loops
+   included), guards, and arm restarts. Field reads copy, never move — single ownership applies
+   to whole values, and resource-reaching fields keep their hard error.
+
+   The read half's vocabulary, all landed in-wave: field access through `&Struct`; `match &x`
+   typing against the pointee and binding owned copies, with an affine-pointee gate (recursive —
+   `&Option<Connection>` trips it) because a copied descriptor would be a second owner; `&Self`
+   receivers, the trait declaring the mode, the impl spelling it, the call site auto-borrowing;
+   and `print(&p)` as the non-consuming print. Two hardening fixes rode the flip: guards on a
+   place-read scrutinee re-check its root's liveness, and per-instance move reports dedupe on
+   (span, message).
+
+   The corpus migration is the API lesson: std/list borrows what it walks and owns what it
+   stores, std/http's `header` borrows the request, posts.norn grew the dup-through-a-borrow
+   idiom for its double-payload turn, and matching.norn rebuilds constructor payloads per site —
+   a moved value is rebuilt, not resurrected. examples/run/ownership.norn is the legal half as an
+   executable spec, and ownership-errors/plain-moves.norn pins the wording.
+
+   Unlocked and NOT this wave: full flattening — the representation payoff 6a deferred because
+   only moves make it sound. Item 5 keeps the write half: `&mut`, first consumer
+   `push(&mut buf, x)`.
 7. **Generics and traits — landed.** The gate on the general standard library, shipped as one
    wave (2026-08-19) because each half is the other's first consumer: bounds need traits to
    name, and a trait's worth shows first on a type parameter. Item 12 records what "collections"
@@ -589,7 +633,8 @@ Ordered roughly by when it becomes worth doing, not by importance:
    derived equality (item 9); `Ord` and operator traits (comparisons stay builtin-typed);
    inherent impls — methods come from traits only, so `req.header(h)` stays `header(req, h)`;
    extension methods on builtin types (`2.seconds` still waits); `self` receiver sugar; `where`
-   clauses (still reserved); borrow receivers (`&Self` is refused — receivers move); and `task`
+   clauses (still reserved); borrow receivers (`&Self` was refused here — landed with item 6c,
+   the trait declaring the receiver mode); and `task`
    members with `uses` clauses (parse-permissive, check-refused). One plan amendment made in
    flight: "unified under one trait" became *unified where the signatures agree* — `Display` is
    infallible rendering only, and std/bytes's fallible `to_string(Bytes) -> Option<String>`
