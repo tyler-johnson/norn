@@ -14,16 +14,12 @@ designed as one coherent model — and compiled to native binaries.*
 A `reactor` is a live dependency graph. Inputs arrive as discrete occurrences, state advances in atomic turns, signals recompute glitch-free, and effects run only after a turn commits — so no observer ever sees a half-updated world.
 
 ```
-task fn report(open: I64) -> ()
-    uses { clock }
-{
+task fn report(open: I64) -> () {
     await sleep(1)
     print(open)
 }
 
-reactor Gate(limit: I64)
-    uses { clock }
-{
+reactor Gate(limit: I64) {
     input opened: () [capacity: 64, overflow: reject]
     input closed: () [capacity: 64, overflow: reject]
 

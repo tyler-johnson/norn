@@ -113,8 +113,8 @@ Alternatives considered:
   mandatory wrapper was pure ceremony.)
 - **Reactors** — static graphs only: `input` with declared capacity and overflow policy, `state`,
   `signal`, `on` handlers, `after` effect requests, `export`, `latest`, and `send`.
-  `uses { … }` applies to a reactor as well as to a task: it is the authority the reactor's effects
-  need, and the spawner's set must cover it.
+  A reactor has an authority set as a task does: the union of what its handlers reach, inferred
+  like any other, and a spawner reaches all of it through the handle.
 
   An input has two spellings, and a queue clause on an `on` is the discriminator between them.
   `on queued(id: I64) [capacity: 8, overflow: reject] { … }` declares the input and answers it in
@@ -163,7 +163,7 @@ Alternatives considered:
   `Bytes` arrived with M6, where `Flow<Bytes>` gives it work to do — with copying slices, because a
   clone-everything engine cannot make zero-copy observable. The borrowed representation waits with
   §8 item 6, alongside everything else that needs values to have layout.
-- **Effects** — `uses { ... }` as a checked annotation.
+- **Effects** — an inferred capability set, with `uses { ... }` as an optional exact assertion.
 - **I/O** — TCP, timers, files, HTTP/1.1, `Flow<Bytes>` with genuine demand signalling.
 
 ### Excluded, deliberately
@@ -484,7 +484,7 @@ Ordered roughly by when it becomes worth doing, not by importance:
    surface is three modes on parameters — `T` reads (unmarked, the default), `mut T` writes back,
    `sink T` consumes — with no `&`, no lifetimes, and no reference types anywhere; ordinary values
    copy, the affine tier moves, and the acyclic-heap theorem carries safety. `sink` is inferred
-   from bodies by a call-graph fixpoint (the same shape `uses` inference will take, item 8) and
+   from bodies by a call-graph fixpoint (the shape `uses` inference took in turn, item 8) and
    enforced at call sites; writing it is an assertion — legal on any type, revoking the caller's
    name even without physical consumption — and required only where no body exists to infer from
    (`sink Self` on a trait method). Call sites stay unmarked for all three modes: no ceremony
@@ -772,14 +772,64 @@ Ordered roughly by when it becomes worth doing, not by importance:
    extension methods on builtin types (`2.seconds` still waits); `self` receiver sugar; `where`
    clauses (still reserved); borrow receivers (`&Self` was refused here — landed with item 6c,
    the trait declaring the receiver mode); and `task`
-   members with `uses` clauses (parse-permissive, check-refused). One plan amendment made in
+   members with `uses` clauses (parse-permissive, check-refused — and the one construct with no
+   body for item 8's inference to read, which is why the clause is still parsed there). One plan amendment made in
    flight: "unified under one trait" became *unified where the signatures agree* — `Display` is
    infallible rendering only, and std/bytes's fallible `to_string(Bytes) -> Option<String>`
    stays a free function, fallibility living in the type as the naming format demands.
-8. **Capability inference, test handlers.** `uses { ... }` is checked but not inferred in v0.
-   Decided 2026-08-19: inference is the destination — the compiler computes the set, and a written
-   `uses` becomes an optional public bound, the same inferred-by-default, declared-as-assertion
-   shape item 5 gives `sink` (`DESIGN.md` §6 carries the note).
+8. **Capability inference, test handlers.** Decided 2026-08-19: inference is the destination — the
+   compiler computes the set, and a written `uses` becomes an optional public bound, the same
+   inferred-by-default, declared-as-assertion shape item 5 gives `sink` (`DESIGN.md` §6 carries
+   the note). Test handlers remain open.
+
+   **The capability wave landed 2026-08-20** — `uses` is inferred, and 78 of the corpus's 89
+   clauses are gone. Purely static, like the modes wave and for the same reason: no NIR, interp,
+   or codegen snapshot moved a byte, because nothing after the checker ever read a `Capability`.
+
+   The mechanics. `check/uses.rs` is `infer_sinks`' shape with a set lattice instead of a mode:
+   one edge walk per concrete body collecting what it reaches — a capability-carrying builtin, a
+   called `fn`, a `spawn reactor` — then sweeps in `FnId` order and then `ReactorId` order,
+   unioning callee sets into caller sets until nothing moves, with a reactor's set the union of
+   its lifted members'. Five capabilities and a monotone union means the loop terminates without
+   a fuse, and recursion converges with no cycle detection at all — which is the answer to the
+   only question the plan started from: nothing has to be written to break a loop. It runs
+   between `check_turns` and `infer_sinks`, after monomorphization, so a set is a per-instance
+   fact and templates are skipped as inert; an instance inherits its template's written clause,
+   spans and all, and the (span, message) dedupe collapses the report back to where it was
+   written. The one deliberate divergence from `check_turns`, which walks the same graph:
+   `collect_calls` excludes an `after`'s head call because the task does not run during the turn,
+   and the capability walk must include it, since `after wait(ms)` is exactly where a reactor's
+   authority comes from.
+
+   A written clause is **exact** — the one narrowing the 2026-08-19 decision took in landing. A
+   capability the body reaches and the clause omits is an error; so is one the clause names and
+   the body never reaches, because authority nobody exercises is authority nobody meant to grant.
+   The clause therefore documents and bounds but cannot reserve ahead of use, and `uses { }` is a
+   real spelling: the assertion that a task reaches nothing. That distinction is why `ast`'s three
+   `uses` fields became `Option<UsesClause>` — a `Vec` cannot tell "infer this" from "assert the
+   empty set" apart. Under-declaration reports at the call inside the declaring function that
+   leads to the capability, with the chain down to the builtin as a note (`through `Beeper` →
+   `Beeper.on.rang` → `beep` → `sleep``); over-declaration reports at the offending capability's
+   own path span, which is why `capabilities` now returns spans.
+
+   What left with it: `require_task_authority` became `require_task_context`, keeping only the
+   question that must stay eager — whether the context may build a task at all — and the
+   `Checker::uses` field, its two assignment sites, and `begin_member`'s `uses` parameter went
+   with the capability half. A reactor's members are no longer checked against a set handed down
+   to them; the set is computed up from what they reach, which is also the first time a reactor's
+   own clause was checked against its own body rather than only at the spawn site.
+
+   The corpus strip is the wave's point. `std/http.norn` lost all seven `uses { net.io }`,
+   `examples/http/files.norn` lost six including a five-capability union, and
+   `examples/tasks/scoped-resource.norn` turned out to have been declaring `net.io` it never
+   used — the exactness rule found it on the first run. The teaching set kept on purpose:
+   `examples/tasks.norn` and `examples/reactors.norn` each keep one clause as the public-bound
+   illustration, `examples/generics.norn` keeps the trait member's (still parse-permissive,
+   check-refused), and `examples/errors/declarations.norn` keeps the parser's non-task refusal.
+   `examples/type-errors/capabilities.norn` is the new rejection corpus — under-declared direct,
+   under-declared transitive, over-declared, and a reactor whose `uses { }` its handler
+   contradicts — and `unauthorised.norn` keeps the spawn lesson by having `main` assert `uses { }`
+   rather than by declaring nothing.
 9. **Derives and constrained attributes.** `@derive(Json)`, `@http_api` — `DESIGN.md` §8 stage 2.
 10. **Durable state projections, supervision policy.**
 11. **The rest of HTTP, and general flows.** M6's wire is deliberately narrow, and each narrowing
@@ -821,7 +871,7 @@ Ordered roughly by when it becomes worth doing, not by importance:
     take. Go keeps its
     builtins forever and affords short names by keeping the set near fifteen and shadowable;
     Norn's set is bigger, growing, and reserved, so staying on that road means either squatting
-    on `read`/`open`/`close` or weakening the closed vocabulary that `uses` checking leans on.
+    on `read`/`open`/`close` or weakening the closed vocabulary a written `uses` resolves against.
     Rust's road ends better: std code written in Norn is one implementation executed by both
     engines, so the differential oracle covers it for free and the mirror stops growing with the
     language. Until the absorption begins, the bar for a new builtin is "cannot wait for std".
@@ -914,5 +964,5 @@ Ordered roughly by when it becomes worth doing, not by importance:
     `grow`'s copy loop, so whatever iterates inside a turn is still bounded by the data
     (`DESIGN.md` §14).
     What never dissolves is a small intrinsic layer at the syscall boundary, which is also where
-    `uses { … }` keeps doing its checking: the authority seam stays a closed, named table after
-    every name above it has become a library.
+    every capability set is seeded: the authority seam stays a closed, named table after every
+    name above it has become a library, and inference is a union over what a body reaches from it.

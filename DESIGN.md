@@ -433,16 +433,15 @@ An event models logical occurrences inside a reactor. A flow models transfer und
 
 ### Pure propagation; explicit authority
 
-Reactive expressions cannot perform I/O, suspend, lock, or execute unbounded computation. A signal may call pure functions and bounded total operations. Tasks declare the capabilities they require:
+Reactive expressions cannot perform I/O, suspend, lock, or execute unbounded computation. A signal may call pure functions and bounded total operations. The capabilities a task requires are the ones its body reaches, and the compiler works them out:
 
 ```
 // Effect declaration
-task fn load_user(id: UserId) -> Result<User, LoadError>
-    uses { database.read, clock }
-{
+task fn load_user(id: UserId) -> Result<User, LoadError> {
     ...
 }
 
+// A written clause is an assertion about a public surface
 task fn replace_file(path: Path, contents: Flow<Bytes>)
     -> Result<()>
     uses { fs.write }
@@ -451,9 +450,9 @@ task fn replace_file(path: Path, contents: Flow<Bytes>)
 }
 ```
 
-A package that does not declare `net.connect` cannot start making outbound requests in a later release without changing its public effect signature. Tests can supply fake capabilities for clocks, filesystems, HTTP, randomness, and process signals.
+Inference is transitive and runs to a fixpoint over the call graph, so recursion needs no annotation to break it; a reactor's set is the union of its handlers', and spawning one costs the spawner everything the reactor can reach. Writing the clause is how a public function pins its authority: `replace_file` cannot start making outbound requests in a later release without the clause changing, and a clause that changes is a visible change to the effect signature. Tests can supply fake capabilities for clocks, filesystems, HTTP, randomness, and process signals.
 
-> **Decided 2026-08-19: `uses` will be inferred.** The clause stays a checked annotation in v0; the destination is that the compiler computes a function's capability set from its body, and a written `uses` becomes an optional public bound — the same inferred-by-default, declared-as-assertion shape the `sink` parameter mode has (§7). See `BOOTSTRAP.md` §8 item 8.
+> **`uses` is inferred (decided 2026-08-19, landed 2026-08-20).** The compiler computes a function's capability set from its body; a written `uses { … }` is an optional bound checked against it — the same inferred-by-default, declared-as-assertion shape the `sink` parameter mode has (§7). One narrowing the decision took in landing: the assertion is *exact*, so a clause names neither more nor less than the body reaches. It documents and bounds authority; it cannot reserve authority ahead of use, because a capability nobody exercises is one nobody meant to grant. `uses { }` is the assertion that a task reaches nothing. See `BOOTSTRAP.md` §8 item 8.
 
 Koka is an important precedent for treating effects and handlers as part of a typed general-purpose language rather than informal documentation.[^9] This proposal would use a narrower, systems-oriented effect model whose main jobs are authority tracking, test substitution, and preserving the pure reactor-turn boundary.
 
@@ -1443,7 +1442,7 @@ FFI calls need declarations covering blocking behavior, thread safety, ownership
 
 **Phase 3: ownership and local graph reclamation.** Introduce parameter modes (`mut` writeback, inferred `sink`), task-local regions, cross-reactor transfer rules, and reactor-local graph arenas. Measure the cost of reference counting, region promotion, dynamic graph switching, and local tracing.
 
-**Phase 4: effects, persistence patterns, and tooling.** Add capability inference (decided 2026-08-19: `uses` becomes inferred), test handlers, graph visualization, turn tracing, queue inspection, and application-defined durable snapshots. Develop standard patterns for transactional outboxes and replay without making them magical.
+**Phase 4: effects, persistence patterns, and tooling.** Add test handlers, graph visualization, turn tracing, queue inspection, and application-defined durable snapshots. Capability inference landed early, with §7's parameter modes. Develop standard patterns for transactional outboxes and replay without making them magical.
 
 **Phase 5: constrained metaprogramming.** Begin with derives and HTTP/schema generation. Add hygienic syntax and typed procedural macros only after the semantic APIs they manipulate are stable.
 
