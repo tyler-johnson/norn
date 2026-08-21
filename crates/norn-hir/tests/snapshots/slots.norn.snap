@@ -1,0 +1,40 @@
+error: a `Slots` value cannot hold Connection
+ --> slots.norn:1:25
+  |
+1 | fn hold_a_connection(x: Slots<Connection>) -> () {
+  |                         ^^^^^^^^^^^^^^^^^ resources and tasks have exactly one owner
+  = note: `Slots` is for plain data — it is copied freely, copy-on-write at the storage; hold the data, not the handle
+
+error: `Slots` takes 1 type argument, found 0
+ --> slots.norn:4:23
+  |
+4 | fn missing_element(x: Slots) -> () {
+  |                       ^^^^^
+  = note: write the element type, as in `Slots<I64>`
+
+error: `Slots` takes 1 type argument, found 2
+ --> slots.norn:7:19
+  |
+7 | fn wrong_arity(x: Slots<I64, I64>) -> () {
+  |                   ^^^^^^^^^^^^^^^
+  = note: write the element type, as in `Slots<I64>`
+
+error: `==` does not apply to Slots<I64>
+  --> slots.norn:11:12
+   |
+11 |     return a == a
+   |            ^^^^^^
+   = note: structural equality on structs and enums is not derived yet; match instead
+
+error: Slots<I64> cannot implement a trait
+  --> slots.norn:18:19
+   |
+18 | impl Describe for Slots<I64> {
+   |                   ^^^^^^^^^^ not a named type
+   = note: a trait is implemented for a struct, an enum, or one of `I64`, `F64`, `Bool`, `String`, `Bytes`
+
+error: `Slots` is declared twice
+  --> slots.norn:24:8
+   |
+24 | struct Slots {
+   |        ^^^^^ duplicate type

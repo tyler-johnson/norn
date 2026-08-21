@@ -256,6 +256,42 @@ fn main() -> () {
     );
 }
 
+/// The `Slots` spelling (BOOTSTRAP §8 item 5): a copyable slab, legal wherever plain data is —
+/// parameters, returns, and a template's own fields, where the element is a bare parameter.
+#[test]
+fn slots_is_plain_data() {
+    accepted(
+        "a slab passes, returns, and copies",
+        "\
+fn pass_along(s: Slots<I64>) -> Slots<I64> {
+    let kept = s
+    print(kept)
+    return s
+}
+
+fn main() -> () {
+}
+",
+    );
+
+    accepted(
+        "a template holds a slab of its own parameter",
+        "\
+struct Buffer<T> {
+    storage: Slots<T>
+    len: I64
+}
+
+fn occupancy(buf: Buffer<I64>) -> I64 {
+    buf.len
+}
+
+fn main() -> () {
+}
+",
+    );
+}
+
 /// The read half of the modes doctrine (BOOTSTRAP §8 item 5): field access and `match` on an
 /// owned value, spelled plainly, because reads are unmarked and an ordinary value copies.
 #[test]

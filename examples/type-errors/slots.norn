@@ -1,0 +1,26 @@
+fn hold_a_connection(x: Slots<Connection>) -> () {
+}
+
+fn missing_element(x: Slots) -> () {
+}
+
+fn wrong_arity(x: Slots<I64, I64>) -> () {
+}
+
+fn compare_slots(a: Slots<I64>) -> Bool {
+    return a == a
+}
+
+trait Describe {
+    fn describe(value: Self) -> String
+}
+
+impl Describe for Slots<I64> {
+    fn describe(value: Self) -> String {
+        return "a slab"
+    }
+}
+
+struct Slots {
+    payload: I64
+}

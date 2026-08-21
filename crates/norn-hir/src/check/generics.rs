@@ -400,6 +400,7 @@ impl Checker {
             ),
             Ty::Task(inner) => Ty::Task(Box::new(self.subst(inner, args, at, depth))),
             Ty::Shared(inner) => Ty::Shared(Box::new(self.subst(inner, args, at, depth))),
+            Ty::Slots(inner) => Ty::Slots(Box::new(self.subst(inner, args, at, depth))),
             Ty::Input(inner) => Ty::Input(Box::new(self.subst(inner, args, at, depth))),
             Ty::Signal(inner) => Ty::Signal(Box::new(self.subst(inner, args, at, depth))),
             Ty::Event(inner) => Ty::Event(Box::new(self.subst(inner, args, at, depth))),
@@ -482,6 +483,9 @@ impl Checker {
             }
             (Ty::Task(p), Ty::Task(f)) => self.solve(p, f, bindings),
             (Ty::Shared(p), Ty::Shared(f)) => self.solve(p, f, bindings),
+            // Without this arm the catch-all would silently teach nothing through a slab, and
+            // `push<T>(buf: mut Buf<T>, …)` could never infer `T` from a `Buf<I64>`.
+            (Ty::Slots(p), Ty::Slots(f)) => self.solve(p, f, bindings),
             (Ty::Input(p), Ty::Input(f)) => self.solve(p, f, bindings),
             (Ty::Signal(p), Ty::Signal(f)) => self.solve(p, f, bindings),
             (Ty::Event(p), Ty::Event(f)) => self.solve(p, f, bindings),
@@ -522,6 +526,7 @@ impl Checker {
             Ty::Option(inner)
             | Ty::Task(inner)
             | Ty::Shared(inner)
+            | Ty::Slots(inner)
             | Ty::Input(inner)
             | Ty::Signal(inner)
             | Ty::Event(inner) => self.bind_params(inner, bindings, to),
@@ -565,6 +570,7 @@ impl Checker {
             Ty::Option(inner)
             | Ty::Task(inner)
             | Ty::Shared(inner)
+            | Ty::Slots(inner)
             | Ty::Input(inner)
             | Ty::Signal(inner)
             | Ty::Event(inner) => self.mentions_unbound(inner, bindings),
@@ -945,6 +951,7 @@ impl Checker {
             Ty::Option(inner)
             | Ty::Task(inner)
             | Ty::Shared(inner)
+            | Ty::Slots(inner)
             | Ty::Input(inner)
             | Ty::Signal(inner)
             | Ty::Event(inner) => self.mentions_param(inner),

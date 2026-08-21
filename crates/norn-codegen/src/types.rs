@@ -121,6 +121,11 @@ impl<'p> Registry<'p> {
                 self.intern(ty);
                 self.walk(inner);
             }
+            // `Slots<T>` likewise: a pointer to its storage, interned by name.
+            Ty::Slots(inner) => {
+                self.intern(ty);
+                self.walk(inner);
+            }
             Ty::Input(inner) | Ty::Signal(inner) => {
                 self.intern(ty);
                 self.walk(inner);
@@ -170,6 +175,7 @@ impl<'p> Registry<'p> {
             // Payload-distinguishing, unlike `task`: the renderer delegates to the payload's, so
             // every instantiation needs its own key. Composes for nesting (`shared_shared_i64`).
             Ty::Shared(inner) => format!("shared_{}", self.key(inner)),
+            Ty::Slots(inner) => format!("slots_{}", self.key(inner)),
             Ty::Resource(Resource::Listener) => "res_listener".into(),
             Ty::Resource(Resource::Connection) => "res_connection".into(),
             Ty::Resource(Resource::File) => "res_file".into(),
@@ -198,6 +204,10 @@ impl<'p> Registry<'p> {
             // Already a pointer, so `boxed()` excludes it: a `Shared` field stores this same
             // `Rc` inline rather than double-boxing.
             Ty::Shared(inner) => format!("Rc<{}>", self.repr(inner)),
+            // Already a pointer too — the `Rc` is what makes copying a slab a refcount bump and
+            // what the ops' `Rc::make_mut` uniqueness check reads. The element is field-shaped so
+            // an aggregate element sits behind one `Rc` of its own.
+            Ty::Slots(inner) => format!("Rc<Vec<Option<{}>>>", self.field_repr(inner)),
             // The kind is part of the static type, so the value is the id alone.
             Ty::Resource(_) => "ResourceId".into(),
             Ty::Reactor(_) => "ReactorId".into(),
@@ -568,6 +578,11 @@ impl<'p> Registry<'p> {
             Ty::Shared(inner) => {
                 let _ = writeln!(out, "    render_{}(&**v)", self.key(inner));
             }
+            // The Bytes model: the capacity, not the contents — a slab is storage, and what it
+            // holds is the sequence on top of it's business to show.
+            Ty::Slots(_) => {
+                let _ = writeln!(out, "    format!(\"<slots {{}}>\", v.len())");
+            }
             other => panic!("no renderer for {other:?}"),
         }
         let _ = writeln!(out, "}}");
@@ -673,6 +688,7 @@ fn unreal(ty: &Ty) -> bool {
         Ty::Option(inner)
         | Ty::Task(inner)
         | Ty::Shared(inner)
+        | Ty::Slots(inner)
         | Ty::Input(inner)
         | Ty::Signal(inner)
         | Ty::Event(inner) => unreal(inner),

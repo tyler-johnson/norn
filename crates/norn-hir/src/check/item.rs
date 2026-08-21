@@ -62,6 +62,11 @@ impl Checker {
         self.ns[self.current]
             .types
             .insert("Shared".into(), TypeName::Builtin(Ty::Error));
+        // And `Slots`, on the same footing as `Shared`: the entry exists to collide with a
+        // redeclaration, and `resolve_ty` answers for the name before it is read.
+        self.ns[self.current]
+            .types
+            .insert("Slots".into(), TypeName::Builtin(Ty::Error));
         self.ns[self.current]
             .types
             .insert("IoError".into(), TypeName::Enum(EnumId::IO_ERROR));

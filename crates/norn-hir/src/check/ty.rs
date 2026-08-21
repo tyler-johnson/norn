@@ -183,6 +183,31 @@ impl Checker {
                             None => Ty::Error,
                         };
                     }
+                    "Slots" => {
+                        return match self.type_args(name, args, 1, ty.span) {
+                            Some(mut args) => {
+                                let inner = args.remove(0);
+                                // The `Shared` rule, for the same reason: a slab is copied
+                                // freely, and a copied descriptor would be a second owner.
+                                if self.program.affine(&inner) {
+                                    self.push(
+                                        Diagnostic::new(
+                                            ty.span,
+                                            format!(
+                                                "a `Slots` value cannot hold {}",
+                                                self.program.ty_name(&inner)
+                                            ),
+                                        )
+                                        .label("resources and tasks have exactly one owner")
+                                        .note("`Slots` is for plain data — it is copied freely, copy-on-write at the storage; hold the data, not the handle"),
+                                    );
+                                    return Ty::Error;
+                                }
+                                Ty::Slots(Box::new(inner))
+                            }
+                            None => Ty::Error,
+                        };
+                    }
                     // A signal's own type has no spelling. Registering the names here is what
                     // turns the attempt into a teaching diagnostic instead of "unknown type", and
                     // it is also why there is no escape check to write: a signal cannot appear in
@@ -383,6 +408,7 @@ impl Checker {
                     }
                     "Task" => "write the value the task produces, as in `Task<()>`",
                     "Shared" => "write the payload type, as in `Shared<Config>`",
+                    "Slots" => "write the element type, as in `Slots<I64>`",
                     _ => "write the element type, as in `Option<I64>`",
                 }),
             );

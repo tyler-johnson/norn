@@ -169,6 +169,12 @@ pub enum Ty {
     /// `unshare(s)` copies the payload back out. Deeply immutable and copied freely — which is
     /// why the payload may not be affine, refused at every site that could produce one.
     Shared(Box<Ty>),
+    /// A copyable slab of element slots — the storage `std/buf`'s `Buf<T>` sequences over.
+    /// Copying one is a refcount bump; every write op does the uniqueness check inside itself,
+    /// writing in place when the storage is unique and cloning it once when it is shared, so the
+    /// copy-on-write is unobservable. Not affine, and its element may not be affine either —
+    /// refused at the spelling and re-checked at monomorphization, the `Shared` pattern.
+    Slots(Box<Ty>),
     /// A computation that has not run. Calling a `task fn` builds one; `await` and `spawn` are what
     /// start it. Laziness is what lets a policy cancel obsolete work in M3 — it cannot cancel work
     /// it did not control the starting of.
@@ -251,6 +257,7 @@ impl Program {
                 format!("Result<{}, {}>", self.ty_name(ok), self.ty_name(err))
             }
             Ty::Shared(inner) => format!("Shared<{}>", self.ty_name(inner)),
+            Ty::Slots(inner) => format!("Slots<{}>", self.ty_name(inner)),
             Ty::Task(inner) => format!("Task<{}>", self.ty_name(inner)),
             Ty::Resource(resource) => resource.name().into(),
             Ty::Reactor(id) => self.reactors[id.index()].name.clone(),
@@ -288,6 +295,10 @@ impl Program {
             // refuses the spelling, and monomorphization re-checks instantiated templates — so
             // false is truthful for every value that can exist.
             Ty::Shared(_) => false,
+            // Likewise not recursed, and for the same reason: `resolve_ty` refuses the spelling
+            // of an affine element and monomorphization re-checks instantiated templates, so no
+            // slab holding a resource can exist for this arm to under-report.
+            Ty::Slots(_) => false,
             Ty::Option(inner) => self.affine_seen(inner, visiting),
             Ty::Result(ok, err) => {
                 self.affine_seen(ok, visiting) || self.affine_seen(err, visiting)
