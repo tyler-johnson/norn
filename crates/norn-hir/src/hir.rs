@@ -769,6 +769,20 @@ pub enum Builtin {
     FlowNext,
     FlowLen,
     FlowClose,
+    /// `slots_new(capacity)`: an empty slab of `capacity` holes. The element type comes from the
+    /// expectation, like `None`'s — the argument says how many slots, not what they hold.
+    SlotsNew,
+    /// `slots_len(s)`: the capacity, holes included.
+    SlotsLen,
+    /// `slots_get(s, i)`: the element at `i` — `None` for a hole, a trap out of range.
+    SlotsGet,
+    /// `slots_set(mut s, i, x)`: write slot `i`. With `slots_take` these are the first Mut-mode
+    /// builtins: the slab argument is a place the return writes back into, and the op does the
+    /// copy-on-write uniqueness check inside itself — in place when the storage is unique, one
+    /// storage clone when it is shared, unobservably either way.
+    SlotsSet,
+    /// `slots_take(mut s, i)`: the element at `i`, leaving a hole behind.
+    SlotsTake,
 }
 
 impl Builtin {
@@ -801,6 +815,11 @@ impl Builtin {
         Builtin::FlowNext,
         Builtin::FlowLen,
         Builtin::FlowClose,
+        Builtin::SlotsNew,
+        Builtin::SlotsLen,
+        Builtin::SlotsGet,
+        Builtin::SlotsSet,
+        Builtin::SlotsTake,
     ];
 
     pub fn from_name(name: &str) -> Option<Builtin> {
@@ -829,6 +848,11 @@ impl Builtin {
             "flow_next" => Some(Builtin::FlowNext),
             "flow_len" => Some(Builtin::FlowLen),
             "flow_close" => Some(Builtin::FlowClose),
+            "slots_new" => Some(Builtin::SlotsNew),
+            "slots_len" => Some(Builtin::SlotsLen),
+            "slots_get" => Some(Builtin::SlotsGet),
+            "slots_set" => Some(Builtin::SlotsSet),
+            "slots_take" => Some(Builtin::SlotsTake),
             _ => None,
         }
     }
@@ -860,6 +884,11 @@ impl Builtin {
             Builtin::FlowNext => "flow_next",
             Builtin::FlowLen => "flow_len",
             Builtin::FlowClose => "flow_close",
+            Builtin::SlotsNew => "slots_new",
+            Builtin::SlotsLen => "slots_len",
+            Builtin::SlotsGet => "slots_get",
+            Builtin::SlotsSet => "slots_set",
+            Builtin::SlotsTake => "slots_take",
         }
     }
 
@@ -880,7 +909,14 @@ impl Builtin {
             | Builtin::TextUnchecked
             | Builtin::Byte
             | Builtin::BytesAt
-            | Builtin::FlowLen => true,
+            | Builtin::FlowLen
+            // The write ops too: a writeback lands in the caller's own frame, and mutating what
+            // you alone hold is nothing the world can see happen.
+            | Builtin::SlotsNew
+            | Builtin::SlotsLen
+            | Builtin::SlotsGet
+            | Builtin::SlotsSet
+            | Builtin::SlotsTake => true,
             Builtin::Print
             | Builtin::Sleep
             | Builtin::TcpListen
@@ -925,7 +961,12 @@ impl Builtin {
             | Builtin::FileClose
             | Builtin::FlowNext
             | Builtin::FlowLen
-            | Builtin::FlowClose => &[],
+            | Builtin::FlowClose
+            | Builtin::SlotsNew
+            | Builtin::SlotsLen
+            | Builtin::SlotsGet
+            | Builtin::SlotsSet
+            | Builtin::SlotsTake => &[],
             Builtin::FileCreate => &[Capability::FsWrite],
             Builtin::FlowOfFile => &[Capability::FsRead],
             Builtin::Sleep => &[Capability::Clock],
@@ -955,6 +996,7 @@ impl Builtin {
         let fallible = |ok: Ty| Ty::Result(Box::new(ok), Box::new(io_error()));
         let read = |ty: Ty| (ty, Mode::Read);
         let sink = |ty: Ty| (ty, Mode::Sink);
+        let mut_ = |ty: Ty| (ty, Mode::Mut);
         match self {
             Builtin::Print => (vec![read(Ty::Error)], Ty::Unit),
             Builtin::ListenerPort => (vec![read(listener())], Ty::I64),
@@ -992,6 +1034,19 @@ impl Builtin {
             Builtin::FlowNext => (vec![read(flow())], task(fallible(Ty::Bytes))),
             Builtin::FlowLen => (vec![read(flow())], Ty::I64),
             Builtin::FlowClose => (vec![sink(flow())], task(Ty::Unit)),
+            // The slots ops are typed by what they are handed, like `shared` — every `Ty::Error`
+            // here is checked properly at the call site. What this table does carry is the mode
+            // column: the write ops take the slab at a `Mut` position, and `moves` enforces the
+            // place-shape, `let mut`-root, and exclusivity rules through the same `arguments()`
+            // path every call rides.
+            Builtin::SlotsNew => (vec![read(Ty::I64)], Ty::Error),
+            Builtin::SlotsLen => (vec![read(Ty::Error)], Ty::I64),
+            Builtin::SlotsGet => (vec![read(Ty::Error), read(Ty::I64)], Ty::Error),
+            Builtin::SlotsSet => (
+                vec![mut_(Ty::Error), read(Ty::I64), read(Ty::Error)],
+                Ty::Unit,
+            ),
+            Builtin::SlotsTake => (vec![mut_(Ty::Error), read(Ty::I64)], Ty::Error),
         }
     }
 }

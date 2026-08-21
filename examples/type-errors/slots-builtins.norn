@@ -1,0 +1,60 @@
+// Where the slots builtins are refused (BOOTSTRAP §8 item 5, the sequence wave). The write ops
+// are the first Mut-mode builtins, so the place-shape, `let mut`-root, and state-cell rules are
+// inherited through the same mode column every call rides.
+
+// The element type comes from the expectation; with none there is nothing to build.
+fn uninferable() -> () {
+    let s = slots_new(4)
+}
+
+// And the expectation must be a slab.
+fn mismatched() -> I64 {
+    let n: I64 = slots_new(4)
+    n
+}
+
+// Arity is the signature's.
+fn arity() -> () {
+    let s: Slots<I64> = slots_new(4, 5)
+}
+
+// The value written must be the slab's own element type.
+fn wrong_element() -> () {
+    let mut s: Slots<I64> = slots_new(4)
+    slots_set(s, 0, "seven")
+}
+
+// A non-slab first argument teaches where slabs come from.
+fn not_a_slab() -> () {
+    let n = 3
+    print(slots_len(n))
+}
+
+// The affine refusal runs again at instantiation, where the element is finally concrete: the
+// template's `Slots<T>` is invisible to the spelling check, and `slots_new` is the one
+// expression that could mint the slab.
+fn mint<T>() -> Slots<T> {
+    let s: Slots<T> = slots_new(0)
+    return s
+}
+
+fn leak() -> () {
+    let held = mint<Connection>()
+}
+
+// The slab of a write op is a `Mut` argument, so its root must be declared `mut`...
+fn frozen() -> () {
+    let s: Slots<I64> = slots_new(4)
+    slots_set(s, 0, 7)
+}
+
+// ...and a state cell commits at the end of the turn, so a writeback cannot land in one.
+reactor History(size: I64) {
+    input recorded: I64 [capacity: 8, overflow: reject]
+
+    state entries: Slots<I64> = slots_new(size)
+
+    on recorded(value) {
+        slots_set(entries, 0, value)
+    }
+}

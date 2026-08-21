@@ -1,0 +1,52 @@
+error: cannot tell what type `slots_new` builds here
+ --> slots-builtins.norn:7:13
+  |
+7 |     let s = slots_new(4)
+  |             ^^^^^^^^^^^^ no expected type at this position
+  = note: annotate the binding or the return type, as in `let x: Slots<I64> = …`
+
+error: expected I64, found Slots
+  --> slots-builtins.norn:12:18
+   |
+12 |     let n: I64 = slots_new(4)
+   |                  ^^^^^^^^^^^^
+
+error: `slots_new` takes 1 positional argument
+  --> slots-builtins.norn:18:25
+   |
+18 |     let s: Slots<I64> = slots_new(4, 5)
+   |                         ^^^^^^^^^^^^^^^
+
+error: expected I64, found String
+  --> slots-builtins.norn:24:21
+   |
+24 |     slots_set(s, 0, "seven")
+   |                     ^^^^^^^
+
+error: `slots_len` needs a slab, not I64
+  --> slots-builtins.norn:30:21
+   |
+30 |     print(slots_len(n))
+   |                     ^ not a `Slots`
+   = note: a slab comes from `slots_new`, as in `let s: Slots<I64> = slots_new(4)`
+
+error: a `Slots` value cannot hold Connection
+  --> slots-builtins.norn:42:16
+   |
+42 |     let held = mint<Connection>()
+   |                ^^^^^^^^^^^^^^^^^^ instantiated here with an affine element
+   = note: resources and tasks have exactly one owner; hold the data, not the handle
+
+error: `s` is not declared `mut`
+  --> slots-builtins.norn:48:15
+   |
+48 |     slots_set(s, 0, 7)
+   |               ^ a `mut` argument is written back
+   = note: declare it as `let mut s = …`
+
+error: `entries` is a `state` cell
+  --> slots-builtins.norn:58:19
+   |
+58 |         slots_set(entries, 0, value)
+   |                   ^^^^^^^ state commits at the end of the turn
+   = note: read it into a `let mut` local, pass that, and assign the result back — the assignment is what commits

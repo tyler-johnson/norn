@@ -1388,6 +1388,25 @@ impl Checker {
                         .note("resources and tasks have exactly one owner; share the data, not the handle"),
                     );
                 }
+                // The same re-check for the slab constructor: `let s: Slots<T> = slots_new(0)` at
+                // `T = Connection` is invisible to the template and only exists once substituted,
+                // and this is the one expression that could mint a `Slots` of an affine element.
+                if *builtin == Builtin::SlotsNew
+                    && let Ty::Slots(element) = &ty
+                    && self.program.affine(element)
+                {
+                    self.push(
+                        Diagnostic::new(
+                            cx.at,
+                            format!(
+                                "a `Slots` value cannot hold {}",
+                                self.program.ty_name(element)
+                            ),
+                        )
+                        .label("instantiated here with an affine element")
+                        .note("resources and tasks have exactly one owner; hold the data, not the handle"),
+                    );
+                }
                 ExprKind::Builtin {
                     builtin: *builtin,
                     args,

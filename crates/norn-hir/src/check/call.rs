@@ -138,7 +138,7 @@ impl Checker {
                 );
                 return self.error_expr(span);
             }
-            return self.check_builtin(builtin, args, span);
+            return self.check_builtin(builtin, args, expected, span);
         }
 
         let Some(&id) = self.ns[self.current].fns.get(name) else {
@@ -429,6 +429,7 @@ impl Checker {
         &mut self,
         builtin: Builtin,
         args: &[ast::Arg],
+        expected: Option<&Ty>,
         span: Span,
     ) -> Expr {
         let (params, ret) = builtin.signature();
@@ -460,6 +461,11 @@ impl Checker {
             Builtin::Latest => return self.check_latest(args, span),
             Builtin::Shared => return self.check_shared(args, span),
             Builtin::Unshare => return self.check_unshare(args, span),
+            Builtin::SlotsNew => return self.check_slots_new(args, expected, span),
+            Builtin::SlotsLen => return self.check_slots_len(args, span),
+            Builtin::SlotsGet => return self.check_slots_get(args, span),
+            Builtin::SlotsSet => return self.check_slots_set(args, span),
+            Builtin::SlotsTake => return self.check_slots_take(args, span),
             _ => {}
         }
 
@@ -598,6 +604,125 @@ impl Checker {
                 args: vec![target],
             },
             ty: *inner,
+            span,
+        }
+    }
+
+    /// `slots_new(capacity)`: an empty slab. The element type comes from the expectation, the way
+    /// `None`'s payload does — the argument says how many slots, not what they hold — so
+    /// `let storage: Slots<T> = slots_new(0)` works inside a template, where nothing else could
+    /// name `T`'s slab.
+    pub(super) fn check_slots_new(
+        &mut self,
+        args: &[ast::Arg],
+        expected: Option<&Ty>,
+        span: Span,
+    ) -> Expr {
+        let capacity = self.check_expr(&args[0].value, Some(&Ty::I64));
+        let element = match expected {
+            Some(Ty::Slots(element)) => (**element).clone(),
+            Some(other) if !other.is_error() => {
+                let message = format!("expected {}, found Slots", self.program.ty_name(other));
+                self.error(span, message);
+                return self.error_expr(span);
+            }
+            _ => return self.uninferable(span, "slots_new", "Slots<I64>"),
+        };
+        Expr {
+            kind: ExprKind::Builtin {
+                builtin: Builtin::SlotsNew,
+                args: vec![capacity],
+            },
+            ty: Ty::Slots(Box::new(element)),
+            span,
+        }
+    }
+
+    /// The slab every other slots builtin starts with: checked, then destructured to its element
+    /// type, the refusal teaching where slabs come from.
+    fn slab_arg(&mut self, name: &str, arg: &ast::Arg) -> Option<(Expr, Ty)> {
+        let slab = self.check_expr(&arg.value, None);
+        if slab.ty.is_error() {
+            return None;
+        }
+        let Ty::Slots(element) = slab.ty.clone() else {
+            let message = format!(
+                "`{name}` needs a slab, not {}",
+                self.program.ty_name(&slab.ty)
+            );
+            self.push(
+                Diagnostic::new(arg.span, message)
+                    .label("not a `Slots`")
+                    .note("a slab comes from `slots_new`, as in `let s: Slots<I64> = slots_new(4)`"),
+            );
+            return None;
+        };
+        Some((slab, *element))
+    }
+
+    /// `slots_len(s)`: the capacity, holes included — the one read that is about the storage
+    /// rather than an element.
+    pub(super) fn check_slots_len(&mut self, args: &[ast::Arg], span: Span) -> Expr {
+        let Some((slab, _)) = self.slab_arg("slots_len", &args[0]) else {
+            return self.error_expr(span);
+        };
+        Expr {
+            kind: ExprKind::Builtin {
+                builtin: Builtin::SlotsLen,
+                args: vec![slab],
+            },
+            ty: Ty::I64,
+            span,
+        }
+    }
+
+    /// `slots_get(s, i)`: the element at `i`, `None` for a hole.
+    pub(super) fn check_slots_get(&mut self, args: &[ast::Arg], span: Span) -> Expr {
+        let Some((slab, element)) = self.slab_arg("slots_get", &args[0]) else {
+            return self.error_expr(span);
+        };
+        let index = self.check_expr(&args[1].value, Some(&Ty::I64));
+        Expr {
+            kind: ExprKind::Builtin {
+                builtin: Builtin::SlotsGet,
+                args: vec![slab, index],
+            },
+            ty: Ty::Option(Box::new(element)),
+            span,
+        }
+    }
+
+    /// `slots_set(mut s, i, x)`: write slot `i`. The slab sits at a `Mut` position — `moves`
+    /// enforces the place shape and the `let mut` root through the same path every call rides —
+    /// and the value is checked against the slab's own element type.
+    pub(super) fn check_slots_set(&mut self, args: &[ast::Arg], span: Span) -> Expr {
+        let Some((slab, element)) = self.slab_arg("slots_set", &args[0]) else {
+            return self.error_expr(span);
+        };
+        let index = self.check_expr(&args[1].value, Some(&Ty::I64));
+        let value = self.check_expr(&args[2].value, Some(&element));
+        Expr {
+            kind: ExprKind::Builtin {
+                builtin: Builtin::SlotsSet,
+                args: vec![slab, index, value],
+            },
+            ty: Ty::Unit,
+            span,
+        }
+    }
+
+    /// `slots_take(mut s, i)`: the element at `i`, leaving a hole behind.
+    pub(super) fn check_slots_take(&mut self, args: &[ast::Arg], span: Span) -> Expr {
+        let Some((slab, element)) = self.slab_arg("slots_take", &args[0]) else {
+            return self.error_expr(span);
+        };
+        let index = self.check_expr(&args[1].value, Some(&Ty::I64));
+        Expr {
+            kind: ExprKind::Builtin {
+                builtin: Builtin::SlotsTake,
+                args: vec![slab, index],
+            },
+            ty: Ty::Option(Box::new(element)),
             span,
         }
     }

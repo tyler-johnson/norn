@@ -292,6 +292,73 @@ fn main() -> () {
     );
 }
 
+/// The slots builtins' legal surface: a slab built from the expectation, read anywhere, and
+/// written through a `Mut` position — including a field chain rooted at a `mut` parameter, the
+/// shape `std/buf`'s `push` is made of.
+#[test]
+fn slots_builtins_check() {
+    accepted(
+        "the whole surface on a local slab",
+        "\
+fn main() -> () {
+    let mut s: Slots<I64> = slots_new(4)
+    slots_set(s, 0, 7)
+    print(slots_len(s))
+    match slots_get(s, 0) {
+        Some(v) => print(v)
+        None => print(0)
+    }
+    match slots_take(s, 0) {
+        Some(v) => print(v)
+        None => print(0)
+    }
+}
+",
+    );
+
+    accepted(
+        "a write op reaches through a mut parameter's field",
+        "\
+struct Buffer {
+    storage: Slots<I64>
+    len: I64
+}
+
+fn push(buf: mut Buffer, value: I64) -> () {
+    let at = buf.len
+    slots_set(buf.storage, at, value)
+    buf = Buffer(storage: buf.storage, len: at + 1)
+}
+
+fn main() -> () {
+    let mut buf = Buffer(storage: slots_new(4), len: 0)
+    push(buf, 7)
+    print(buf.len)
+}
+",
+    );
+
+    accepted(
+        "a template builds its own slab",
+        "\
+struct Buffer<T> {
+    storage: Slots<T>
+    len: I64
+}
+
+fn empty<T>() -> Buffer<T> {
+    let storage: Slots<T> = slots_new(0)
+    return Buffer(storage: storage, len: 0)
+}
+
+fn main() -> () {
+    let buf: Buffer<I64> = empty()
+    print(buf.len)
+}
+",
+    );
+}
+
 /// The read half of the modes doctrine (BOOTSTRAP §8 item 5): field access and `match` on an
 /// owned value, spelled plainly, because reads are unmarked and an ordinary value copies.
 #[test]
