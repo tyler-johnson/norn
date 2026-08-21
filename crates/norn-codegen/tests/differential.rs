@@ -99,6 +99,35 @@ fn traps_match() {
             "mut-writeback-trap",
             "fn wreck(count: mut I64) -> I64 {\n    count = count + 1\n    let zero = 0\n    count / zero\n}\n\nfn main() -> I64 {\n    let mut total = 5\n    wreck(total)\n}\n",
         ),
+        (
+            "slots-new-negative",
+            "fn main() -> () {\n    let s: Slots<I64> = slots_new(0 - 1)\n    print(s)\n}\n",
+        ),
+        (
+            // The bounds are values, like a slice's, and the trap interpolates index and
+            // capacity — both engines must agree on every byte.
+            "slots-get-range",
+            "fn main() -> () {\n    let s: Slots<I64> = slots_new(3)\n    print(slots_get(s, 3))\n}\n",
+        ),
+        (
+            "slots-negative-index",
+            "fn main() -> () {\n    let s: Slots<I64> = slots_new(3)\n    print(slots_get(s, 0 - 1))\n}\n",
+        ),
+        (
+            "slots-set-range",
+            "fn main() -> () {\n    let mut s: Slots<I64> = slots_new(3)\n    slots_set(s, 3, 7)\n}\n",
+        ),
+        (
+            "slots-take-range",
+            "fn main() -> () {\n    let mut s: Slots<I64> = slots_new(3)\n    print(slots_take(s, 3))\n}\n",
+        ),
+        (
+            // The bounds check runs before the `Rc::make_mut` in both engines, so a set out of
+            // range through a `mut` field chain mutates nothing — there is no half-write, and
+            // the agreement is the trap text plus the untouched stdout before it.
+            "slots-set-range-through-mut-chain",
+            "struct Holder {\n    inner: Slots<I64>\n}\n\nfn wreck(h: mut Holder) -> () {\n    slots_set(h.inner, 9, 7)\n}\n\nfn main() -> () {\n    let mut h = Holder(inner: slots_new(2))\n    print(slots_len(h.inner))\n    wreck(h)\n}\n",
+        ),
     ];
     for (name, source) in programs {
         let (nir, main) = common::build_source(name, source);

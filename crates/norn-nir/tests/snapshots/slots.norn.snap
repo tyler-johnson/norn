@@ -1,0 +1,144 @@
+=== nir ===
+struct Record #0 (label: String, hits: I64)
+struct Ledger #1 (entries: Slots<I64>, count: I64)
+enum Option #0 (None, Some(?))
+enum Result #1 (Ok(?), Err(?))
+enum IoError #2 (NotFound, Denied, InUse, Refused, Closed, Other(String))
+
+fn occupancy #0(_0/s: Slots<I64>) -> I64
+    local _1: I64
+  b0:
+    _1 = builtin slots_len(_0/s)
+    return _1
+
+fn first_or #1(_0/s: Slots<I64>, _1/fallback: I64) -> I64
+    local _2/v: I64
+    local _3: I64
+    local _4: Option<I64>
+  b0:
+    _4 = builtin slots_get(_0/s, 0)
+    goto b2
+  b1:
+    return _3
+  b2:
+    switch tag _4 [1 => b6] else b3
+  b3:
+    switch tag _4 [0 => b8] else b4
+  b4:
+    trap "no match arm applied"
+  b5:
+    _3 = _2/v
+    goto b1
+  b6:
+    _2/v = _4.0@Some
+    goto b5
+  b7:
+    _3 = _1/fallback
+    goto b1
+  b8:
+    goto b7
+
+fn main #2() -> ()
+    local _0/s: Slots<I64>
+    local _1/kept: Slots<I64>
+    local _2/ledger: Ledger
+    local _3/records: Slots<Record>
+    local _4: Slots<I64>
+    local _5: ()
+    local _6: I64
+    local _7: ()
+    local _8: Option<I64>
+    local _9: ()
+    local _10: ()
+    local _11: ()
+    local _12: Option<I64>
+    local _13: ()
+    local _14: Option<I64>
+    local _15: ()
+    local _16: Option<I64>
+    local _17: ()
+    local _18: ()
+    local _19: Option<I64>
+    local _20: ()
+    local _21: Option<I64>
+    local _22: ()
+    local _23: Option<I64>
+    local _24: ()
+    local _25: Option<I64>
+    local _26: ()
+    local _27: I64
+    local _28: ()
+    local _29: I64
+    local _30: ()
+    local _31: Ledger
+    local _32: ()
+    local _33: Option<I64>
+    local _34: ()
+    local _35: ()
+    local _36: Slots<Record>
+    local _37: Record
+    local _38: ()
+    local _39: Option<Record>
+    local _40: ()
+  b0:
+    _4 = builtin slots_new(3)
+    _0/s = _4
+    _5 = builtin print(_0/s)
+    _6 = builtin slots_len(_0/s)
+    _7 = builtin print(_6)
+    _8 = builtin slots_get(_0/s, 0)
+    _9 = builtin print(_8)
+    _10 = builtin slots_set(_0/s, 0, 7)
+    _11 = builtin slots_set(_0/s, 2, 9)
+    _12 = builtin slots_get(_0/s, 0)
+    _13 = builtin print(_12)
+    _14 = builtin slots_get(_0/s, 1)
+    _15 = builtin print(_14)
+    _16 = builtin slots_get(_0/s, 2)
+    _17 = builtin print(_16)
+    _1/kept = _0/s
+    _18 = builtin slots_set(_0/s, 1, 8)
+    _19 = builtin slots_get(_0/s, 1)
+    _20 = builtin print(_19)
+    _21 = builtin slots_get(_1/kept, 1)
+    _22 = builtin print(_21)
+    _23 = builtin slots_take(_0/s, 0)
+    _24 = builtin print(_23)
+    _25 = builtin slots_get(_0/s, 0)
+    _26 = builtin print(_25)
+    _27 = call occupancy#0(_0/s)
+    _28 = builtin print(_27)
+    _29 = call first_or#1(_0/s, 42)
+    _30 = builtin print(_29)
+    _31 = Ledger(_0/s, 2)
+    _2/ledger = _31
+    _32 = builtin slots_set(_2/ledger.0, 0, 100)
+    _33 = builtin slots_get(_2/ledger.0, 0)
+    _34 = builtin print(_33)
+    _35 = builtin print(_2/ledger)
+    _36 = builtin slots_new(2)
+    _3/records = _36
+    _37 = Record("hits", 3)
+    _38 = builtin slots_set(_3/records, 0, _37)
+    _39 = builtin slots_get(_3/records, 0)
+    _40 = builtin print(_39)
+    return _40
+
+=== output ===
+<slots 3>
+3
+None
+Some(7)
+None
+Some(9)
+Some(8)
+None
+Some(7)
+None
+3
+42
+Some(100)
+Ledger(entries: <slots 3>, count: 2)
+Some(Record(label: "hits", hits: 3))
+=== result ===
+()

@@ -1,0 +1,65 @@
+// The sequence wave's storage (BOOTSTRAP §8 item 5): a `Slots<T>` is a copyable slab of
+// optional element slots. Copying one is a refcount bump, and the write ops do the uniqueness
+// check inside themselves — in place when the storage is unique, one clone when shared — so a
+// copy taken before a write keeps its value, exactly the `Shared` promise with mutation on top.
+
+struct Record {
+    label: String
+    hits: I64
+}
+
+struct Ledger {
+    entries: Slots<I64>
+    count: I64
+}
+
+fn occupancy(s: Slots<I64>) -> I64 {
+    slots_len(s)
+}
+
+fn first_or(s: Slots<I64>, fallback: I64) -> I64 {
+    match slots_get(s, 0) {
+        Some(v) => v
+        None => fallback
+    }
+}
+
+fn main() -> () {
+    let mut s: Slots<I64> = slots_new(3)
+    print(s)
+    print(slots_len(s))
+
+    // A fresh slab is all holes.
+    print(slots_get(s, 0))
+
+    slots_set(s, 0, 7)
+    slots_set(s, 2, 9)
+    print(slots_get(s, 0))
+    print(slots_get(s, 1))
+    print(slots_get(s, 2))
+
+    // The COW witness: `kept` is a copy taken before the write, and the write op's uniqueness
+    // check clones the storage rather than let the copy see the new value.
+    let kept = s
+    slots_set(s, 1, 8)
+    print(slots_get(s, 1))
+    print(slots_get(kept, 1))
+
+    // Taking leaves a hole behind.
+    print(slots_take(s, 0))
+    print(slots_get(s, 0))
+
+    // Through a function boundary a slab is an ordinary value.
+    print(occupancy(s))
+    print(first_or(s, 42))
+
+    // And inside a struct it is an ordinary field, aggregates as elements included.
+    let mut ledger = Ledger(entries: s, count: 2)
+    slots_set(ledger.entries, 0, 100)
+    print(slots_get(ledger.entries, 0))
+    print(ledger)
+
+    let mut records: Slots<Record> = slots_new(2)
+    slots_set(records, 0, Record(label: "hits", hits: 3))
+    print(slots_get(records, 0))
+}

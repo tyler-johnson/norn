@@ -1283,6 +1283,55 @@ impl Emitter<'_> {
             Builtin::Byte => format!("byte({}, {fname})?", arg(0)),
             Builtin::BytesAt => format!("bytes_at({}, {}, {fname})?", arg(0), arg(1)),
             Builtin::TextUnchecked => format!("text_unchecked({}, {fname})?", arg(0)),
+            // The slots ops are inline blocks — the prelude cannot hold them, because their
+            // element types are per-instantiation and the prelude is generic-free (the
+            // `Latest`/`ListenerPort` precedent). The write ops lend the slab's own place with
+            // `mut_place_expr` and mutate through `Rc::make_mut` — in place when the storage is
+            // unique, one clone when shared — with the bounds check before the `make_mut`, so a
+            // trap mutates nothing and never pays the copy, matching the interpreter.
+            Builtin::SlotsNew => format!(
+                "{{ let cap = {}; if cap < 0 {{ return Err(Trap::new(format!(\"`slots_new` negative capacity: {{cap}}\"), {fname})); }} Rc::new(vec![None; cap as usize]) }}",
+                arg(0)
+            ),
+            Builtin::SlotsLen => format!("(({}).len() as i64)", arg(0)),
+            Builtin::SlotsGet => {
+                let ename = self.repr(dest_ty);
+                format!(
+                    "{{ let slab = {}; let index = {}; let len = slab.len() as i64; if index < 0 || index >= len {{ return Err(Trap::new(format!(\"`slots_get` out of range: {{index}} of {{len}}\"), {fname})); }} match slab[index as usize].clone() {{ Some(v) => {ename}::V{}(v), None => {ename}::V{} }} }}",
+                    arg(0),
+                    arg(1),
+                    hir::EnumId::SOME,
+                    hir::EnumId::NONE
+                )
+            }
+            Builtin::SlotsSet | Builtin::SlotsTake => {
+                let name = builtin.name();
+                let Operand::Copy(place) = &args[0] else {
+                    panic!("a `mut` argument is a place");
+                };
+                let slab = self.mut_place_expr(function, ctx, place);
+                let guard = format!(
+                    "let index = {}; let len = slab.len() as i64; if index < 0 || index >= len {{ return Err(Trap::new(format!(\"`{name}` out of range: {{index}} of {{len}}\"), {fname})); }}",
+                    arg(1)
+                );
+                if builtin == Builtin::SlotsSet {
+                    let element = match self.place_ty(function, place) {
+                        Ty::Slots(element) => *element,
+                        other => panic!("`slots_set` on {other:?} survived checking"),
+                    };
+                    let stored = self.registry.store(&element, &arg(2));
+                    format!(
+                        "{{ let slab = {slab}; {guard} Rc::make_mut(slab)[index as usize] = Some({stored}); }}"
+                    )
+                } else {
+                    let ename = self.repr(dest_ty);
+                    format!(
+                        "{{ let slab = {slab}; {guard} match Rc::make_mut(slab)[index as usize].take() {{ Some(v) => {ename}::V{}(v), None => {ename}::V{} }} }}",
+                        hir::EnumId::SOME,
+                        hir::EnumId::NONE
+                    )
+                }
+            }
             task => panic!(
                 "`{}` builds a task and cannot be evaluated here",
                 task.name()

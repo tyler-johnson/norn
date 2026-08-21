@@ -383,11 +383,12 @@ impl<'p> Registry<'p> {
         for name in self.aggregate_names() {
             let _ = writeln!(out, "    {name}({name}),");
         }
-        // One variant per interned `Shared` instantiation — a shared value crosses the same
+        // One variant per interned `Shared` and `Slots` instantiation — both cross the same
         // seams any value does (`send(input, shared(cfg))`), and the payload type differs per
-        // instantiation. `keys` is push-ordered by the deterministic walk.
+        // instantiation. A struct *holding* one crosses as its `S{id}` variant free; these are
+        // for the bare pointer itself. `keys` is push-ordered by the deterministic walk.
         for (key, ty) in &self.keys {
-            if matches!(ty, Ty::Shared(_)) {
+            if matches!(ty, Ty::Shared(_) | Ty::Slots(_)) {
                 let _ = writeln!(out, "    {}({}),", camel(key), self.repr(ty));
             }
         }
@@ -470,7 +471,7 @@ impl<'p> Registry<'p> {
             );
         }
         for (key, ty) in &self.keys {
-            if matches!(ty, Ty::Shared(_)) {
+            if matches!(ty, Ty::Shared(_) | Ty::Slots(_)) {
                 let name = camel(key);
                 pair(
                     key,
