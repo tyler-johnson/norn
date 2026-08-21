@@ -1,0 +1,53 @@
+// The mut wave's writeback (BOOTSTRAP §8 item 5): a `mut T` parameter is semantically
+// copy-in/copy-out — the callee works on its own copy, and the caller's variable receives it
+// when the call returns — and call sites stay unmarked. A copy taken before the call keeps its
+// value: the writeback copies on write, exactly the level that is shared.
+
+struct Point {
+    x: I64
+    y: I64
+}
+
+struct Nested {
+    at: Point
+}
+
+fn bump(count: mut I64) -> () {
+    count = count + 1
+}
+
+fn twice(count: mut I64) -> () {
+    bump(count)
+    bump(count)
+}
+
+fn shift(x: mut I64, y: mut I64) -> () {
+    x = x + 1
+    y = y - 1
+}
+
+fn main() -> () {
+    let mut total = 0
+    bump(total)
+    twice(total)
+    print(total)
+
+    let mut n = 0
+    while n < 3 {
+        bump(total)
+        n = n + 1
+    }
+    print(total)
+
+    let mut spot = Nested(at: Point(x: 10, y: 20))
+    let kept = spot
+    bump(spot.at.x)
+    print(spot.at.x)
+    print(kept.at.x)
+
+    let mut a = 1
+    let mut b = 9
+    shift(a, b)
+    print(a)
+    print(b)
+}

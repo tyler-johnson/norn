@@ -723,7 +723,14 @@ impl Emitter<'_> {
     fn param_list(&self, function: &Function) -> String {
         let mut out = String::new();
         for i in 0..function.params {
-            out.push_str(&format!(", a{i}: {}", self.repr(&function.tys[i])));
+            let repr = self.repr(&function.tys[i]);
+            // A `Mut` parameter is a real `&mut`: semantically copy-in/copy-out — the body works
+            // on its own local, written back at every return — representationally a pointer,
+            // sound because argument-list exclusivity leaves nothing else aliasing the pointee.
+            match function.modes.get(i) {
+                Some(hir::Mode::Mut) => out.push_str(&format!(", a{i}: &mut {repr}")),
+                _ => out.push_str(&format!(", a{i}: {repr}")),
+            }
         }
         out
     }
@@ -736,7 +743,15 @@ impl Emitter<'_> {
             .map(|i| {
                 let repr = self.repr(&function.tys[i]);
                 if i < function.params {
-                    format!("let mut l{i}: Option<{repr}> = Some(a{i});")
+                    match function.modes.get(i) {
+                        // The copy-in half: the body's local is the callee's own copy, and the
+                        // pointee stays untouched until a return writes it back — which is also
+                        // what keeps a trapping body from ever half-writing the caller.
+                        Some(hir::Mode::Mut) => {
+                            format!("let mut l{i}: Option<{repr}> = Some((*a{i}).clone());")
+                        }
+                        _ => format!("let mut l{i}: Option<{repr}> = Some(a{i});"),
+                    }
                 } else {
                     format!("let mut l{i}: Option<{repr}> = None;")
                 }
@@ -974,6 +989,19 @@ impl Emitter<'_> {
                         "return Ok(Cont::Return(wrap_{}({value})));",
                         self.key(&function.ret)
                     )],
+                    // The copy-out half: `ret` binds first — the return operand may read a `Mut`
+                    // parameter's own local — then each writeback lands in its pointee. A task
+                    // fn never declares `Mut`, and a handler's padded column is all `Read`.
+                    _ if function.modes.contains(&hir::Mode::Mut) => {
+                        let mut lines = vec![format!("let ret = {value};")];
+                        for (i, mode) in function.modes.iter().enumerate() {
+                            if *mode == hir::Mode::Mut {
+                                lines.push(format!("*a{i} = l{i}.take().unwrap();"));
+                            }
+                        }
+                        lines.push("return Ok(ret);".into());
+                        lines
+                    }
                     _ => vec![format!("return Ok({value});")],
                 }
             }
@@ -1052,7 +1080,7 @@ impl Emitter<'_> {
                 format!(
                     "f{id}({}{})?",
                     ctx.cx_opt(),
-                    self.args_list(function, ctx, args)
+                    self.call_args(function, ctx, *id, args)
                 )
             }
             Rvalue::Builtin(builtin, args) => {
@@ -1262,10 +1290,24 @@ impl Emitter<'_> {
         }
     }
 
-    fn args_list(&self, function: &Function, ctx: Ctx, operands: &[Operand]) -> String {
+    /// A direct call's arguments: reads clone, and a `Mut` position lends `&mut` to the
+    /// argument's own place. Every checked program's emitted call compiles: operands are flat
+    /// places or constants — lowering hoisted all evaluation — arguments evaluate left to right,
+    /// so each read's clone completes before any later borrow starts, and exclusivity refused
+    /// every list where a borrowed root appears twice.
+    fn call_args(&self, function: &Function, ctx: Ctx, callee: usize, operands: &[Operand]) -> String {
+        let modes = &self.program.fns[callee].modes;
         let mut out = String::new();
-        for operand in operands {
-            out.push_str(&format!(", {}", self.operand_expr(function, ctx, operand)));
+        for (index, operand) in operands.iter().enumerate() {
+            match modes.get(index) {
+                Some(hir::Mode::Mut) => {
+                    let Operand::Copy(place) = operand else {
+                        panic!("a `mut` argument is a place");
+                    };
+                    out.push_str(&format!(", {}", self.mut_place_expr(function, ctx, place)));
+                }
+                _ => out.push_str(&format!(", {}", self.operand_expr(function, ctx, operand))),
+            }
         }
         out
     }
@@ -1336,6 +1378,35 @@ impl Emitter<'_> {
             ty = step_ty;
         }
         out.push_str(" cur.clone() }");
+        out
+    }
+
+    /// A place lent for writing: a `&mut` to the value at `place`, copy-on-write through each
+    /// `Rc`-stored step exactly like `write_stmt`. `mut` arguments are checker-restricted to
+    /// struct-field chains the same way writes are, so `Deref` and `Downcast` cannot appear.
+    fn mut_place_expr(&self, function: &Function, ctx: Ctx, place: &Place) -> String {
+        let base = format!("{}l{}", ctx.locals(), place.local);
+        if place.proj.is_empty() {
+            return format!("{base}.as_mut().unwrap()");
+        }
+        let mut ty = function.tys[place.local].clone();
+        let mut out = format!("{{ let cur = {base}.as_mut().unwrap();");
+        for proj in &place.proj {
+            let Proj::Field(index) = proj else {
+                panic!("a `mut` argument projected through an enum or a shared value");
+            };
+            let step_ty = self.program.ty_of_proj(&ty, proj);
+            // Interior steps are aggregates, always `Rc`-stored; the leaf is `make_mut` when its
+            // field is boxed and a plain `&mut` when it is inline. Either way the block yields
+            // `&mut Repr` of the value itself.
+            if self.registry.boxed(&step_ty) {
+                out.push_str(&format!(" let cur = Rc::make_mut(&mut cur.f{index});"));
+            } else {
+                out.push_str(&format!(" let cur = &mut cur.f{index};"));
+            }
+            ty = step_ty;
+        }
+        out.push_str(" cur }");
         out
     }
 

@@ -1,0 +1,94 @@
+=== nir ===
+struct Point #0 (x: I64, y: I64)
+struct Nested #1 (at: Point)
+enum Option #0 (None, Some(?))
+enum Result #1 (Ok(?), Err(?))
+enum IoError #2 (NotFound, Denied, InUse, Refused, Closed, Other(String))
+
+fn bump #0(_0/count: I64) -> ()
+    local _1: I64
+  b0:
+    _1 = _0/count add.i 1
+    _0/count = _1
+    return ()
+
+fn twice #1(_0/count: I64) -> ()
+    local _1: ()
+    local _2: ()
+  b0:
+    _1 = call bump#0(mut _0/count)
+    _2 = call bump#0(mut _0/count)
+    return _2
+
+fn shift #2(_0/x: I64, _1/y: I64) -> ()
+    local _2: I64
+    local _3: I64
+  b0:
+    _2 = _0/x add.i 1
+    _0/x = _2
+    _3 = _1/y sub.i 1
+    _1/y = _3
+    return ()
+
+fn main #3() -> ()
+    local _0/total: I64
+    local _1/n: I64
+    local _2/spot: Nested
+    local _3/kept: Nested
+    local _4/a: I64
+    local _5/b: I64
+    local _6: ()
+    local _7: ()
+    local _8: ()
+    local _9: Bool
+    local _10: ()
+    local _11: I64
+    local _12: ()
+    local _13: Point
+    local _14: Nested
+    local _15: ()
+    local _16: ()
+    local _17: ()
+    local _18: ()
+    local _19: ()
+    local _20: ()
+  b0:
+    _0/total = 0
+    _6 = call bump#0(mut _0/total)
+    _7 = call twice#1(mut _0/total)
+    _8 = builtin print(_0/total)
+    _1/n = 0
+    goto b1
+  b1:
+    _9 = _1/n lt 3
+    branch _9 ? b3 : b2
+  b2:
+    _12 = builtin print(_0/total)
+    _13 = Point(10, 20)
+    _14 = Nested(_13)
+    _2/spot = _14
+    _3/kept = _2/spot
+    _15 = call bump#0(mut _2/spot.0.0)
+    _16 = builtin print(_2/spot.0.0)
+    _17 = builtin print(_3/kept.0.0)
+    _4/a = 1
+    _5/b = 9
+    _18 = call shift#2(mut _4/a, mut _5/b)
+    _19 = builtin print(_4/a)
+    _20 = builtin print(_5/b)
+    return _20
+  b3:
+    _10 = call bump#0(mut _0/total)
+    _11 = _1/n add.i 1
+    _1/n = _11
+    goto b1
+
+=== output ===
+3
+6
+11
+10
+2
+8
+=== result ===
+()
