@@ -1,0 +1,369 @@
+=== nir ===
+struct Buf #0 (storage: Slots<T>, len: I64)
+struct Buf<I64> #1 (storage: Slots<I64>, len: I64)
+enum Option #0 (None, Some(?))
+enum Result #1 (Ok(?), Err(?))
+enum IoError #2 (NotFound, Denied, InUse, Refused, Closed, Other(String))
+
+fn or_zero #0(_0/held: Option<I64>) -> I64
+    local _1/v: I64
+    local _2: I64
+  b0:
+    goto b2
+  b1:
+    return _2
+  b2:
+    switch tag _0/held [1 => b6] else b3
+  b3:
+    switch tag _0/held [0 => b8] else b4
+  b4:
+    trap "no match arm applied"
+  b5:
+    _2 = _1/v
+    goto b1
+  b6:
+    _1/v = _0/held.0@Some
+    goto b5
+  b7:
+    _2 = 0
+    goto b1
+  b8:
+    goto b7
+
+fn total #1(_0/buf: Buf<I64>) -> I64
+    local _1/sum: I64
+    local _2/i: I64
+    local _3: I64
+    local _4: Bool
+    local _5: Option<I64>
+    local _6: I64
+    local _7: I64
+    local _8: I64
+  b0:
+    _1/sum = 0
+    _2/i = 0
+    goto b1
+  b1:
+    _3 = call buf.length<I64>#10(_0/buf)
+    _4 = _2/i lt _3
+    branch _4 ? b3 : b2
+  b2:
+    return _1/sum
+  b3:
+    _5 = call buf.get<I64>#11(_0/buf, _2/i)
+    _6 = call or_zero#0(_5)
+    _7 = _1/sum add.i _6
+    _1/sum = _7
+    _8 = _2/i add.i 1
+    _2/i = _8
+    goto b1
+
+fn main #2() -> ()
+    local _0/buf: Buf<I64>
+    local _1/n: I64
+    local _2/kept: Buf<I64>
+    local _3/drained: Buf<I64>
+    local _4: Buf<I64>
+    local _5: I64
+    local _6: ()
+    local _7: Bool
+    local _8: I64
+    local _9: ()
+    local _10: I64
+    local _11: I64
+    local _12: ()
+    local _13: ()
+    local _14: Option<I64>
+    local _15: ()
+    local _16: Option<I64>
+    local _17: ()
+    local _18: Option<I64>
+    local _19: ()
+    local _20: ()
+    local _21: Option<I64>
+    local _22: ()
+    local _23: ()
+    local _24: I64
+    local _25: ()
+    local _26: I64
+    local _27: ()
+    local _28: Option<I64>
+    local _29: ()
+    local _30: I64
+    local _31: ()
+    local _32: Buf<I64>
+    local _33: ()
+    local _34: ()
+    local _35: Option<I64>
+    local _36: ()
+    local _37: Option<I64>
+    local _38: ()
+    local _39: Option<I64>
+    local _40: ()
+    local _41: I64
+    local _42: ()
+  b0:
+    _4 = call buf.empty<I64>#12()
+    _0/buf = _4
+    _5 = call buf.length<I64>#10(_0/buf)
+    _6 = builtin print(_5)
+    _1/n = 0
+    goto b1
+  b1:
+    _7 = _1/n lt 5
+    branch _7 ? b3 : b2
+  b2:
+    _11 = call buf.length<I64>#10(_0/buf)
+    _12 = builtin print(_11)
+    _13 = builtin print(_0/buf)
+    _14 = call buf.get<I64>#11(_0/buf, 0)
+    _15 = builtin print(_14)
+    _16 = call buf.get<I64>#11(_0/buf, 4)
+    _17 = builtin print(_16)
+    _18 = call buf.get<I64>#11(_0/buf, 5)
+    _19 = builtin print(_18)
+    _20 = call buf.set<I64>#14(mut _0/buf, 1, 99)
+    _21 = call buf.get<I64>#11(_0/buf, 1)
+    _22 = builtin print(_21)
+    _2/kept = _0/buf
+    _23 = call buf.push<I64>#13(mut _0/buf, 50)
+    _24 = call buf.length<I64>#10(_0/buf)
+    _25 = builtin print(_24)
+    _26 = call buf.length<I64>#10(_2/kept)
+    _27 = builtin print(_26)
+    _28 = call buf.get<I64>#11(_2/kept, 5)
+    _29 = builtin print(_28)
+    _30 = call total#1(_0/buf)
+    _31 = builtin print(_30)
+    _32 = call buf.empty<I64>#12()
+    _3/drained = _32
+    _33 = call buf.push<I64>#13(mut _3/drained, 7)
+    _34 = call buf.push<I64>#13(mut _3/drained, 8)
+    _35 = call buf.pop<I64>#15(mut _3/drained)
+    _36 = builtin print(_35)
+    _37 = call buf.pop<I64>#15(mut _3/drained)
+    _38 = builtin print(_37)
+    _39 = call buf.pop<I64>#15(mut _3/drained)
+    _40 = builtin print(_39)
+    _41 = call buf.length<I64>#10(_3/drained)
+    _42 = builtin print(_41)
+    return _42
+  b3:
+    _8 = _1/n mul.i 10
+    _9 = call buf.push<I64>#13(mut _0/buf, _8)
+    _10 = _1/n add.i 1
+    _1/n = _10
+    goto b1
+
+inert fn buf.empty #3() -> Buf
+  b0:
+    return ()
+
+inert fn buf.length #4(_0/buf: Buf) -> I64
+  b0:
+    return ()
+
+inert fn buf.push #5(_0/buf: Buf, _1/value: T) -> ()
+  b0:
+    return ()
+
+inert fn buf.pop #6(_0/buf: Buf) -> Option<T>
+  b0:
+    return ()
+
+inert fn buf.get #7(_0/buf: Buf, _1/index: I64) -> Option<T>
+  b0:
+    return ()
+
+inert fn buf.set #8(_0/buf: Buf, _1/index: I64, _2/value: T) -> ()
+  b0:
+    return ()
+
+inert fn buf.grow #9(_0/buf: Buf) -> ()
+  b0:
+    return ()
+
+fn buf.length<I64> #10(_0/buf: Buf<I64>) -> I64
+  b0:
+    return _0/buf.1
+
+fn buf.get<I64> #11(_0/buf: Buf<I64>, _1/index: I64) -> Option<I64>
+    local _2: Option<I64>
+    local _3: Bool
+    local _4: Bool
+    local _5: Bool
+    local _6: Option<I64>
+    local _7: Option<I64>
+  b0:
+    _4 = _1/index lt 0
+    _3 = _4
+    branch _3 ? b2 : b1
+  b1:
+    _5 = _1/index ge _0/buf.1
+    _3 = _5
+    goto b2
+  b2:
+    branch _3 ? b3 : b4
+  b3:
+    _6 = Option.None()
+    _2 = _6
+    goto b5
+  b4:
+    _7 = builtin slots_get(_0/buf.0, _1/index)
+    _2 = _7
+    goto b5
+  b5:
+    return _2
+
+fn buf.empty<I64> #12() -> Buf<I64>
+    local _0/storage: Slots<I64>
+    local _1: Slots<I64>
+    local _2: Buf<I64>
+  b0:
+    _1 = builtin slots_new(0)
+    _0/storage = _1
+    _2 = Buf<I64>(_0/storage, 0)
+    return _2
+
+fn buf.push<I64> #13(_0/buf: Buf<I64>, _1/value: I64) -> ()
+    local _2/at: I64
+    local _3: ()
+    local _4: I64
+    local _5: Bool
+    local _6: ()
+    local _7: ()
+    local _8: I64
+  b0:
+    _4 = builtin slots_len(_0/buf.0)
+    _5 = _0/buf.1 eq _4
+    branch _5 ? b1 : b2
+  b1:
+    _6 = call buf.grow<I64>#16(mut _0/buf)
+    _3 = _6
+    goto b3
+  b2:
+    _3 = ()
+    goto b3
+  b3:
+    _2/at = _0/buf.1
+    _7 = builtin slots_set(_0/buf.0, _2/at, _1/value)
+    _8 = _2/at add.i 1
+    _0/buf.1 = _8
+    return ()
+
+fn buf.set<I64> #14(_0/buf: Buf<I64>, _1/index: I64, _2/value: I64) -> ()
+    local _3: ()
+  b0:
+    _3 = builtin slots_set(_0/buf.0, _1/index, _2/value)
+    return _3
+
+fn buf.pop<I64> #15(_0/buf: Buf<I64>) -> Option<I64>
+    local _1/at: I64
+    local _2: Option<I64>
+    local _3: Bool
+    local _4: Option<I64>
+    local _5: I64
+    local _6: Option<I64>
+  b0:
+    _3 = _0/buf.1 eq 0
+    branch _3 ? b1 : b2
+  b1:
+    _4 = Option.None()
+    _2 = _4
+    goto b3
+  b2:
+    _5 = _0/buf.1 sub.i 1
+    _1/at = _5
+    _0/buf.1 = _1/at
+    _6 = builtin slots_take(_0/buf.0, _1/at)
+    _2 = _6
+    goto b3
+  b3:
+    return _2
+
+fn buf.grow<I64> #16(_0/buf: Buf<I64>) -> ()
+    local _1/old: Slots<I64>
+    local _2/capacity: I64
+    local _3/bigger: I64
+    local _4/fresh: Slots<I64>
+    local _5/i: I64
+    local _6/v: I64
+    local _7: I64
+    local _8: I64
+    local _9: Bool
+    local _10: I64
+    local _11: Slots<I64>
+    local _12: Bool
+    local _13: ()
+    local _14: Option<I64>
+    local _15: ()
+    local _16: I64
+  b0:
+    _1/old = _0/buf.0
+    _7 = builtin slots_len(_1/old)
+    _2/capacity = _7
+    _9 = _2/capacity eq 0
+    branch _9 ? b1 : b2
+  b1:
+    _8 = 4
+    goto b3
+  b2:
+    _10 = _2/capacity mul.i 2
+    _8 = _10
+    goto b3
+  b3:
+    _3/bigger = _8
+    _11 = builtin slots_new(_3/bigger)
+    _4/fresh = _11
+    _5/i = 0
+    goto b4
+  b4:
+    _12 = _5/i lt _0/buf.1
+    branch _12 ? b6 : b5
+  b5:
+    _0/buf.0 = _4/fresh
+    return ()
+  b6:
+    _14 = builtin slots_get(_1/old, _5/i)
+    goto b8
+  b7:
+    _16 = _5/i add.i 1
+    _5/i = _16
+    goto b4
+  b8:
+    switch tag _14 [1 => b12] else b9
+  b9:
+    switch tag _14 [0 => b14] else b10
+  b10:
+    trap "no match arm applied"
+  b11:
+    _15 = builtin slots_set(_4/fresh, _5/i, _6/v)
+    _13 = _15
+    goto b7
+  b12:
+    _6/v = _14.0@Some
+    goto b11
+  b13:
+    _13 = ()
+    goto b7
+  b14:
+    goto b13
+
+=== output ===
+0
+5
+Buf<I64>(storage: <slots 8>, len: 5)
+Some(0)
+Some(40)
+None
+Some(99)
+6
+5
+None
+239
+Some(8)
+Some(7)
+None
+0
+=== result ===
+()

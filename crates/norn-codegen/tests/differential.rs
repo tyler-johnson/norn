@@ -123,6 +123,13 @@ fn traps_match() {
             "fn main() -> () {\n    let mut s: Slots<I64> = slots_new(3)\n    print(slots_take(s, 3))\n}\n",
         ),
         (
+            // std/buf's `set` delegates its bound to the slab, so a set at the capacity of a
+            // full buf traps with the capacity on both sides — the v0 looseness the std/buf doc
+            // comment records, pinned here until std gains a trap primitive.
+            "buf-set-range",
+            "import { Buf, empty, push, set } from \"std/buf\"\n\nfn main() -> () {\n    let mut buf: Buf<I64> = empty()\n    let mut n = 0\n    while n < 4 {\n        push(buf, n)\n        n = n + 1\n    }\n    set(buf, 4, 9)\n}\n",
+        ),
+        (
             // The bounds check runs before the `Rc::make_mut` in both engines, so a set out of
             // range through a `mut` field chain mutates nothing — there is no half-write, and
             // the agreement is the trap text plus the untouched stdout before it.

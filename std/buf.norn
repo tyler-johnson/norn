@@ -1,0 +1,82 @@
+// The contiguous sequence, written once — BOOTSTRAP §8 item 12's open question, answered.
+//
+// A `Buf<T>` is an ordinary struct over a `Slots<T>` slab and a length, COW-copyable exactly as
+// its parts are: copying one is two refcount bumps, and the write ops do the uniqueness check
+// inside the slab — in place when this buf is the storage's only holder, one storage clone when
+// a copy is watching. `push` is the first real `mut` consumer: the caller writes `push(buf, x)`
+// unmarked, and the signature is where the writeback contract lives.
+//
+// Arguments are subject-first, like std/list. Iteration and behaviour-taking functions — map,
+// filter, fold — wait for M7's closures; indexing sugar waits for the trait that names it.
+
+export struct Buf<T> {
+    storage: Slots<T>
+    len: I64
+}
+
+// The expectation is what settles `T` here: `let out: Buf<I64> = empty()`.
+export fn empty<T>() -> Buf<T> {
+    let storage: Slots<T> = slots_new(0)
+    Buf(storage: storage, len: 0)
+}
+
+export fn length<T>(buf: Buf<T>) -> I64 {
+    buf.len
+}
+
+export fn push<T>(buf: mut Buf<T>, value: T) -> () {
+    if buf.len == slots_len(buf.storage) {
+        grow(buf)
+    }
+    let at = buf.len
+    slots_set(buf.storage, at, value)
+    buf.len = at + 1
+}
+
+// The last element, or `None` on an empty buf. The slot it held becomes a hole outside the
+// length, which no read can reach.
+export fn pop<T>(buf: mut Buf<T>) -> Option<T> {
+    if buf.len == 0 {
+        None
+    } else {
+        let at = buf.len - 1
+        buf.len = at
+        slots_take(buf.storage, at)
+    }
+}
+
+export fn get<T>(buf: Buf<T>, index: I64) -> Option<T> {
+    if index < 0 || index >= buf.len {
+        None
+    } else {
+        slots_get(buf.storage, index)
+    }
+}
+
+// Write an element the buf already covers. The enforced bound is the *capacity* in v0 — std has
+// no trap primitive yet, so the check delegated to the slab is the one that can stop the
+// program — and an index in the len..capacity gap writes a slot no read can observe: `get` and
+// `pop` are length-guarded, `push` overwrites slot `len` before the length grows past it, and
+// `grow` copies only the written prefix. The bound tightens to the length when std gains a way
+// to trap (the std/bytes precedent: `to_string` rides `text_unchecked`'s).
+export fn set<T>(buf: mut Buf<T>, index: I64, value: T) -> () {
+    slots_set(buf.storage, index, value)
+}
+
+// Double the storage — from 4, the first time — and carry the written prefix across. Private:
+// capacity is a representation fact, not part of the surface.
+fn grow<T>(buf: mut Buf<T>) -> () {
+    let old = buf.storage
+    let capacity = slots_len(old)
+    let bigger = if capacity == 0 { 4 } else { capacity * 2 }
+    let mut fresh: Slots<T> = slots_new(bigger)
+    let mut i = 0
+    while i < buf.len {
+        match slots_get(old, i) {
+            Some(v) => slots_set(fresh, i, v)
+            None => ()
+        }
+        i = i + 1
+    }
+    buf.storage = fresh
+}

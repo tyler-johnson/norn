@@ -1,0 +1,395 @@
+=== nir ===
+struct Buf #0 (storage: Slots<T>, len: I64)
+struct Buf<I64> #1 (storage: Slots<I64>, len: I64)
+enum Option #0 (None, Some(?))
+enum Result #1 (Ok(?), Err(?))
+enum IoError #2 (NotFound, Denied, InUse, Refused, Closed, Other(String))
+
+reactor History #0(Buf<I64>, I64)
+    node 0 seed: Buf<I64> param slot 0 arg 0 <- []
+    node 1 size: I64 param slot 1 arg 1 <- []
+    node 2 entries: Buf<I64> state slot 2 init History.entries.init#10 <- [seed]
+    node 3 cursor: I64 state slot 3 init History.cursor.init#11 <- []
+    node 4 count: I64 signal History.count#12 export <- [entries]
+    node 5 newest: Option<I64> signal History.newest#13 export <- [entries, cursor, size]
+    node 6 snapshot: Buf<I64> signal History.snapshot#14 export <- [entries]
+    order [seed, size, entries, cursor, count, newest, snapshot]
+    input 0 recorded: I64 capacity 8 overflow reject handler History.on.recorded#9
+        plan [entries, cursor, count, newest, snapshot]
+    exports [count, newest, snapshot]
+
+task fn record #0(_0/feed: History) -> ()
+    local _1: Input<I64>
+    local _2: Task<()>
+    local _3: ()
+    local _4: Input<I64>
+    local _5: Task<()>
+    local _6: ()
+    local _7: Input<I64>
+    local _8: Task<()>
+    local _9: ()
+    local _10: Input<I64>
+    local _11: Task<()>
+    local _12: ()
+    local _13: Input<I64>
+    local _14: Task<()>
+    local _15: ()
+  b0:
+    _1 = input 0 of _0/feed
+    _2 = task builtin send(_1, 3)
+    await _2 -> _3, resume b1
+  b1:
+    _4 = input 0 of _0/feed
+    _5 = task builtin send(_4, 1)
+    await _5 -> _6, resume b2
+  b2:
+    _7 = input 0 of _0/feed
+    _8 = task builtin send(_7, 4)
+    await _8 -> _9, resume b3
+  b3:
+    _10 = input 0 of _0/feed
+    _11 = task builtin send(_10, 1)
+    await _11 -> _12, resume b4
+  b4:
+    _13 = input 0 of _0/feed
+    _14 = task builtin send(_13, 5)
+    await _14 -> _15, resume b5
+  b5:
+    return _15
+
+task fn main #1() -> ()
+    local _0/seed: Buf<I64>
+    local _1/n: I64
+    local _2/feed: History
+    local _3: Buf<I64>
+    local _4: Bool
+    local _5: ()
+    local _6: I64
+    local _7: History
+    local _8: Task<()>
+    local _9: ()
+    local _10: Task<()>
+    local _11: ()
+    local _12: Signal<I64>
+    local _13: I64
+    local _14: ()
+    local _15: Signal<Option<I64>>
+    local _16: Option<I64>
+    local _17: ()
+    local _18: Signal<Buf<I64>>
+    local _19: Buf<I64>
+    local _20: ()
+  b0:
+    _3 = call buf.empty<I64>#18()
+    _0/seed = _3
+    _1/n = 0
+    goto b1
+  b1:
+    _4 = _1/n lt 4
+    branch _4 ? b3 : b2
+  b2:
+    _7 = spawn reactor History#0(_0/seed, 4)
+    _2/feed = _7
+    _8 = task record#0(_2/feed)
+    await _8 -> _9, resume b4
+  b3:
+    _5 = call buf.push<I64>#19(mut _0/seed, 0)
+    _6 = _1/n add.i 1
+    _1/n = _6
+    goto b1
+  b4:
+    _10 = task builtin sleep(10)
+    await _10 -> _11, resume b5
+  b5:
+    _12 = export 0 of _2/feed
+    _13 = builtin latest(_12)
+    _14 = builtin print(_13)
+    _15 = export 1 of _2/feed
+    _16 = builtin latest(_15)
+    _17 = builtin print(_16)
+    _18 = export 2 of _2/feed
+    _19 = builtin latest(_18)
+    _20 = builtin print(_19)
+    return _20
+
+inert fn buf.empty #2() -> Buf
+  b0:
+    return ()
+
+inert fn buf.length #3(_0/buf: Buf) -> I64
+  b0:
+    return ()
+
+inert fn buf.push #4(_0/buf: Buf, _1/value: T) -> ()
+  b0:
+    return ()
+
+inert fn buf.pop #5(_0/buf: Buf) -> Option<T>
+  b0:
+    return ()
+
+inert fn buf.get #6(_0/buf: Buf, _1/index: I64) -> Option<T>
+  b0:
+    return ()
+
+inert fn buf.set #7(_0/buf: Buf, _1/index: I64, _2/value: T) -> ()
+  b0:
+    return ()
+
+inert fn buf.grow #8(_0/buf: Buf) -> ()
+  b0:
+    return ()
+
+fn History.on.recorded #9(_0/value: I64, _1/seed: Buf<I64>, _2/size: I64, _3/entries: Buf<I64>, _4/cursor: I64) -> ()
+    local _5/held: Buf<I64>
+    local _6: ()
+    local _7: I64
+    local _8: I64
+  b0:
+    _5/held = _3/entries
+    _6 = call buf.set<I64>#17(mut _5/held, _4/cursor, _0/value)
+    _3/entries = _5/held
+    set slot 2 = _3/entries
+    _7 = _4/cursor add.i 1
+    _8 = _7 rem.i _2/size
+    _4/cursor = _8
+    set slot 3 = _4/cursor
+    return ()
+
+fn History.entries.init #10(_0/seed: Buf<I64>) -> Buf<I64>
+  b0:
+    return _0/seed
+
+fn History.cursor.init #11() -> I64
+  b0:
+    return 0
+
+fn History.count #12(_0/entries: Buf<I64>) -> I64
+    local _1: I64
+  b0:
+    _1 = call buf.length<I64>#15(_0/entries)
+    return _1
+
+fn History.newest #13(_0/entries: Buf<I64>, _1/cursor: I64, _2/size: I64) -> Option<I64>
+    local _3: I64
+    local _4: I64
+    local _5: I64
+    local _6: Option<I64>
+  b0:
+    _3 = _1/cursor add.i _2/size
+    _4 = _3 sub.i 1
+    _5 = _4 rem.i _2/size
+    _6 = call buf.get<I64>#16(_0/entries, _5)
+    return _6
+
+fn History.snapshot #14(_0/entries: Buf<I64>) -> Buf<I64>
+  b0:
+    return _0/entries
+
+fn buf.length<I64> #15(_0/buf: Buf<I64>) -> I64
+  b0:
+    return _0/buf.1
+
+fn buf.get<I64> #16(_0/buf: Buf<I64>, _1/index: I64) -> Option<I64>
+    local _2: Option<I64>
+    local _3: Bool
+    local _4: Bool
+    local _5: Bool
+    local _6: Option<I64>
+    local _7: Option<I64>
+  b0:
+    _4 = _1/index lt 0
+    _3 = _4
+    branch _3 ? b2 : b1
+  b1:
+    _5 = _1/index ge _0/buf.1
+    _3 = _5
+    goto b2
+  b2:
+    branch _3 ? b3 : b4
+  b3:
+    _6 = Option.None()
+    _2 = _6
+    goto b5
+  b4:
+    _7 = builtin slots_get(_0/buf.0, _1/index)
+    _2 = _7
+    goto b5
+  b5:
+    return _2
+
+fn buf.set<I64> #17(_0/buf: Buf<I64>, _1/index: I64, _2/value: I64) -> ()
+    local _3: ()
+  b0:
+    _3 = builtin slots_set(_0/buf.0, _1/index, _2/value)
+    return _3
+
+fn buf.empty<I64> #18() -> Buf<I64>
+    local _0/storage: Slots<I64>
+    local _1: Slots<I64>
+    local _2: Buf<I64>
+  b0:
+    _1 = builtin slots_new(0)
+    _0/storage = _1
+    _2 = Buf<I64>(_0/storage, 0)
+    return _2
+
+fn buf.push<I64> #19(_0/buf: Buf<I64>, _1/value: I64) -> ()
+    local _2/at: I64
+    local _3: ()
+    local _4: I64
+    local _5: Bool
+    local _6: ()
+    local _7: ()
+    local _8: I64
+  b0:
+    _4 = builtin slots_len(_0/buf.0)
+    _5 = _0/buf.1 eq _4
+    branch _5 ? b1 : b2
+  b1:
+    _6 = call buf.grow<I64>#20(mut _0/buf)
+    _3 = _6
+    goto b3
+  b2:
+    _3 = ()
+    goto b3
+  b3:
+    _2/at = _0/buf.1
+    _7 = builtin slots_set(_0/buf.0, _2/at, _1/value)
+    _8 = _2/at add.i 1
+    _0/buf.1 = _8
+    return ()
+
+fn buf.grow<I64> #20(_0/buf: Buf<I64>) -> ()
+    local _1/old: Slots<I64>
+    local _2/capacity: I64
+    local _3/bigger: I64
+    local _4/fresh: Slots<I64>
+    local _5/i: I64
+    local _6/v: I64
+    local _7: I64
+    local _8: I64
+    local _9: Bool
+    local _10: I64
+    local _11: Slots<I64>
+    local _12: Bool
+    local _13: ()
+    local _14: Option<I64>
+    local _15: ()
+    local _16: I64
+  b0:
+    _1/old = _0/buf.0
+    _7 = builtin slots_len(_1/old)
+    _2/capacity = _7
+    _9 = _2/capacity eq 0
+    branch _9 ? b1 : b2
+  b1:
+    _8 = 4
+    goto b3
+  b2:
+    _10 = _2/capacity mul.i 2
+    _8 = _10
+    goto b3
+  b3:
+    _3/bigger = _8
+    _11 = builtin slots_new(_3/bigger)
+    _4/fresh = _11
+    _5/i = 0
+    goto b4
+  b4:
+    _12 = _5/i lt _0/buf.1
+    branch _12 ? b6 : b5
+  b5:
+    _0/buf.0 = _4/fresh
+    return ()
+  b6:
+    _14 = builtin slots_get(_1/old, _5/i)
+    goto b8
+  b7:
+    _16 = _5/i add.i 1
+    _5/i = _16
+    goto b4
+  b8:
+    switch tag _14 [1 => b12] else b9
+  b9:
+    switch tag _14 [0 => b14] else b10
+  b10:
+    trap "no match arm applied"
+  b11:
+    _15 = builtin slots_set(_4/fresh, _5/i, _6/v)
+    _13 = _15
+    goto b7
+  b12:
+    _6/v = _14.0@Some
+    goto b11
+  b13:
+    _13 = ()
+    goto b7
+  b14:
+    goto b13
+
+=== graph ===
+reactor History #0(Buf<I64>, I64)
+    node 0 seed: Buf<I64> param slot 0 arg 0 <- []
+    node 1 size: I64 param slot 1 arg 1 <- []
+    node 2 entries: Buf<I64> state slot 2 init History.entries.init#10 <- [seed]
+    node 3 cursor: I64 state slot 3 init History.cursor.init#11 <- []
+    node 4 count: I64 signal History.count#12 export <- [entries]
+    node 5 newest: Option<I64> signal History.newest#13 export <- [entries, cursor, size]
+    node 6 snapshot: Buf<I64> signal History.snapshot#14 export <- [entries]
+    order [seed, size, entries, cursor, count, newest, snapshot]
+    input 0 recorded: I64 capacity 8 overflow reject handler History.on.recorded#9
+        plan [entries, cursor, count, newest, snapshot]
+    exports [count, newest, snapshot]
+
+=== output ===
+4
+Some(5)
+Buf<I64>(storage: <slots 4>, len: 4)
+=== result ===
+()
+=== trace ===
+0ms t0 spawn main root
+0ms t0 resume
+0ms R0 create History in t0
+0ms R0 publish 0
+0ms t0 park timer 10ms
+0ms R0 turn 0 recorded
+0ms R0 commit entries
+0ms R0 commit cursor
+0ms R0 recompute count
+0ms R0 recompute newest
+0ms R0 recompute snapshot
+0ms R0 publish 1
+0ms R0 turn 1 recorded
+0ms R0 commit entries
+0ms R0 commit cursor
+0ms R0 recompute count
+0ms R0 recompute newest
+0ms R0 recompute snapshot
+0ms R0 publish 2
+0ms R0 turn 2 recorded
+0ms R0 commit entries
+0ms R0 commit cursor
+0ms R0 recompute count
+0ms R0 recompute newest
+0ms R0 recompute snapshot
+0ms R0 publish 3
+0ms R0 turn 3 recorded
+0ms R0 commit entries
+0ms R0 commit cursor
+0ms R0 recompute count
+0ms R0 recompute newest
+0ms R0 recompute snapshot
+0ms R0 publish 4
+0ms R0 turn 4 recorded
+0ms R0 commit entries
+0ms R0 commit cursor
+0ms R0 recompute count
+0ms R0 recompute newest
+0ms R0 recompute snapshot
+0ms R0 publish 5
+10ms -- clock
+10ms t0 resume
+10ms R0 stop
+10ms t0 done

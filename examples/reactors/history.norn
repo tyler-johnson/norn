@@ -1,0 +1,57 @@
+// A `Buf` as reactor state, updated inside a turn — within what a turn permits. Two rules meet
+// here and the example teaches both:
+//
+//   - A state cell cannot sit at a `mut` argument — the writeback would land beside the turn's
+//     commit rather than in it — so the handler uses the documented idiom: read the cell into a
+//     `let mut` local, write through that, and assign the result back. The assignment is what
+//     commits.
+//   - A turn must be provably finite, so `push` is not turn-callable at all: it statically
+//     reaches `grow`'s copy loop, however rarely growth actually fires. What a turn may do is
+//     the loop-free `set`, which is why the history is a bounded ring — its capacity built up
+//     front in task land, where `push` and its loop are at home.
+
+import { Buf, empty, length, push, set, get } from "std/buf"
+
+reactor History(seed: Buf<I64>, size: I64) {
+    input recorded: I64 [capacity: 8, overflow: reject]
+
+    state entries: Buf<I64> = seed
+    state cursor: I64 = 0
+
+    on recorded(value) {
+        let mut held = entries
+        set(held, cursor, value)
+        entries = held
+        cursor = (cursor + 1) % size
+    }
+
+    export signal count = length(entries)
+    export signal newest = get(entries, (cursor + size - 1) % size)
+    export signal snapshot = entries
+}
+
+task fn record(feed: History) -> ()
+{
+    await send(feed.recorded, 3)
+    await send(feed.recorded, 1)
+    await send(feed.recorded, 4)
+    await send(feed.recorded, 1)
+    await send(feed.recorded, 5)
+}
+
+task fn main() -> ()
+    uses { clock }
+{
+    let mut seed: Buf<I64> = empty()
+    let mut n = 0
+    while n < 4 {
+        push(seed, 0)
+        n = n + 1
+    }
+    let feed = spawn reactor History(seed: seed, size: 4)
+    await record(feed)
+    await sleep(10)
+    print(latest(feed.count))
+    print(latest(feed.newest))
+    print(latest(feed.snapshot))
+}

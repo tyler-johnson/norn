@@ -279,7 +279,7 @@ fn an_unknown_std_module_is_diagnosed() {
         "{out}"
     );
     assert!(
-        out.contains("the standard library provides `std/fmt`"),
+        out.contains("the standard library provides `std/buf`"),
         "{out}"
     );
 }

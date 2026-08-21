@@ -1,0 +1,161 @@
+=== ast ===
+(module
+  (struct Buf export (type-params T) (field storage (ty Slots T)) (field len I64))
+  (fn empty export
+    (type-params T)
+    (params)
+    (ret (ty Buf T))
+    (block
+      (let storage (ty (ty Slots T)) (call (path slots_new) (arg (int 0))))
+      (call (path Buf) (arg storage (path storage)) (arg len (int 0)))))
+  (fn length export
+    (type-params T)
+    (params (param buf (ty Buf T)))
+    (ret I64)
+    (block (path buf.len)))
+  (fn push export
+    (type-params T)
+    (params (param buf mut (ty Buf T)) (param value T))
+    (ret unit)
+    (block
+      (if
+        (binary == (path buf.len) (call (path slots_len) (arg (path buf.storage))))
+        (block (call (path grow) (arg (path buf)))))
+      (let at (path buf.len))
+      (call
+        (path slots_set)
+        (arg (path buf.storage))
+        (arg (path at))
+        (arg (path value)))
+      (assign (path buf.len) (binary + (path at) (int 1)))))
+  (fn pop export
+    (type-params T)
+    (params (param buf mut (ty Buf T)))
+    (ret (ty Option T))
+    (block
+      (if
+        (binary == (path buf.len) (int 0))
+        (block (path None))
+        (else
+          (block
+            (let at (binary - (path buf.len) (int 1)))
+            (assign (path buf.len) (path at))
+            (call (path slots_take) (arg (path buf.storage)) (arg (path at))))))))
+  (fn get export
+    (type-params T)
+    (params (param buf (ty Buf T)) (param index I64))
+    (ret (ty Option T))
+    (block
+      (if
+        (binary ||
+          (binary < (path index) (int 0))
+          (binary >= (path index) (path buf.len)))
+        (block (path None))
+        (else
+          (block
+            (call (path slots_get) (arg (path buf.storage)) (arg (path index))))))))
+  (fn set export
+    (type-params T)
+    (params (param buf mut (ty Buf T)) (param index I64) (param value T))
+    (ret unit)
+    (block
+      (call
+        (path slots_set)
+        (arg (path buf.storage))
+        (arg (path index))
+        (arg (path value)))))
+  (fn grow
+    (type-params T)
+    (params (param buf mut (ty Buf T)))
+    (ret unit)
+    (block
+      (let old (path buf.storage))
+      (let capacity (call (path slots_len) (arg (path old))))
+      (let bigger
+        (if
+          (binary == (path capacity) (int 0))
+          (block (int 4))
+          (else (block (binary * (path capacity) (int 2))))))
+      (let fresh mut (ty (ty Slots T)) (call (path slots_new) (arg (path bigger))))
+      (let i mut (int 0))
+      (while
+        (binary < (path i) (path buf.len))
+        (block
+          (match
+            (call (path slots_get) (arg (path old)) (arg (path i)))
+            (arm
+              (construct Some (arg (bind v)))
+              (call
+                (path slots_set)
+                (arg (path fresh))
+                (arg (path i))
+                (arg (path v))))
+            (arm (bind None) unit))
+          (assign (path i) (binary + (path i) (int 1)))))
+      (assign (path buf.storage) (path fresh)))))
+
+=== canonical ===
+export struct Buf<T> {
+    storage: Slots<T>
+    len: I64
+}
+
+export fn empty<T>() -> Buf<T> {
+    let storage: Slots<T> = slots_new(0)
+    Buf(storage: storage, len: 0)
+}
+
+export fn length<T>(buf: Buf<T>) -> I64 {
+    buf.len
+}
+
+export fn push<T>(buf: mut Buf<T>, value: T) -> () {
+    if buf.len == slots_len(buf.storage) {
+        grow(buf)
+    }
+    let at = buf.len
+    slots_set(buf.storage, at, value)
+    buf.len = at + 1
+}
+
+export fn pop<T>(buf: mut Buf<T>) -> Option<T> {
+    if buf.len == 0 {
+        None
+    } else {
+        let at = buf.len - 1
+        buf.len = at
+        slots_take(buf.storage, at)
+    }
+}
+
+export fn get<T>(buf: Buf<T>, index: I64) -> Option<T> {
+    if index < 0 || index >= buf.len {
+        None
+    } else {
+        slots_get(buf.storage, index)
+    }
+}
+
+export fn set<T>(buf: mut Buf<T>, index: I64, value: T) -> () {
+    slots_set(buf.storage, index, value)
+}
+
+fn grow<T>(buf: mut Buf<T>) -> () {
+    let old = buf.storage
+    let capacity = slots_len(old)
+    let bigger = if capacity == 0 {
+        4
+    } else {
+        capacity * 2
+    }
+    let mut fresh: Slots<T> = slots_new(bigger)
+    let mut i = 0
+    while i < buf.len {
+        match slots_get(old, i) {
+            Some(v) => slots_set(fresh, i, v)
+            None => ()
+        }
+        i = i + 1
+    }
+    buf.storage = fresh
+}

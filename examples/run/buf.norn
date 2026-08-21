@@ -1,0 +1,63 @@
+// The std/buf sequence end to end: growth across both boundaries (0→4 and 4→8), reads and
+// writes, popping down to `None`, and the COW witness — a copy taken before a push keeps its
+// value, because the write op's uniqueness check clones the storage rather than let the copy
+// see the new element.
+
+import { Buf, empty, length, push, pop, get, set } from "std/buf"
+
+fn or_zero(held: Option<I64>) -> I64 {
+    match held {
+        Some(v) => v
+        None => 0
+    }
+}
+
+fn total(buf: Buf<I64>) -> I64 {
+    let mut sum = 0
+    let mut i = 0
+    while i < length(buf) {
+        sum = sum + or_zero(get(buf, i))
+        i = i + 1
+    }
+    sum
+}
+
+fn main() -> () {
+    let mut buf: Buf<I64> = empty()
+    print(length(buf))
+
+    // Five pushes cross 0→4 and 4→8.
+    let mut n = 0
+    while n < 5 {
+        push(buf, n * 10)
+        n = n + 1
+    }
+    print(length(buf))
+    print(buf)
+
+    print(get(buf, 0))
+    print(get(buf, 4))
+    print(get(buf, 5))
+
+    set(buf, 1, 99)
+    print(get(buf, 1))
+
+    // The COW witness: `kept` was copied before the push and does not see it.
+    let kept = buf
+    push(buf, 50)
+    print(length(buf))
+    print(length(kept))
+    print(get(kept, 5))
+
+    // A buf through a helper is an ordinary value.
+    print(total(buf))
+
+    // Pop to the bottom, then once more.
+    let mut drained: Buf<I64> = empty()
+    push(drained, 7)
+    push(drained, 8)
+    print(pop(drained))
+    print(pop(drained))
+    print(pop(drained))
+    print(length(drained))
+}

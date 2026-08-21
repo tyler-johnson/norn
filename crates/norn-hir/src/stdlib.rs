@@ -10,6 +10,7 @@
 /// verbatim — extensionless, which is what keeps them disjoint from file keys, whose relative
 /// resolution always appends `.norn`.
 pub const STD: &[(&str, &str)] = &[
+    ("std/buf", include_str!("../../../std/buf.norn")),
     ("std/fmt", include_str!("../../../std/fmt.norn")),
     ("std/list", include_str!("../../../std/list.norn")),
     ("std/time", include_str!("../../../std/time.norn")),
