@@ -42,6 +42,9 @@ pub enum Value {
     /// representation choice, invisible in output — and no operator reaches it, so the variant
     /// name can only surface on an unreachable-coercion trap path.
     Shared(Rc<Value>),
+    /// `slots_new(n)`: a copyable slab of optional element slots. The write ops go through
+    /// `Rc::make_mut` — the copy-on-write lives inside the ops, never in the caller.
+    Slots(Rc<Vec<Option<Value>>>),
     /// A computation that has not run. `await` and `spawn` are what start it.
     Task(Rc<TaskValue>),
     /// A handle into the runtime's resource table.
@@ -265,6 +268,20 @@ impl Interpreter<'_> {
                                 new_frame(self.program, callee, arguments, Some(dest));
                             pushed.writebacks = writebacks;
                             frames.push(pushed);
+                            continue;
+                        }
+                        // A builtin with a `Mut` row does its own writeback in the same step:
+                        // slab out, mutate, slab back, then the result into the fresh temp.
+                        if let Rvalue::Builtin(builtin, args) = rvalue
+                            && builtin
+                                .signature()
+                                .0
+                                .iter()
+                                .any(|(_, mode)| *mode == Mode::Mut)
+                        {
+                            let dest = place.clone();
+                            let value = self.mut_builtin(frame, *builtin, args)?;
+                            write_place(frame, &dest, value);
                             continue;
                         }
                         let value = self.eval(frame, cx.as_deref_mut(), rvalue)?;
@@ -572,6 +589,27 @@ impl Interpreter<'_> {
                 }
                 Value::Int(data[index as usize] as i64)
             }
+            Builtin::SlotsNew => {
+                let capacity = integer("slots_new", &args[0])?;
+                if capacity < 0 {
+                    return Err(
+                        self.trap(frame, format!("`slots_new` negative capacity: {capacity}"))
+                    );
+                }
+                Value::Slots(Rc::new(vec![None; capacity as usize]))
+            }
+            Builtin::SlotsLen => Value::Int(slab("slots_len", &args[0])?.len() as i64),
+            Builtin::SlotsGet => {
+                let slots = slab("slots_get", &args[0])?;
+                let index = integer("slots_get", &args[1])?;
+                let len = slots.len() as i64;
+                if index < 0 || index >= len {
+                    return Err(
+                        self.trap(frame, format!("`slots_get` out of range: {index} of {len}"))
+                    );
+                }
+                option(slots[index as usize].clone())
+            }
             Builtin::TextUnchecked => {
                 let data = blob("text_unchecked", &args[0])?;
                 match std::str::from_utf8(&data) {
@@ -597,6 +635,45 @@ impl Interpreter<'_> {
                 ));
             }
         })
+    }
+
+    /// A builtin with a `Mut` row — `slots_set` and `slots_take`. The slab argument is read out
+    /// of its place, mutated, and written back, with the result landing in the caller's fresh
+    /// temporary afterwards; the bounds check runs first, so a trap mutates nothing.
+    ///
+    /// The read here clones the slab out of the frame, so the `Rc::make_mut` below always finds
+    /// the storage shared and copies — a perf-only divergence from the typed backend, which
+    /// lends the place and mutates in place when the refcount allows. The `bytes_slice`
+    /// precedent: unobservable, because a slab renders as its capacity and every trap
+    /// interpolates computed numbers.
+    fn mut_builtin(
+        &self,
+        frame: &mut Frame,
+        builtin: Builtin,
+        args: &[Operand],
+    ) -> Result<Value, Trap> {
+        let name = builtin.name();
+        let Operand::Copy(slab_place) = &args[0] else {
+            unreachable!("a `mut` argument is a place");
+        };
+        let held = read_place(frame, slab_place);
+        let mut slots = slab(name, &held)?;
+        let index = integer(name, &read_operand(frame, &args[1]))?;
+        let len = slots.len() as i64;
+        if index < 0 || index >= len {
+            return Err(self.trap(frame, format!("`{name}` out of range: {index} of {len}")));
+        }
+        let result = match builtin {
+            Builtin::SlotsSet => {
+                let value = read_operand(frame, &args[2]);
+                Rc::make_mut(&mut slots)[index as usize] = Some(value);
+                Value::Unit
+            }
+            Builtin::SlotsTake => option(Rc::make_mut(&mut slots)[index as usize].take()),
+            other => unreachable!("`{}` has no mut row", other.name()),
+        };
+        write_place(frame, slab_place, Value::Slots(slots));
+        Ok(result)
     }
 
     /// Ask the runtime for the effect of a task builtin. `Pending` means the task parks and asks
@@ -767,6 +844,9 @@ impl Interpreter<'_> {
             Value::Bool(v) => v.to_string(),
             Value::Str(v) => format!("{:?}", &**v),
             Value::Bytes(v) => format!("<bytes {}>", v.len()),
+            // The Bytes model: the capacity, not the contents — a slab is storage, and what it
+            // holds is the sequence on top of it's business to show.
+            Value::Slots(v) => format!("<slots {}>", v.len()),
             Value::Shared(inner) => self.render_nested(inner),
             Value::Task(task) => {
                 let name = match &task.kind {
@@ -905,6 +985,26 @@ fn blob(builtin: &str, value: &Value) -> Result<Rc<[u8]>, Trap> {
             "runtime",
         )),
     }
+}
+
+fn slab(builtin: &str, value: &Value) -> Result<Rc<Vec<Option<Value>>>, Trap> {
+    match value {
+        Value::Slots(slots) => Ok(slots.clone()),
+        other => Err(Trap::new(
+            format!("`{builtin}` wanted a slab, found {other:?}"),
+            "runtime",
+        )),
+    }
+}
+
+/// Wrap an element that may be absent as an `Option<T>` — `fallible`'s shape, for the slots
+/// reads, where a hole is a `None`.
+fn option(value: Option<Value>) -> Value {
+    let (variant, fields) = match value {
+        Some(value) => (EnumId::SOME, vec![value]),
+        None => (EnumId::NONE, Vec::new()),
+    };
+    Value::Variant(EnumId::OPTION.index(), variant, Rc::new(fields))
 }
 
 /// Wrap what a socket operation returned as a `Result<T, IoError>`.

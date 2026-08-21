@@ -445,6 +445,14 @@ impl Lowerer<'_> {
                 let rvalue = if builtin.is_task() {
                     Rvalue::BuiltinTask(*builtin, args)
                 } else {
+                    // A builtin's `Mut` position holds a place, exactly as a call's does — the
+                    // checker enforces the same contract through the same mode dispatch, and the
+                    // interpreter's writeback destructures the operand on the strength of it.
+                    debug_assert!(builtin.signature().0.iter().zip(&args).all(
+                        |((_, mode), arg)| {
+                            *mode != hir::Mode::Mut || matches!(arg, Operand::Copy(_))
+                        }
+                    ));
                     Rvalue::Builtin(*builtin, args)
                 };
                 self.emit(temp.clone(), rvalue);
