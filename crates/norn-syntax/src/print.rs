@@ -332,7 +332,11 @@ fn print_member(member: &Member) -> String {
 }
 
 fn print_param(p: &Param) -> String {
-    let mode = if p.sink.is_some() { "sink " } else { "" };
+    let mode = match p.mode {
+        ParamMode::Read => "",
+        ParamMode::Sink(_) => "sink ",
+        ParamMode::Mut(_) => "mut ",
+    };
     format!("{}: {mode}{}", p.name.name, print_type(&p.ty))
 }
 

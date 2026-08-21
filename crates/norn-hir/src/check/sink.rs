@@ -334,7 +334,9 @@ fn parts(expr: &Expr, param_modes: &[Vec<Mode>], consumed: &mut [Option<Span>]) 
             value(rhs, param_modes, consumed);
         }
         // The mode split `Moves` enforces, read from the current fixpoint state: a `Sink`
-        // argument is consumed, a `Read` argument is only named.
+        // argument is consumed, a `Read` argument is only named. A `Mut` argument is also only
+        // named — the callee works on a copy and the writeback re-fills the caller's place, so
+        // the caller keeps its value and inference must not read the position as consuming.
         ExprKind::Call { callee, args } => {
             for (index, arg) in args.iter().enumerate() {
                 let mode = param_modes
@@ -344,7 +346,7 @@ fn parts(expr: &Expr, param_modes: &[Vec<Mode>], consumed: &mut [Option<Span>]) 
                     .unwrap_or(Mode::Read);
                 match mode {
                     Mode::Sink => value(arg, param_modes, consumed),
-                    Mode::Read => place(arg, param_modes, consumed),
+                    Mode::Read | Mode::Mut => place(arg, param_modes, consumed),
                 }
             }
         }
@@ -353,7 +355,7 @@ fn parts(expr: &Expr, param_modes: &[Vec<Mode>], consumed: &mut [Option<Span>]) 
             for (index, arg) in args.iter().enumerate() {
                 match params.get(index).map_or(Mode::Read, |(_, mode)| *mode) {
                     Mode::Sink => value(arg, param_modes, consumed),
-                    Mode::Read => place(arg, param_modes, consumed),
+                    Mode::Read | Mode::Mut => place(arg, param_modes, consumed),
                 }
             }
         }

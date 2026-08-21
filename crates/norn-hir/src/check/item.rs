@@ -1,20 +1,21 @@
 use super::*;
 
 /// The written mode column of a parameter list, with which entries are pinned: `sink T` is
-/// `Sink`, asserted rather than observed, so inference must not soften it; everything else is
-/// `Read` until a body proves otherwise.
+/// `Sink`, asserted rather than observed, so inference must not soften it; `mut T` is `Mut`,
+/// declared and never inferred; everything else is `Read` until a body proves otherwise.
 pub(super) fn written_modes(params: &[ast::Param]) -> (Vec<Mode>, Vec<bool>) {
     let modes = params
         .iter()
-        .map(|p| {
-            if p.sink.is_some() {
-                Mode::Sink
-            } else {
-                Mode::Read
-            }
+        .map(|p| match p.mode {
+            ast::ParamMode::Read => Mode::Read,
+            ast::ParamMode::Sink(_) => Mode::Sink,
+            ast::ParamMode::Mut(_) => Mode::Mut,
         })
         .collect();
-    let pinned = params.iter().map(|p| p.sink.is_some()).collect();
+    let pinned = params
+        .iter()
+        .map(|p| !matches!(p.mode, ast::ParamMode::Read))
+        .collect();
     (modes, pinned)
 }
 

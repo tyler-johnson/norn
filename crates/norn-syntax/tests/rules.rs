@@ -646,3 +646,36 @@ fn sink_round_trips() {
     assert!(parsed.ok(), "{}", errors(source));
     assert_eq!(print::module(&parsed.module), source);
 }
+
+#[test]
+fn mut_is_a_parameter_mode() {
+    let dumped = ast("fn bump(count: mut I64) {}\n");
+    assert!(dumped.contains("(param count mut I64)"), "{dumped}");
+}
+
+#[test]
+fn mut_is_not_a_parameter_name() {
+    // Unlike `sink`, `mut` is a reserved word: it cannot name a parameter, so there is no
+    // lookahead to resolve — `mut:` is a parse error, not a pathology.
+    let rendered = errors("fn f(mut: I64) {}\n");
+    assert!(rendered.contains("expected a name"), "{rendered}");
+}
+
+#[test]
+fn mut_needs_a_type() {
+    let rendered = errors("fn f(x: mut) {}\n");
+    assert!(rendered.contains("expected a name"), "{rendered}");
+}
+
+#[test]
+fn mut_round_trips() {
+    let source = "fn bump(count: mut I64) -> () {\n    ()\n}\n";
+    let parsed = parse(source);
+    assert!(parsed.ok(), "{}", errors(source));
+    assert_eq!(print::module(&parsed.module), source);
+    assert_eq!(
+        dump::module(&parsed.module),
+        dump::module(&parse(&print::module(&parsed.module)).module),
+        "the canonical form parses to a different tree"
+    );
+}

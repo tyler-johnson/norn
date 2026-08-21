@@ -56,10 +56,15 @@ impl Checker {
                 }
                 // Modes are a fact about calls; a reactor parameter is state, written once when
                 // the reactor is created, and spawning already hands the arguments over.
-                if let Some(at) = param.sink {
+                let mode = match param.mode {
+                    ast::ParamMode::Read => None,
+                    ast::ParamMode::Sink(at) => Some(("sink", at)),
+                    ast::ParamMode::Mut(at) => Some(("mut", at)),
+                };
+                if let Some((word, at)) = mode {
                     self.push(
                         Diagnostic::new(at, "a reactor parameter has no mode")
-                            .label("`sink` does not apply here")
+                            .label(format!("`{word}` does not apply here"))
                             .note("`spawn reactor` always hands its arguments over; there is no call for a mode to describe"),
                     );
                 }

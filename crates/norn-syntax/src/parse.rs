@@ -527,12 +527,12 @@ impl Parser {
         while !self.at(&TokenKind::RParen) && !self.at_eof() {
             let name = self.ident()?;
             self.expect(TokenKind::Colon)?;
-            let sink = self.sink_mode();
+            let mode = self.param_mode();
             let ty = self.ty()?;
             let span = name.span.to(ty.span);
             params.push(Param {
                 name,
-                sink,
+                mode,
                 ty,
                 span,
             });
@@ -542,6 +542,18 @@ impl Parser {
         }
         let close = self.expect(TokenKind::RParen)?.span;
         Ok((params, close))
+    }
+
+    /// The parameter's written mode. `mut` is a reserved word, so seeing it after the `:` is
+    /// enough; `sink` takes the contextual lookahead below.
+    fn param_mode(&mut self) -> ParamMode {
+        if self.at(&TokenKind::Kw(Kw::Mut)) {
+            return ParamMode::Mut(self.advance().span);
+        }
+        match self.sink_mode() {
+            Some(span) => ParamMode::Sink(span),
+            None => ParamMode::Read,
+        }
     }
 
     /// The contextual `sink` mode, if the parameter wrote one. `sink` is not a reserved word:

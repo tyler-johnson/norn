@@ -324,8 +324,10 @@ fn dump_member(member: &Member) -> Node {
 
 fn dump_param(p: &Param) -> Node {
     let mut children = vec![atom(&p.name.name)];
-    if p.sink.is_some() {
-        children.push(atom("sink"));
+    match p.mode {
+        ParamMode::Read => {}
+        ParamMode::Sink(_) => children.push(atom("sink")),
+        ParamMode::Mut(_) => children.push(atom("mut")),
     }
     children.push(dump_type(&p.ty));
     list("param", children)

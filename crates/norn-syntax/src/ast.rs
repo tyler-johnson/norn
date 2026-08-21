@@ -147,16 +147,25 @@ pub struct FnDecl {
     pub span: Span,
 }
 
-/// One parameter: `conn: Connection`, or `conn: sink Connection` when the callee consumes it.
-/// `sink` is a contextual keyword — recognised only between the `:` and the type, and only when
-/// what follows can start a type — so it stays an ordinary name everywhere else, parameter names
-/// included. The span is the word itself, so the checker can point at it.
+/// One parameter: `conn: Connection` reads, `conn: sink Connection` is consumed, and
+/// `buf: mut Buffer` is written back to the caller when the call returns.
 #[derive(Debug)]
 pub struct Param {
     pub name: Ident,
-    pub sink: Option<Span>,
+    pub mode: ParamMode,
     pub ty: Type,
     pub span: Span,
+}
+
+/// The mode a parameter wrote, if any. `sink` is a contextual keyword — recognised only between
+/// the `:` and the type, and only when what follows can start a type — so it stays an ordinary
+/// name everywhere else, parameter names included. `mut` is a reserved word and needs no such
+/// care. Each span is the word itself, so the checker can point at it.
+#[derive(Debug, Clone, Copy)]
+pub enum ParamMode {
+    Read,
+    Sink(Span),
+    Mut(Span),
 }
 
 /// `export trait Display { fn to_string(value: Self) -> String }` — a named set of function

@@ -132,15 +132,19 @@ impl Capability {
 /// A parameter's calling mode (BOOTSTRAP §8 item 5). `Read` looks at the argument without
 /// consuming it — the unmarked default, what makes passing a value not a move. `Sink` takes it:
 /// the caller's name dies at the call, written `sink T` or inferred from a body that consumes.
+/// `Mut` writes back: the callee works on its own copy, and the caller's variable receives it
+/// when the call returns — written `mut T`, never inferred, because a writeback changes the
+/// caller's value and that is worth stating up front.
 ///
-/// Modes are a fact about checking alone: the checker keeps them beside its signatures, `moves`
-/// enforces them, and nothing downstream — NIR, either engine, the backend — learns they exist.
-/// The enum lives here only because `Builtin::signature` carries the builtins' column of it.
-/// Extensible on purpose: the mutation wave adds `Mut` as a variant, not a type.
+/// `Read` and `Sink` are a fact about checking alone: the checker keeps them beside its
+/// signatures and `moves` enforces them. `Mut` is the first mode the pipeline below learns
+/// about — NIR carries the column so both engines can pair each `Mut` argument's place with the
+/// writeback the return performs. A mode is still a calling convention, not a type.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Mode {
     Read,
     Sink,
+    Mut,
 }
 
 /// A type. Everything an executable body carries is monomorphic — generic declarations are

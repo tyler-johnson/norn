@@ -194,7 +194,8 @@ impl Moves<'_> {
                 for (index, arg) in args.iter().enumerate() {
                     match self.fn_mode(*callee, index) {
                         Mode::Sink => self.consume(arg),
-                        Mode::Read => self.place(arg),
+                        // Placeholder until the call-site wave: a `Mut` argument is a live place.
+                        Mode::Read | Mode::Mut => self.place(arg),
                     }
                 }
             }
@@ -204,7 +205,7 @@ impl Moves<'_> {
                     let mode = params.get(index).map_or(Mode::Read, |(_, mode)| *mode);
                     match mode {
                         Mode::Sink => self.consume(arg),
-                        Mode::Read => self.place(arg),
+                        Mode::Read | Mode::Mut => self.place(arg),
                     }
                 }
             }
