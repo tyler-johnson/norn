@@ -496,6 +496,65 @@ fn main() -> () {
     );
 }
 
+/// The call-site half: a `mut` argument is a place — a `mut` variable or a chain of its fields —
+/// a `mut` parameter forwards, and exclusivity only bites when the call writes the repeated root.
+#[test]
+fn mut_arguments_are_places() {
+    accepted(
+        "a field chain rooted at a `mut` variable is a writeback home",
+        "\
+struct Point {
+    x: I64
+    y: I64
+}
+
+fn bump(count: mut I64) -> () {
+    count = count + 1
+}
+
+fn main() -> () {
+    let mut point = Point(x: 1, y: 2)
+    bump(point.x)
+    print(point.x)
+}
+",
+    );
+
+    accepted(
+        "a `mut` parameter forwards at a `mut` position",
+        "\
+fn bump(count: mut I64) -> () {
+    count = count + 1
+}
+
+fn twice(count: mut I64) -> () {
+    bump(count)
+    bump(count)
+}
+
+fn main() -> () {
+    let mut total = 0
+    twice(total)
+    print(total)
+}
+",
+    );
+
+    accepted(
+        "the same root at two read positions is not aliasing a call can act on",
+        "\
+fn add(a: I64, b: I64) -> I64 {
+    a + b
+}
+
+fn main() -> () {
+    let n = 21
+    print(add(n, n))
+}
+",
+    );
+}
+
 /// Generic *types* land ahead of the corpus that dogfoods them — std/list and the run example
 /// arrive later in the item 7 wave — so the acceptance side is pinned here: instantiation by
 /// annotation, by expectation, by field inference, through patterns, and inside reactor state.

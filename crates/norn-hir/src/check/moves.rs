@@ -20,6 +20,7 @@ impl Checker {
                 program: &self.program,
                 param_modes: &self.param_modes,
                 locals: &function.locals,
+                params: function.params,
                 moved: vec![None; function.locals.len()],
                 declared: (0..function.locals.len())
                     .map(|local| local < function.params)
@@ -74,10 +75,17 @@ fn read_as_place(expr: &Expr) -> bool {
 }
 
 fn rooted_at_local(expr: &Expr) -> bool {
+    root_of(expr).is_some()
+}
+
+/// The local a place-shaped expression is rooted at: the variable itself, or the one under a
+/// chain of fields. `None` for anything that is not a place — a literal, a call's result, a
+/// constructed value — which by the same token has no home a writeback could land in.
+fn root_of(expr: &Expr) -> Option<LocalId> {
     match &expr.kind {
-        ExprKind::Local(_) => true,
-        ExprKind::Field { base, .. } => rooted_at_local(base),
-        _ => false,
+        ExprKind::Local(id) => Some(*id),
+        ExprKind::Field { base, .. } => root_of(base),
+        _ => None,
     }
 }
 
@@ -94,6 +102,9 @@ struct Moves<'p> {
     /// shorter than its arity, and its parameters are reactor members, which are never affine.
     param_modes: &'p [Vec<Mode>],
     locals: &'p [LocalDef],
+    /// How many of `locals` are parameters — what tells a read parameter's refusal to suggest
+    /// `name: mut T` where an ordinary local's suggests `let mut`.
+    params: usize,
     moved: Vec<Option<Span>>,
     /// Which locals have been declared on the path walked so far: parameters at entry, everything
     /// else as its `let` or pattern binding is reached. What the loop rule means by "outside the
@@ -163,6 +174,114 @@ impl Moves<'_> {
         }
     }
 
+    /// One argument list, in argument order, behind the exclusivity check: a root that appears
+    /// twice is refused when either appearance sits at a `Mut` position. The writeback makes the
+    /// argument list the one aliasing a call can see — the native backend passes a written
+    /// argument as a pointer, and that is unobservable exactly because nothing else in the list
+    /// reaches the same variable.
+    fn arguments(&mut self, args: &[Expr], modes: &[Mode]) {
+        let roots: Vec<Option<LocalId>> = args.iter().map(root_of).collect();
+        for (second, arg) in args.iter().enumerate() {
+            let Some(root) = roots[second] else { continue };
+            let writes = |index: usize| modes.get(index) == Some(&Mode::Mut);
+            let first = (0..second)
+                .find(|&first| roots[first] == Some(root) && (writes(first) || writes(second)));
+            if let Some(first) = first {
+                let name = self.locals[root.index()].name.clone();
+                self.errors.push(
+                    Diagnostic::new(arg.span, format!("`{name}` cannot be passed twice to a call that writes it"))
+                        .label("passed again here")
+                        .secondary(args[first].span, "first passed here")
+                        .note("the argument list is the only aliasing a call can see, so a variable a call writes appears in it once; copy it into another `let` if two positions need it"),
+                );
+            }
+        }
+        for (arg, mode) in args.iter().zip(modes) {
+            match mode {
+                Mode::Sink => self.consume(arg),
+                Mode::Read => self.place(arg),
+                Mode::Mut => self.mutate(arg),
+            }
+        }
+    }
+
+    /// An argument at a `Mut` position: the callee's copy is written back into it when the call
+    /// returns, so the argument must *be* a place — a variable or a chain of fields rooted at
+    /// one — whose root is live, `mut`, and reachable without crossing a shared value. Nothing
+    /// moves: the name keeps its value across the call, re-filled rather than revoked.
+    fn mutate(&mut self, arg: &Expr) {
+        let mut cursor = arg;
+        loop {
+            match &cursor.kind {
+                ExprKind::Local(id) => {
+                    if !self.live(*id, cursor.span) {
+                        return;
+                    }
+                    let local = &self.locals[id.index()];
+                    let name = local.name.clone();
+                    // Roles answer before mutability: a handler may assign a `state` cell, but a
+                    // writeback into one would land beside the turn's commit rather than in it.
+                    let diagnostic = match local.role {
+                        LocalRole::State(_) => {
+                            Diagnostic::new(arg.span, format!("`{name}` is a `state` cell"))
+                                .label("state commits at the end of the turn")
+                                .note("read it into a `let mut` local, pass that, and assign the result back — the assignment is what commits")
+                        }
+                        LocalRole::Signal => {
+                            Diagnostic::new(arg.span, format!("`{name}` is a signal, and a signal is never assigned"))
+                                .label("derived, not stored")
+                                .note("a writeback assigns when the call returns; a signal *is* its expression — declare it as `state` if it needs to change")
+                        }
+                        LocalRole::Param => {
+                            Diagnostic::new(arg.span, format!("`{name}` is a reactor parameter"))
+                                .label("fixed when the reactor was created")
+                                .note("declare a `state` cell initialised from it if it needs to change")
+                        }
+                        LocalRole::Message => {
+                            Diagnostic::new(arg.span, format!("`{name}` is the message this handler was given"))
+                                .label("a writeback would assign it")
+                        }
+                        LocalRole::Ordinary if !local.mutable => {
+                            let advice = if id.index() < self.params {
+                                format!("a parameter is written back only if it is itself `mut`: declare it `{name}: mut T`")
+                            } else {
+                                format!("declare it as `let mut {name} = …`")
+                            };
+                            Diagnostic::new(arg.span, format!("`{name}` is not declared `mut`"))
+                                .label("a `mut` argument is written back")
+                                .note(advice)
+                        }
+                        LocalRole::Ordinary => return,
+                    };
+                    self.errors.push(diagnostic);
+                    return;
+                }
+                ExprKind::Field { base, .. } => {
+                    if matches!(base.ty, Ty::Shared(_)) {
+                        self.errors.push(
+                            Diagnostic::new(arg.span, "a `mut` argument cannot reach through a shared value")
+                                .label("shared values are immutable")
+                                .note("`unshare` it, change the copy, and `shared` the result"),
+                        );
+                        return;
+                    }
+                    cursor = base;
+                }
+                ExprKind::Error => return,
+                _ => {
+                    self.errors.push(
+                        Diagnostic::new(arg.span, "only a variable or one of its fields can be passed as `mut`")
+                            .label("this value has no home to write back to")
+                            .note("the callee's copy is written back when the call returns; bind the value with `let mut` first"),
+                    );
+                    // Still walked: whatever the expression consumes, it consumes.
+                    self.value(cursor);
+                    return;
+                }
+            }
+        }
+    }
+
     /// Everything that is neither a name nor a projection: walked in evaluation order, so that the
     /// first use of a moved value is the one reported.
     fn parts(&mut self, expr: &Expr) {
@@ -188,26 +307,21 @@ impl Moves<'_> {
                 self.value(rhs);
             }
             // A call's arguments follow the callee's modes: a `Sink` position takes the value —
-            // the caller's name dies there — and a `Read` position only has to name something
-            // that is live. This is what makes passing a value not a move.
+            // the caller's name dies there — a `Read` position only has to name something that
+            // is live, and a `Mut` position is a place the return writes back into. This is what
+            // makes passing a value not a move.
             ExprKind::Call { callee, args } => {
-                for (index, arg) in args.iter().enumerate() {
-                    match self.fn_mode(*callee, index) {
-                        Mode::Sink => self.consume(arg),
-                        // Placeholder until the call-site wave: a `Mut` argument is a live place.
-                        Mode::Read | Mode::Mut => self.place(arg),
-                    }
-                }
+                let modes: Vec<Mode> = (0..args.len())
+                    .map(|index| self.fn_mode(*callee, index))
+                    .collect();
+                self.arguments(args, &modes);
             }
             ExprKind::Builtin { builtin, args } => {
                 let (params, _) = builtin.signature();
-                for (index, arg) in args.iter().enumerate() {
-                    let mode = params.get(index).map_or(Mode::Read, |(_, mode)| *mode);
-                    match mode {
-                        Mode::Sink => self.consume(arg),
-                        Mode::Read | Mode::Mut => self.place(arg),
-                    }
-                }
+                let modes: Vec<Mode> = (0..args.len())
+                    .map(|index| params.get(index).map_or(Mode::Read, |(_, mode)| *mode))
+                    .collect();
+                self.arguments(args, &modes);
             }
             // A constructor's payload is stored: the aggregate owns what it was built from, so
             // every argument is a whole-value use.

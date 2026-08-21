@@ -1,0 +1,75 @@
+// Where a `mut` argument is refused (BOOTSTRAP §8 item 5). A writeback needs a home: a variable
+// or a chain of its fields, declared `mut`, live, reachable without crossing a shared value, and
+// appearing in the argument list exactly once when the call writes it.
+
+fn bump(count: mut I64) -> () {
+    count = count + 1
+}
+
+fn pin(target: mut I64, from: I64) -> () {
+    target = from
+}
+
+fn shift(x: mut I64, y: mut I64) -> () {
+    x = x + 1
+    y = y - 1
+}
+
+struct Point {
+    x: I64
+    y: I64
+}
+
+// A literal has no home to write back to.
+fn literal() -> () {
+    bump(3)
+}
+
+// Neither does a call's result: it is a value, not a place.
+fn result() -> () {
+    bump(total())
+}
+
+fn total() -> I64 {
+    41
+}
+
+// The root must be declared `mut` — the call changes it.
+fn immutable() -> () {
+    let count = 0
+    bump(count)
+}
+
+// A read parameter is not written back; forwarding needs the parameter itself to be `mut`.
+fn forwarded(count: I64) -> () {
+    bump(count)
+}
+
+// A shared value is immutable, however the chain reaches it.
+fn through_shared() -> () {
+    let held = shared(Point(x: 1, y: 2))
+    bump(held.x)
+}
+
+// The same variable cannot be passed twice to a call that writes it.
+fn twice() -> () {
+    let mut count = 0
+    pin(count, count)
+}
+
+// Two fields of one root still alias it: roots are what the exclusivity rule sees.
+fn two_fields() -> () {
+    let mut point = Point(x: 1, y: 2)
+    shift(point.x, point.y)
+}
+
+// A state cell commits at the end of the turn; a writeback would land beside the commit.
+reactor Counter(step: I64) {
+    input bumped: () [capacity: 8, overflow: reject]
+
+    state count: I64 = 0
+
+    on bumped() {
+        bump(count)
+    }
+}

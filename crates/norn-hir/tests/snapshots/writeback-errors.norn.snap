@@ -1,0 +1,63 @@
+error: only a variable or one of its fields can be passed as `mut`
+  --> writeback-errors.norn:25:10
+   |
+25 |     bump(3)
+   |          ^ this value has no home to write back to
+   = note: the callee's copy is written back when the call returns; bind the value with `let mut` first
+
+error: only a variable or one of its fields can be passed as `mut`
+  --> writeback-errors.norn:30:10
+   |
+30 |     bump(total())
+   |          ^^^^^^^ this value has no home to write back to
+   = note: the callee's copy is written back when the call returns; bind the value with `let mut` first
+
+error: `count` is not declared `mut`
+  --> writeback-errors.norn:40:10
+   |
+40 |     bump(count)
+   |          ^^^^^ a `mut` argument is written back
+   = note: declare it as `let mut count = …`
+
+error: `count` is not declared `mut`
+  --> writeback-errors.norn:45:10
+   |
+45 |     bump(count)
+   |          ^^^^^ a `mut` argument is written back
+   = note: a parameter is written back only if it is itself `mut`: declare it `count: mut T`
+
+error: a `mut` argument cannot reach through a shared value
+  --> writeback-errors.norn:51:10
+   |
+51 |     bump(held.x)
+   |          ^^^^^^ shared values are immutable
+   = note: `unshare` it, change the copy, and `shared` the result
+
+error: `count` cannot be passed twice to a call that writes it
+  --> writeback-errors.norn:57:16
+   |
+57 |     pin(count, count)
+   |                ^^^^^ passed again here
+  --> writeback-errors.norn:57:9
+   |
+57 |     pin(count, count)
+   |         ^^^^^ first passed here
+   = note: the argument list is the only aliasing a call can see, so a variable a call writes appears in it once; copy it into another `let` if two positions need it
+
+error: `point` cannot be passed twice to a call that writes it
+  --> writeback-errors.norn:63:20
+   |
+63 |     shift(point.x, point.y)
+   |                    ^^^^^^^ passed again here
+  --> writeback-errors.norn:63:11
+   |
+63 |     shift(point.x, point.y)
+   |           ^^^^^^^ first passed here
+   = note: the argument list is the only aliasing a call can see, so a variable a call writes appears in it once; copy it into another `let` if two positions need it
+
+error: `count` is a `state` cell
+  --> writeback-errors.norn:73:14
+   |
+73 |         bump(count)
+   |              ^^^^^ state commits at the end of the turn
+   = note: read it into a `let mut` local, pass that, and assign the result back — the assignment is what commits
