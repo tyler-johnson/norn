@@ -88,15 +88,14 @@ impl Checker {
         }
     }
 
-    /// Whether the running function may create a task at all, and whether it declared the authority
-    /// the task it is creating needs. Both questions belong here, at the point of creation: once a
-    /// `Task<T>` is a value, nothing downstream can tell what it will do.
-    pub(super) fn require_task_authority(
-        &mut self,
-        what: &str,
-        needs: &[Capability],
-        span: Span,
-    ) -> bool {
+    /// Whether the running function may create a task at all.
+    ///
+    /// This half has to stay here, at the point of creation: whether a task may be built is a
+    /// property of the context the expression sits in, and nothing later can recover it. The other
+    /// half of the old question — whether the authority was *declared* — left with inference.
+    /// Capabilities are now a whole-program fact `infer_uses` computes from the same call graph,
+    /// so a body no longer carries a set to be checked against while it is walked.
+    pub(super) fn require_task_context(&mut self, what: &str, span: Span) -> bool {
         if !self.ctx.builds_tasks() {
             if self.ctx.in_turn() {
                 self.impure(what, "builds a task", span);
@@ -113,32 +112,7 @@ impl Checker {
             );
             return false;
         }
-        let mut authorised = true;
-        for capability in needs {
-            if !self.uses.contains(capability) {
-                let message = format!(
-                    "`{}` does not declare the capability `{}`",
-                    self.fn_name,
-                    capability.name()
-                );
-                self.push(
-                    Diagnostic::new(span, message)
-                        .label(format!("`{what}` uses it"))
-                        .note("a task's `uses { … }` set must cover every task it creates")
-                        .note(format!(
-                            "add it: `uses {{ {} }}`",
-                            self.uses
-                                .iter()
-                                .chain(std::iter::once(capability))
-                                .map(|c| c.name())
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        )),
-                );
-                authorised = false;
-            }
-        }
-        authorised
+        true
     }
 
     /// A task that is built and dropped does nothing at all, which is the obvious first bug

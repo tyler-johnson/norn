@@ -12,16 +12,12 @@ struct Session {
 }
 
 // The double close, spelled two ways.
-task fn closes_twice(conn: Connection) -> ()
-    uses { net.io }
-{
+task fn closes_twice(conn: Connection) -> () {
     await tcp_close(conn)
     await tcp_close(conn)
 }
 
-task fn reads_a_closed_socket(conn: Connection) -> ()
-    uses { net.io }
-{
+task fn reads_a_closed_socket(conn: Connection) -> () {
     await tcp_close(conn)
     match await tcp_read(conn) {
         Ok(_) => ()
@@ -29,16 +25,12 @@ task fn reads_a_closed_socket(conn: Connection) -> ()
     }
 }
 
-task fn serve(conn: Connection) -> ()
-    uses { net.io }
-{
+task fn serve(conn: Connection) -> () {
     await tcp_close(conn)
 }
 
 // A spawned task owns what it was handed, so the second `spawn` has nothing to hand it.
-task fn spawns_it_twice(conn: Connection) -> ()
-    uses { net.io }
-{
+task fn spawns_it_twice(conn: Connection) -> () {
     scope {
         spawn serve(conn)
         spawn serve(conn)
@@ -47,9 +39,7 @@ task fn spawns_it_twice(conn: Connection) -> ()
 
 // A branch that moves is a move: after the `if`, `conn` is gone on one path and there is no way to
 // tell from this line which path arrived here.
-task fn moves_on_one_branch(conn: Connection, tidy: Bool) -> ()
-    uses { net.io }
-{
+task fn moves_on_one_branch(conn: Connection, tidy: Bool) -> () {
     if tidy {
         await tcp_close(conn)
     }
@@ -61,17 +51,13 @@ task fn moves_on_one_branch(conn: Connection, tidy: Bool) -> ()
 
 // Moving one field would leave the rest of the struct with no owner and no name. `match` is what
 // takes a value apart.
-task fn opens_the_struct(session: Session) -> ()
-    uses { net.io }
-{
+task fn opens_the_struct(session: Session) -> () {
     await tcp_close(session.conn)
 }
 
 // A task is built here and started by `await`, so it is a value like any other and starting it
 // twice is using it twice.
-task fn awaits_one_task_twice(conn: Connection) -> ()
-    uses { net.io }
-{
+task fn awaits_one_task_twice(conn: Connection) -> () {
     let closing = tcp_close(conn)
     await closing
     await closing

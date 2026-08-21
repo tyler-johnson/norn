@@ -12,9 +12,7 @@
 
 import { to_string } from "std/fmt"
 
-task fn echo(conn: Connection) -> ()
-    uses { net.io }
-{
+task fn echo(conn: Connection) -> () {
     match await tcp_read(conn) {
         Ok(text) => match await tcp_write(conn, text) {
             Ok(_) => ()
@@ -25,9 +23,7 @@ task fn echo(conn: Connection) -> ()
     await tcp_close(conn)
 }
 
-task fn accept_loop(listener: sink Listener) -> ()
-    uses { net.io }
-{
+task fn accept_loop(listener: sink Listener) -> () {
     scope {
         loop {
             match await tcp_accept(listener) {
@@ -40,9 +36,7 @@ task fn accept_loop(listener: sink Listener) -> ()
     }
 }
 
-task fn main() -> Result<(), IoError>
-    uses { clock, net.listen, net.io }
-{
+task fn main() -> Result<(), IoError> {
     let listener = await tcp_listen(0)?
     print(to_string(listener_port(listener)))
     scope {

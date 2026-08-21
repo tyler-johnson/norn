@@ -20,9 +20,7 @@ fn measure(shape: fmt.Shape) -> I64 {
     }
 }
 
-task fn main() -> ()
-    uses { clock }
-{
+task fn main() -> () {
     let report = Report(label: "width", value: 12)
     print(describe(report))
     print(report.value)

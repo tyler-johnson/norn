@@ -3,7 +3,6 @@
   (fn wait export task
     (params (param ms I64))
     (ret unit)
-    (uses clock)
     (block (await (call (path sleep) (arg (path ms))))))
   (fn seconds export
     (params (param n I64))
@@ -15,9 +14,7 @@
     (block (binary * (path n) (int 60000)))))
 
 === canonical ===
-export task fn wait(ms: I64) -> ()
-    uses { clock }
-{
+export task fn wait(ms: I64) -> () {
     await sleep(ms)
 }
 

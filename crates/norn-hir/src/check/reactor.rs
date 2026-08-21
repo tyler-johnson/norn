@@ -9,7 +9,10 @@ impl Checker {
             // Lifted member names hang off the reactor's display name, so a non-entry module's
             // members compose to "fmt.Gate.on.opened". In-file diagnostics keep the written name.
             let display = self.program.reactors[id.index()].name.clone();
-            let uses = self.capabilities(&decl.uses);
+            let declared_uses = self.capabilities(&decl.uses);
+            let uses_span = decl.uses.as_ref().map(|clause| clause.span);
+            self.declared_reactor_uses[id.index()] = declared_uses;
+            self.reactor_uses_spans[id.index()] = uses_span;
             let mut params = Vec::new();
             let mut nodes: Vec<Node> = Vec::new();
             let mut slots: Vec<NodeId> = Vec::new();
@@ -291,7 +294,6 @@ impl Checker {
 
             let reactor = &mut self.program.reactors[id.index()];
             reactor.params = params;
-            reactor.uses = uses;
             reactor.inputs = inputs;
             reactor.slots = slots;
             reactor.exports = nodes
@@ -498,7 +500,6 @@ impl Checker {
         wiring: &Wiring,
     ) {
         let members = self.member_namespace(id);
-        let uses = self.program.reactors[id.index()].uses.clone();
         let name = self.program.reactors[id.index()].name.clone();
 
         for &node in &wiring.order {
@@ -527,7 +528,7 @@ impl Checker {
                 _ => continue,
             };
 
-            self.begin_member(&name, function, Ctx::Turn, &uses, id, &members, false);
+            self.begin_member(&name, function, Ctx::Turn, id, &members, false);
             for &dep in &wiring.deps[node] {
                 self.bind_node(id, dep, false);
             }
@@ -571,7 +572,7 @@ impl Checker {
                 continue;
             }
 
-            self.begin_member(&name, function, Ctx::Turn, &uses, id, &members, true);
+            self.begin_member(&name, function, Ctx::Turn, id, &members, true);
             let message = self.program.reactors[id.index()].inputs[index].ty.clone();
             self.bind_message(&input.name, params, &message, member.span);
             // Every slot, in slot order, so that the runtime's call is one shape rather than one
@@ -653,13 +654,11 @@ impl Checker {
 
     /// Start checking one lifted member: a fresh local frame, and the reactor's namespace in hand
     /// for the sake of diagnostics about names that are members but not readable here.
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn begin_member(
         &mut self,
         reactor_name: &str,
         function: FnId,
         ctx: Ctx,
-        uses: &[Capability],
         id: ReactorId,
         members: &HashMap<String, Sort>,
         handler: bool,
@@ -669,7 +668,6 @@ impl Checker {
         self.ret = Ty::Unit;
         self.fn_name = self.program.fns[function.index()].name.clone();
         self.ctx = ctx;
-        self.uses = uses.to_vec();
         self.loops = Vec::new();
         // Reactors declare no type parameters, so nothing generic is ever in scope here.
         self.type_params_in_scope.clear();

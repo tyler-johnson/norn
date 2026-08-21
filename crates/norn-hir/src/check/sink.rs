@@ -188,8 +188,9 @@ impl Checker {
 
     /// File the diagnostics under their owners, deduplicated on (span, message): instances
     /// inherit their template's spans, so a mistake written once in a template would otherwise
-    /// report once per instantiation — the `check_moves` discipline.
-    fn report(&mut self, errors: Vec<(usize, Diagnostic)>) {
+    /// report once per instantiation — the `check_moves` discipline. Shared with `infer_uses`,
+    /// the other whole-program pass that reports after `current` has stopped meaning anything.
+    pub(super) fn report(&mut self, errors: Vec<(usize, Diagnostic)>) {
         for (owner, diagnostic) in errors {
             let seen = self.errors[owner]
                 .iter()

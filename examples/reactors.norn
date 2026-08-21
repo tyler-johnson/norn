@@ -30,7 +30,8 @@ export reactor Gate(limit: I64) {
     export signal snapshot = Snapshot(open: open, healthy: healthy)
 }
 
-// `uses` on a reactor is the authority its effects need, and the spawner's set must cover it.
+// A reactor's authority is what its handlers reach, and a spawner reaches all of it through the
+// handle. Both sets are inferred; the clause below is written as an assertion about this one.
 reactor Mailbox(retries: I64)
     uses { clock, net.io }
 {
@@ -86,9 +87,7 @@ reactor Meter(window: I64) {
     export signal mean = total / window
 }
 
-task fn drive(limit: I64) -> ()
-    uses { clock }
-{
+task fn drive(limit: I64) -> () {
     let gate = spawn reactor Gate(limit: limit)
     await send(gate.opened, ())
     print(latest(gate.snapshot))

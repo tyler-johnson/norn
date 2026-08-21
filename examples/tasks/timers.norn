@@ -3,18 +3,14 @@
 // Under the virtual clock this is instant and its trace is a golden file: nothing is runnable
 // between the deadlines, so the runtime jumps straight to each one.
 
-task fn tick(name: String, every: I64) -> ()
-    uses { clock }
-{
+task fn tick(name: String, every: I64) -> () {
     await sleep(every)
     print(name + " once")
     await sleep(every)
     print(name + " twice")
 }
 
-task fn main() -> ()
-    uses { clock }
-{
+task fn main() -> () {
     scope {
         spawn tick("fast", 10)
         spawn tick("slow", 25)

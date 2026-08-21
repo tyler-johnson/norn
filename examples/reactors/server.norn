@@ -35,9 +35,7 @@ reactor Gate(limit: I64) {
     export signal snapshot = Snapshot(accepted: accepted, open: open, healthy: open <= limit)
 }
 
-task fn echo(conn: Connection, gate: Gate) -> ()
-    uses { net.io }
-{
+task fn echo(conn: Connection, gate: Gate) -> () {
     await send(gate.opened, ())
     match await tcp_read(conn) {
         Ok(text) => match await tcp_write(conn, text) {
@@ -52,9 +50,7 @@ task fn echo(conn: Connection, gate: Gate) -> ()
 
 // The accept loop never closes the listener itself — cancellation at the end of `main`'s scope
 // is its closer — so ownership is declared: `sink` says the spawned loop owns the socket.
-task fn accept_loop(listener: sink Listener, gate: Gate) -> ()
-    uses { net.io }
-{
+task fn accept_loop(listener: sink Listener, gate: Gate) -> () {
     loop {
         match await tcp_accept(listener) {
             Ok(conn) => spawn echo(conn, gate)
@@ -63,9 +59,7 @@ task fn accept_loop(listener: sink Listener, gate: Gate) -> ()
     }
 }
 
-task fn main() -> Result<(), IoError>
-    uses { clock, net.listen, net.io }
-{
+task fn main() -> Result<(), IoError> {
     let listener = await tcp_listen(0)?
     print(listener_port(listener))
     let gate = spawn reactor Gate(limit: 4)

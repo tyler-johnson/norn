@@ -496,6 +496,23 @@ fn traits_and_impls_round_trip() {
 }
 
 #[test]
+fn a_written_uses_clause_survives_the_round_trip() {
+    // Written at all is the distinction the tree now carries: an absent clause asks for
+    // inference, and `uses { }` asserts the empty set. Both have to survive print∘parse, and the
+    // dump has to tell them apart.
+    let source = "task fn quiet() -> ()\n    uses { }\n{\n    ()\n}\n\ntask fn loud() -> ()\n    uses { clock, net.io }\n{\n    ()\n}\n\ntask fn plain() -> () {\n    ()\n}\n";
+    let parsed = parse(source);
+    assert!(parsed.ok(), "{}", errors(source));
+    assert_eq!(print::module(&parsed.module), source);
+
+    let dumped = ast(source);
+    assert!(dumped.contains("(uses)"), "{dumped}");
+    assert!(dumped.contains("(uses clock net.io)"), "{dumped}");
+    // `plain` writes none, so it dumps none: exactly two `uses` nodes in the file.
+    assert_eq!(dumped.matches("(uses").count(), 2, "{dumped}");
+}
+
+#[test]
 fn a_trait_member_has_no_body() {
     let rendered = errors(
         "trait Speak {\n    fn speak(value: Self) -> String {\n        \"woof\"\n    }\n}\n",

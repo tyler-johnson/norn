@@ -1,0 +1,58 @@
+// Capabilities are inferred, so none of the clauses below had to be written. Each one is written
+// anyway, and each is wrong in exactly one way: a written `uses { … }` is the whole set, and the
+// compiler holds it to what the body actually reaches.
+
+task fn write_all(path: String) -> Result<(), IoError> {
+    let file = await file_create(path)?
+    await file_close(file)
+    Ok(())
+}
+
+task fn save(path: String) -> Result<(), IoError> {
+    await write_all(path)
+}
+
+// Reaching a capability the clause omits, one hop from the builtin.
+task fn direct() -> ()
+    uses { }
+{
+    await sleep(1)
+}
+
+// The same, several hops away: the error belongs at the call that leads there, and the chain says
+// how it gets to the builtin that needs the authority.
+task fn transitive() -> Result<(), IoError>
+    uses { clock }
+{
+    await sleep(1)
+    await save("./out")
+}
+
+// The other direction. Authority nobody exercises is authority nobody meant to grant, so a
+// capability the body never reaches is as wrong as one it reaches and does not name.
+task fn unreached() -> ()
+    uses { clock, net.io }
+{
+    await sleep(1)
+}
+
+// A reactor's clause is a promise about the whole graph under it, and the blame belongs in the
+// member that breaks it.
+reactor Beeper(every: I64)
+    uses { }
+{
+    input rang: () [capacity: 8, overflow: reject]
+
+    state rings: I64 = 0
+
+    on rang() {
+        rings = rings + 1
+        after beep(every)
+    }
+
+    export signal count = rings
+}
+
+task fn beep(every: I64) -> () {
+    await sleep(every)
+}

@@ -1,0 +1,30 @@
+error: `direct` does not declare the capability `clock`
+  --> capabilities.norn:19:11
+   |
+19 |     await sleep(1)
+   |           ^^^^^^^^ `sleep` uses it
+   = note: a written `uses { … }` is the whole set: write `uses { clock }`, or drop the clause and let it be inferred
+
+error: `transitive` does not declare the capability `fs.write`
+  --> capabilities.norn:28:11
+   |
+28 |     await save("./out")
+   |           ^^^^^^^^^^^^^ `save` reaches it
+   = note: through `save` → `write_all` → `file_create`
+   = note: a written `uses { … }` is the whole set: write `uses { clock, fs.write }`, or drop the clause and let it be inferred
+
+error: `unreached` declares the capability `net.io` and never uses it
+  --> capabilities.norn:34:19
+   |
+34 |     uses { clock, net.io }
+   |                   ^^^^^^ nothing in the body reaches it
+   = note: a written `uses { … }` is exact: the compiler infers the set, and writing one asserts what it must be
+   = note: the inferred set is `uses { clock }`
+
+error: `Beeper` does not declare the capability `clock`
+  --> capabilities.norn:50:15
+   |
+50 |         after beep(every)
+   |               ^^^^^^^^^^^ `beep` reaches it
+   = note: through `beep` → `sleep`
+   = note: a written `uses { … }` is the whole set: write `uses { clock }`, or drop the clause and let it be inferred

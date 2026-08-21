@@ -164,6 +164,11 @@ impl Checker {
                 ast::Item::Reactor(decl) => {
                     let id = ReactorId(self.program.reactors.len() as u32);
                     self.reactor_owner.push(self.current);
+                    // Lockstep with `program.reactors`, filled in by `declare_reactors` once the
+                    // clause has been resolved — the reactor table is append-only, so the row has
+                    // to exist before anything can address it.
+                    self.declared_reactor_uses.push(None);
+                    self.reactor_uses_spans.push(None);
                     self.program.reactors.push(ReactorDef {
                         name: self.qualified(&decl.name.name),
                         params: Vec::new(),
@@ -433,7 +438,8 @@ impl Checker {
             }
             let ret = decl.ret.as_ref().map_or(Ty::Unit, |ty| self.resolve_ty(ty));
             self.type_params_in_scope.clear();
-            let uses = self.capabilities(&decl.uses);
+            let declared = self.capabilities(&decl.uses);
+            let uses_span = decl.uses.as_ref().map(|clause| clause.span);
             let id = FnId(self.program.fns.len() as u32);
             of_item[index] = Some(id);
             self.fn_owner.push(self.current);
@@ -442,6 +448,8 @@ impl Checker {
             self.signatures.push((params.clone(), ret.clone()));
             self.param_modes.push(modes);
             self.mode_pinned.push(pinned);
+            self.declared_uses.push(declared);
+            self.uses_spans.push(uses_span);
             self.program.fns.push(FnDef {
                 // A non-entry module's functions display with their file's stem — "fmt.digits" —
                 // the way lifted reactor members already display dotted. Resolution still goes by
@@ -449,7 +457,7 @@ impl Checker {
                 name: self.qualified(&decl.name.name),
                 type_params,
                 is_task: decl.is_task,
-                uses,
+                uses: Vec::new(),
                 params: params.len(),
                 modes: Vec::new(),
                 locals: Vec::new(),
@@ -479,16 +487,25 @@ impl Checker {
         self.fn_of_item[self.current] = of_item;
     }
 
-    /// Resolve a `uses { … }` list. The vocabulary is closed, so an unknown name is an error that
-    /// says what the three are rather than a capability nobody grants.
-    pub(super) fn capabilities(&mut self, uses: &[ast::Path]) -> Vec<Capability> {
-        let mut resolved = Vec::new();
-        for path in uses {
+    /// Resolve a written `uses { … }`, keeping each capability's own path span.
+    ///
+    /// The vocabulary is closed, so an unknown name is an error that says what the five are rather
+    /// than a capability nobody grants — the one thing about `uses` that a written clause is still
+    /// checked for at its declaration, since inference has no name to resolve. The spans are what
+    /// lets `infer_uses` point at the single capability a body never reaches; a duplicate folds to
+    /// the first one written, silently, the way a duplicate bound does.
+    pub(super) fn capabilities(
+        &mut self,
+        clause: &Option<ast::UsesClause>,
+    ) -> Option<Vec<(Capability, Span)>> {
+        let clause = clause.as_ref()?;
+        let mut resolved: Vec<(Capability, Span)> = Vec::new();
+        for path in &clause.paths {
             let name = path.text();
             match Capability::from_name(&name) {
                 Some(capability) => {
-                    if !resolved.contains(&capability) {
-                        resolved.push(capability);
+                    if !resolved.iter().any(|(seen, _)| *seen == capability) {
+                        resolved.push((capability, path.span));
                     }
                 }
                 None => {
@@ -501,8 +518,8 @@ impl Checker {
                 }
             }
         }
-        resolved.sort();
-        resolved
+        resolved.sort_by_key(|(capability, _)| *capability);
+        Some(resolved)
     }
 
     pub(super) fn check_fns(&mut self, module: &ast::Module) {
@@ -548,7 +565,7 @@ impl Checker {
     /// of an `impl`. The caller has set anything beyond the function's own state — an impl sets
     /// `self_ty` so the body may still spell `Self`.
     fn check_fn_body(&mut self, id: FnId, decl: &ast::FnDecl, display: String) {
-        if !decl.is_task && !decl.uses.is_empty() {
+        if !decl.is_task && decl.uses.is_some() {
             // The parser already rejects `uses` on a non-task function, so this is unreachable
             // in practice; keeping it means the checker never silently ignores a capability.
             self.error(decl.span, "capabilities are only meaningful on a `task fn`");
@@ -563,7 +580,6 @@ impl Checker {
         self.members = HashMap::new();
         self.reactor = None;
         self.in_handler = false;
-        self.uses = self.program.fns[id.index()].uses.clone();
         self.loops = Vec::new();
         // A template body is checked exactly once, its parameters opaque: this scope is what
         // lets a `let` annotation inside it spell `List<T>`, and the bounds beside it are what
@@ -623,6 +639,10 @@ impl Checker {
         // every mode is `Read`; `infer_sinks` pads the row to the real arity once it is known.
         self.param_modes.push(Vec::new());
         self.mode_pinned.push(Vec::new());
+        // A lifted body declares nothing of its own: the clause that pins it is its reactor's,
+        // and `infer_uses` unions the members' inferred sets back up into that.
+        self.declared_uses.push(None);
+        self.uses_spans.push(None);
         self.program.fns.push(FnDef {
             name,
             type_params: Vec::new(),

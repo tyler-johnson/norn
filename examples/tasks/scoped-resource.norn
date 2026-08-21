@@ -9,9 +9,7 @@
 // Nothing here says `close`. The extent of the `scope` is the whole of the cleanup story, which is
 // also why it holds on the error path: `?` returns, and a return unwinds every open scope.
 
-task fn main() -> Result<(), IoError>
-    uses { clock, net.listen, net.io }
-{
+task fn main() -> Result<(), IoError> {
     let outer = await tcp_listen(0)?
 
     scope {

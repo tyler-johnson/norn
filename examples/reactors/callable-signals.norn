@@ -53,9 +53,7 @@ reactor Gate(limit: I64) {
     )
 }
 
-task fn main() -> ()
-    uses { clock }
-{
+task fn main() -> () {
     let gate = spawn reactor Gate(limit: 4)
     await send(gate.added, 1)
     await send(gate.added, 2)

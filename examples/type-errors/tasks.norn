@@ -1,38 +1,26 @@
 // Each function here is wrong in exactly one way, and each way is a rule M2 introduced.
 
-task fn work() -> ()
-    uses { clock }
-{
+task fn work() -> () {
     await sleep(1)
 }
 
-task fn counted() -> I64
-    uses { clock }
-{
+task fn counted() -> I64 {
     await sleep(1)
     7
 }
 
 // There are no task handles, so a spawned task has nowhere to put a value.
-task fn spawn_of_a_value() -> ()
-    uses { clock }
-{
+task fn spawn_of_a_value() -> () {
     spawn counted()
 }
 
 // Building a task and dropping it is the obvious first bug laziness invites.
-task fn discarded() -> ()
-    uses { clock }
-{
+task fn discarded() -> () {
     work()
 }
 
-// Capabilities are checked where a task is built, and cover every task it builds.
-task fn undeclared() -> () {
-    await work()
-}
-
-// The vocabulary is closed.
+// The vocabulary is closed. A written clause is the one place a capability is named, so a name
+// nobody grants is still an error — the rest of the `uses` rules live in `capabilities.norn`.
 task fn misspelled() -> ()
     uses { net.write }
 {

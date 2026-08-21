@@ -11,21 +11,21 @@ error: `token` was given away
    = note: `let kept = token` before the call keeps a copy under a name of its own
 
 error: `conn` has already been moved
-  --> sink-errors.norn:32:31
+  --> sink-errors.norn:28:31
    |
-32 |     let data = await tcp_read(conn)?
+28 |     let data = await tcp_read(conn)?
    |                               ^^^^ used here
-  --> sink-errors.norn:31:20
+  --> sink-errors.norn:27:20
    |
-31 |     await shutdown(conn)
+27 |     await shutdown(conn)
    |                    ^^^^ moved here
    = note: a `Connection` has one owner, and using it as a value is what hands it over
    = note: reads are unmarked and take nothing; what consumes is a `sink` position, a constructor payload, or a deconstructing `match`
 
 error: work started with `spawn` must own its Connection
-  --> sink-errors.norn:50:20
+  --> sink-errors.norn:42:20
    |
-50 |         spawn peek(conn)
+42 |         spawn peek(conn)
    |                    ^^^^ `peek` only reads this
    = note: the task runs after this line, so a parameter that reads would leave the Connection with two users and one owner
    = note: make `peek` consume it — close it in the body, or declare the parameter `sink`

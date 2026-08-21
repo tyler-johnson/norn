@@ -102,12 +102,15 @@ impl Checker {
             signatures: Vec::new(),
             param_modes: Vec::new(),
             mode_pinned: Vec::new(),
+            declared_uses: Vec::new(),
+            uses_spans: Vec::new(),
+            declared_reactor_uses: Vec::new(),
+            reactor_uses_spans: Vec::new(),
             locals: Vec::new(),
             scopes: Vec::new(),
             ret: Ty::Unit,
             fn_name: String::new(),
             ctx: Ctx::Plain,
-            uses: Vec::new(),
             members: HashMap::new(),
             reactor: None,
             in_handler: false,
@@ -199,6 +202,10 @@ impl Checker {
         // every generic instance as an ordinary monomorphic function.
         self.monomorphize();
         self.check_turns();
+        // Capability inference, on the same settled call graph: what a function uses is what its
+        // body reaches, and a written `uses { … }` is checked against that rather than consulted
+        // while the body is walked.
+        self.infer_uses();
         // Sink inference runs immediately before `check_moves`, on the same tables it will
         // enforce: every executable body is concrete by now, so a mode is a per-instance fact.
         self.infer_sinks();

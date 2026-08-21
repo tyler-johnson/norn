@@ -1,35 +1,35 @@
 error: `conn` cannot be moved inside a loop
-  --> loop-moves.norn:13:25
+  --> loop-moves.norn:11:25
    |
-13 |         await tcp_close(conn)
+11 |         await tcp_close(conn)
    |                         ^^^^ moved here
   --> loop-moves.norn:8:27
    |
- 8 | task fn closes_every_pass(conn: Connection, passes: I64) -> ()
+ 8 | task fn closes_every_pass(conn: Connection, passes: I64) -> () {
    |                           ^^^^ …but it was declared outside the loop
    = note: a `Connection` has one owner; the first pass of the loop hands it over, and the next would find it gone
    = note: declare it inside the loop if each pass should have its own
 
 error: `conn` cannot be moved inside a loop
-  --> loop-moves.norn:24:29
+  --> loop-moves.norn:20:29
    |
-24 |             await tcp_close(conn)
+20 |             await tcp_close(conn)
    |                             ^^^^ moved here
-  --> loop-moves.norn:19:30
+  --> loop-moves.norn:17:30
    |
-19 | task fn moves_then_continues(conn: Connection, retry: Bool) -> ()
+17 | task fn moves_then_continues(conn: Connection, retry: Bool) -> () {
    |                              ^^^^ …but it was declared outside the loop
    = note: a `Connection` has one owner; the first pass of the loop hands it over, and the next would find it gone
    = note: declare it inside the loop if each pass should have its own
 
 error: `conn` cannot be moved inside a loop
-  --> loop-moves.norn:33:20
+  --> loop-moves.norn:29:20
    |
-33 |     while consumes(conn) {
+29 |     while consumes(conn) {
    |                    ^^^^ moved here
-  --> loop-moves.norn:32:32
+  --> loop-moves.norn:28:32
    |
-32 | task fn moves_in_the_condition(conn: Connection) -> () {
+28 | task fn moves_in_the_condition(conn: Connection) -> () {
    |                                ^^^^ …but it was declared outside the loop
    = note: a `Connection` has one owner; the first pass of the loop hands it over, and the next would find it gone
    = note: declare it inside the loop if each pass should have its own

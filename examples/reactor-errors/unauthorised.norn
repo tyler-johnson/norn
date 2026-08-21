@@ -1,9 +1,11 @@
-// A reactor's `uses` is the authority its effects need, and the spawner's set must cover it —
-// checked where the reactor is created, because afterwards nothing can tell what a handle will do.
+// A reactor's authority is the authority its effects need, and a spawner reaches all of it
+// through the handle — `spawn reactor` is where the two meet, because afterwards nothing can tell
+// what a handle will do.
+//
+// Both sets here are inferred, so neither declaration below had to be written. Writing one is what
+// makes it checkable: `main` asserts an empty set, and spawning `Beeper` contradicts it.
 
-reactor Beeper(every: I64)
-    uses { clock }
-{
+reactor Beeper(every: I64) {
     input rang: () [capacity: 8, overflow: reject]
 
     state rings: I64 = 0
@@ -16,13 +18,13 @@ reactor Beeper(every: I64)
     export signal count = rings
 }
 
-task fn beep(every: I64) -> ()
-    uses { clock }
-{
+task fn beep(every: I64) -> () {
     await sleep(every)
 }
 
-task fn main() -> () {
+task fn main() -> ()
+    uses { }
+{
     scope {
         let beeper = spawn reactor Beeper(every: 10)
         await send(beeper.rang, ())

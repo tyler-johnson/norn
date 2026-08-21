@@ -23,16 +23,12 @@ struct Snapshot {
 }
 
 // The effect. It suspends, which is the point: it could not have run inside a turn.
-task fn report(open: I64) -> ()
-    uses { clock }
-{
+task fn report(open: I64) -> () {
     await sleep(1)
     print(open)
 }
 
-reactor Gate(limit: I64)
-    uses { clock }
-{
+reactor Gate(limit: I64) {
     input opened: () [capacity: 64, overflow: reject]
     input closed: () [capacity: 64, overflow: reject]
 
@@ -63,9 +59,7 @@ reactor Gate(limit: I64)
     )
 }
 
-task fn main() -> ()
-    uses { clock }
-{
+task fn main() -> () {
     let gate = spawn reactor Gate(limit: 2)
 
     await send(gate.opened, ())

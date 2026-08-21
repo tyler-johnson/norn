@@ -1,67 +1,67 @@
 error: `conn` has already been moved
-  --> moves.norn:19:21
+  --> moves.norn:17:21
    |
-19 |     await tcp_close(conn)
+17 |     await tcp_close(conn)
    |                     ^^^^ used here
-  --> moves.norn:18:21
+  --> moves.norn:16:21
    |
-18 |     await tcp_close(conn)
+16 |     await tcp_close(conn)
    |                     ^^^^ moved here
    = note: a `Connection` has one owner, and using it as a value is what hands it over
    = note: reads are unmarked and take nothing; what consumes is a `sink` position, a constructor payload, or a deconstructing `match`
 
 error: `conn` has already been moved
-  --> moves.norn:26:26
+  --> moves.norn:22:26
    |
-26 |     match await tcp_read(conn) {
+22 |     match await tcp_read(conn) {
    |                          ^^^^ used here
-  --> moves.norn:25:21
+  --> moves.norn:21:21
    |
-25 |     await tcp_close(conn)
+21 |     await tcp_close(conn)
    |                     ^^^^ moved here
    = note: a `Connection` has one owner, and using it as a value is what hands it over
    = note: reads are unmarked and take nothing; what consumes is a `sink` position, a constructor payload, or a deconstructing `match`
 
 error: `conn` has already been moved
-  --> moves.norn:44:21
+  --> moves.norn:36:21
    |
-44 |         spawn serve(conn)
+36 |         spawn serve(conn)
    |                     ^^^^ used here
-  --> moves.norn:43:21
+  --> moves.norn:35:21
    |
-43 |         spawn serve(conn)
+35 |         spawn serve(conn)
    |                     ^^^^ moved here
    = note: a `Connection` has one owner, and using it as a value is what hands it over
    = note: reads are unmarked and take nothing; what consumes is a `sink` position, a constructor payload, or a deconstructing `match`
 
 error: `conn` has already been moved
-  --> moves.norn:56:26
+  --> moves.norn:46:26
    |
-56 |     match await tcp_read(conn) {
+46 |     match await tcp_read(conn) {
    |                          ^^^^ used here
-  --> moves.norn:54:25
+  --> moves.norn:44:25
    |
-54 |         await tcp_close(conn)
+44 |         await tcp_close(conn)
    |                         ^^^^ moved here
    = note: a `Connection` has one owner, and using it as a value is what hands it over
    = note: reads are unmarked and take nothing; what consumes is a `sink` position, a constructor payload, or a deconstructing `match`
 
 error: `conn` cannot be moved out of a `Session`
-  --> moves.norn:67:21
+  --> moves.norn:55:21
    |
-67 |     await tcp_close(session.conn)
+55 |     await tcp_close(session.conn)
    |                     ^^^^^^^^^^^^ this would leave the rest of the value with no owner
    = note: an owned value moves whole; `match` is what takes one apart, as in `match session { Session(conn: conn) => … }`
    = note: a position that only reads can be handed the whole value: reads are unmarked, and take nothing
 
 error: `closing` has already been moved
-  --> moves.norn:77:11
+  --> moves.norn:63:11
    |
-77 |     await closing
+63 |     await closing
    |           ^^^^^^^ used here
-  --> moves.norn:76:11
+  --> moves.norn:62:11
    |
-76 |     await closing
+62 |     await closing
    |           ^^^^^^^ moved here
    = note: a `Task<()>` has one owner, and using it as a value is what hands it over
    = note: a task is work to be done once; build another call if it should happen again

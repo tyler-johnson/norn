@@ -87,8 +87,11 @@ impl Resource {
 }
 
 /// Authority a task needs in order to touch the world. The v0 vocabulary is fixed and closed: an
-/// unknown name is an error rather than an extension point, because `uses` is checked and not
-/// inferred, and a typo that quietly widened authority would defeat the point of declaring it.
+/// unknown name is an error rather than an extension point, because a written `uses` is an
+/// assertion, and a typo that quietly widened authority would defeat the point of writing one.
+///
+/// The set itself is inferred — `check/uses.rs` computes it from what a body reaches — so the
+/// closed vocabulary is now only what a *written* clause is resolved against.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum Capability {
     Clock,
@@ -382,7 +385,9 @@ pub struct ReactorDef {
     /// Constructor parameters, in declaration order. Each is also a node, and a slot: a parameter
     /// is state that is written once and never again.
     pub params: Vec<(String, Ty)>,
-    /// The capability set of the effects this reactor launches. Checked against its spawner's.
+    /// The capability set of the effects this reactor launches: the union of what its members
+    /// reach, inferred by `infer_uses`. A written `uses { … }` on the reactor is checked against
+    /// exactly this, and a spawner reaches all of it through the handle.
     pub uses: Vec<Capability>,
     pub inputs: Vec<InputDef>,
     pub nodes: Vec<Node>,
@@ -523,7 +528,9 @@ pub struct FnDef {
     pub type_params: Vec<String>,
     /// Whether calling this function builds a `Task<ret>` instead of running it.
     pub is_task: bool,
-    /// The declared capability set, sorted and deduplicated. Checked, not inferred.
+    /// The capability set the body reaches, sorted and deduplicated — inferred, not declared.
+    /// Empty while checking runs and filled once by `infer_uses`, the way `modes` is; a written
+    /// `uses { … }` is an assertion held against this rather than the source of it.
     pub uses: Vec<Capability>,
     /// Parameters occupy the first `params` slots of `locals`.
     pub params: usize,

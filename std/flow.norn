@@ -7,9 +7,9 @@
 // names the module (`pipe` from `std/flow`, one day `source.pipe(sink)`); the old `_to` suffix
 // was doing the sink argument's job.
 //
-// No `uses` clause anywhere: the open handles are the authority. `flow_of_file` and `file_create`
-// checked `fs.read`/`fs.write` when they opened them, and driving what is already open asks for
-// nothing more.
+// The open handles are the authority, which is why nothing here reaches for any: `flow_of_file`
+// and `file_create` checked `fs.read`/`fs.write` when they opened them, and driving what is
+// already open asks for nothing more.
 
 // Deliver everything the flow promises into the sink, then close both ends — completion and
 // failure alike consume them, so nothing can legally touch either again and the closes happen

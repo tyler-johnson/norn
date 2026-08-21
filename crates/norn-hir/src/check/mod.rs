@@ -34,6 +34,7 @@ mod sink;
 mod traits;
 mod turns;
 mod ty;
+mod uses;
 
 use generics::Generics;
 use traits::{ImplDef, TraitDef, TraitId};
@@ -333,15 +334,24 @@ struct Checker {
     /// bodiless declarations cannot be flipped by a body, so an impl that consumes a read-pinned
     /// parameter is an error at the impl, never a silent flip.
     mode_pinned: Vec<Vec<bool>>,
+    /// The written `uses { … }` of each function, capability and path span, in the same lockstep —
+    /// `None` where nothing was written, which is the everyday case and the one `infer_uses` fills
+    /// in. The exact analogue of `mode_pinned`: what the programmer wrote is what pins.
+    declared_uses: Vec<Option<Vec<(Capability, Span)>>>,
+    /// The span of each written clause as a whole, for the diagnostic that has to name the set
+    /// rather than one of its members.
+    uses_spans: Vec<Option<Span>>,
+    /// The same pair for reactors, in lockstep with `program.reactors`.
+    declared_reactor_uses: Vec<Option<Vec<(Capability, Span)>>>,
+    reactor_uses_spans: Vec<Option<Span>>,
     locals: Vec<LocalDef>,
     scopes: Vec<Vec<(String, LocalId)>>,
     ret: Ty,
-    /// The function being checked: its name for diagnostics, whether it is a `task fn`, and what it
-    /// declared it uses. Capability checking happens where a task is *built*, because an awaiting
-    /// function cannot see a `Task<T>`'s provenance.
+    /// The function being checked: its name for diagnostics, and whether it is a `task fn`.
+    /// What it *uses* is no longer part of this state — capabilities are inferred whole-program by
+    /// `infer_uses`, long after any body has been walked.
     fn_name: String,
     ctx: Ctx,
-    uses: Vec<Capability>,
     /// The member namespace of the reactor whose body is being checked, if any. Consulted only
     /// when a name fails to resolve, so that "you cannot read that here" beats "unknown name".
     members: HashMap<String, Sort>,

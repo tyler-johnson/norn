@@ -206,11 +206,8 @@ fn dump_item(item: &Item) -> Node {
                 children.push(atom("export"));
             }
             children.push(list("params", decl.params.iter().map(dump_param).collect()));
-            if !decl.uses.is_empty() {
-                children.push(list(
-                    "uses",
-                    decl.uses.iter().map(|p| atom(p.text())).collect(),
-                ));
+            if let Some(clause) = &decl.uses {
+                children.push(dump_uses(clause));
             }
             children.extend(decl.members.iter().map(dump_member));
             list("reactor", children)
@@ -241,7 +238,7 @@ fn dump_fn_head(
     type_params: &[TypeParam],
     params: &[Param],
     ret: Option<&Type>,
-    uses: &[Path],
+    uses: &Option<UsesClause>,
 ) -> Vec<Node> {
     let mut children = Vec::new();
     if is_task {
@@ -254,10 +251,19 @@ fn dump_fn_head(
     if let Some(ret) = ret {
         children.push(list("ret", vec![dump_type(ret)]));
     }
-    if !uses.is_empty() {
-        children.push(list("uses", uses.iter().map(|p| atom(p.text())).collect()));
+    if let Some(clause) = uses {
+        children.push(dump_uses(clause));
     }
     children
+}
+
+/// `(uses clock net.io)`, and the bare `(uses)` for a written-empty clause — which the dump has
+/// to distinguish from no clause at all, since that is the whole of what the field now says.
+fn dump_uses(clause: &UsesClause) -> Node {
+    list(
+        "uses",
+        clause.paths.iter().map(|p| atom(p.text())).collect(),
+    )
 }
 
 fn dump_member(member: &Member) -> Node {

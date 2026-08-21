@@ -70,9 +70,7 @@ task fn flood(sink: Sink) -> ()
     await send(sink.waits, 4)
 }
 
-task fn main() -> ()
-    uses { clock }
-{
+task fn main() -> () {
     let sink = spawn reactor Sink()
     await flood(sink)
     await sleep(10)

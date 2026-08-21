@@ -19,15 +19,11 @@ fn spends_twice() -> I64 {
 
 // `shutdown` never writes `sink`, but its body closes the connection, so the mode is inferred:
 // handing a connection to it is handing it over, exactly as if `tcp_close` were called here.
-task fn shutdown(conn: Connection) -> ()
-    uses { net.io }
-{
+task fn shutdown(conn: Connection) -> () {
     await tcp_close(conn)
 }
 
-task fn closes_then_reads(conn: Connection) -> Result<(), IoError>
-    uses { net.io }
-{
+task fn closes_then_reads(conn: Connection) -> Result<(), IoError> {
     await shutdown(conn)
     let data = await tcp_read(conn)?
     Ok(())
@@ -36,16 +32,12 @@ task fn closes_then_reads(conn: Connection) -> Result<(), IoError>
 // `peek` only reads, so a task built from it cannot own the connection — and a spawned task
 // outlives the call that built it, so reading is not enough: the child would still be using a
 // value the parent owns.
-task fn peek(conn: Connection) -> ()
-    uses { net.io }
-{
+task fn peek(conn: Connection) -> () {
     let data = await tcp_read(conn)
     ()
 }
 
-task fn spawns_a_reader(conn: Connection) -> ()
-    uses { net.io }
-{
+task fn spawns_a_reader(conn: Connection) -> () {
     scope {
         spawn peek(conn)
     }

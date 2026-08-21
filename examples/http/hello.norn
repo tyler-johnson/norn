@@ -13,9 +13,7 @@
 import { to_string } from "std/fmt"
 import { read_request, respond } from "std/http"
 
-task fn serve(conn: Connection) -> ()
-    uses { net.io }
-{
+task fn serve(conn: Connection) -> () {
     match await read_request(conn) {
         Ok(_) => match await respond(conn, 200, "hello from norn\n") {
             Ok(_) => ()
@@ -26,9 +24,7 @@ task fn serve(conn: Connection) -> ()
     }
 }
 
-task fn accept_loop(listener: sink Listener) -> ()
-    uses { net.io }
-{
+task fn accept_loop(listener: sink Listener) -> () {
     scope {
         loop {
             match await tcp_accept(listener) {
@@ -39,9 +35,7 @@ task fn accept_loop(listener: sink Listener) -> ()
     }
 }
 
-task fn main() -> Result<(), IoError>
-    uses { clock, net.listen, net.io }
-{
+task fn main() -> Result<(), IoError> {
     let listener = await tcp_listen(0)?
     print(to_string(listener_port(listener)))
     scope {

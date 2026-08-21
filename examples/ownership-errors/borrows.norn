@@ -24,9 +24,7 @@ fn rewrite(conn: &mut Connection) -> () {
 }
 
 // A borrowed expression: there is nothing for `&` to take — reading does not consume.
-task fn names_a_borrow() -> ()
-    uses { net.listen }
-{
+task fn names_a_borrow() -> () {
     match await tcp_listen(0) {
         Ok(listener) => {
             let held = &listener
@@ -37,9 +35,7 @@ task fn names_a_borrow() -> ()
 }
 
 // An argument spelled `&x`: whether a call consumes is its signature's fact, never the site's.
-task fn reads_with_a_mark(conn: Connection) -> ()
-    uses { net.io }
-{
+task fn reads_with_a_mark(conn: Connection) -> () {
     match await tcp_read(&conn) {
         Ok(_) => ()
         Err(_) => ()

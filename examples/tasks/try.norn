@@ -7,16 +7,12 @@ fn refuse() -> Result<(), IoError> {
     Err(IoError.Refused)
 }
 
-task fn patient() -> ()
-    uses { clock }
-{
+task fn patient() -> () {
     await sleep(1000)
     print("this line is never reached")
 }
 
-task fn main() -> Result<(), IoError>
-    uses { clock }
-{
+task fn main() -> Result<(), IoError> {
     scope {
         spawn patient()
         await sleep(10)

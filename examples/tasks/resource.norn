@@ -9,18 +9,14 @@
 // transfer is declared rather than inferred: `sink` is what says the spawned child owns what it
 // was handed, and accepting then looks at the listener without taking it.
 
-task fn wait_for_client(listener: sink Listener) -> ()
-    uses { net.io }
-{
+task fn wait_for_client(listener: sink Listener) -> () {
     match await tcp_accept(listener) {
         Ok(_) => print("a client arrived")
         Err(_) => print("the listener failed")
     }
 }
 
-task fn main() -> Result<(), IoError>
-    uses { clock, net.listen, net.io }
-{
+task fn main() -> Result<(), IoError> {
     let listener = await tcp_listen(0)?
     scope {
         spawn wait_for_client(listener)

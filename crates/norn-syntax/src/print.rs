@@ -176,11 +176,11 @@ fn print_item(item: &Item) -> String {
                 ""
             };
             let mut out = format!("{export}reactor {}({})", decl.name.name, params.join(", "));
-            if decl.uses.is_empty() {
-                out.push(' ');
-            } else {
-                let caps: Vec<_> = decl.uses.iter().map(|p| p.text()).collect();
-                out.push_str(&format!("\n{INDENT}uses {{ {} }}\n", caps.join(", ")));
+            match &decl.uses {
+                None => out.push(' '),
+                Some(clause) => {
+                    out.push_str(&format!("\n{INDENT}{}\n", print_uses(clause)));
+                }
             }
             out.push_str("{\n");
             for member in &decl.members {
@@ -209,14 +209,11 @@ fn print_fn(decl: &FnDecl, indent: usize) -> String {
         &decl.params,
         decl.ret.as_ref(),
     ));
-    if decl.uses.is_empty() {
-        out.push(' ');
-    } else {
-        let caps: Vec<_> = decl.uses.iter().map(|p| p.text()).collect();
-        out.push_str(&format!(
-            "\n{pad}{INDENT}uses {{ {} }}\n{pad}",
-            caps.join(", ")
-        ));
+    match &decl.uses {
+        None => out.push(' '),
+        Some(clause) => {
+            out.push_str(&format!("\n{pad}{INDENT}{}\n{pad}", print_uses(clause)));
+        }
     }
     out.push_str(&print_block(&decl.body, indent));
     out
@@ -233,11 +230,20 @@ fn print_fn_sig(sig: &FnSig, indent: usize) -> String {
         &sig.params,
         sig.ret.as_ref(),
     ));
-    if !sig.uses.is_empty() {
-        let caps: Vec<_> = sig.uses.iter().map(|p| p.text()).collect();
-        out.push_str(&format!("\n{pad}{INDENT}uses {{ {} }}", caps.join(", ")));
+    if let Some(clause) = &sig.uses {
+        out.push_str(&format!("\n{pad}{INDENT}{}", print_uses(clause)));
     }
     out
+}
+
+/// `uses { clock, net.io }`, or `uses { }` for the clause that asserts an empty set — which is a
+/// different thing from writing no clause at all, and prints differently for that reason.
+fn print_uses(clause: &UsesClause) -> String {
+    if clause.paths.is_empty() {
+        return "uses { }".to_string();
+    }
+    let caps: Vec<_> = clause.paths.iter().map(|p| p.text()).collect();
+    format!("uses {{ {} }}", caps.join(", "))
 }
 
 /// `task fn name<T>(a: T) -> T` — everything a declaration and a signature spell the same way.

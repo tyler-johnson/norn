@@ -245,8 +245,7 @@ impl Checker {
         }
 
         let ty = if self.program.fns[id.index()].is_task {
-            let needs = self.program.fns[id.index()].uses.clone();
-            self.require_task_authority(display, &needs, span);
+            self.require_task_context(display, span);
             Ty::Task(Box::new(ret))
         } else {
             ret
@@ -449,7 +448,7 @@ impl Checker {
             self.error(span, message);
             return self.error_expr(span);
         }
-        if builtin.is_task() && !self.require_task_authority(name, builtin.capabilities(), span) {
+        if builtin.is_task() && !self.require_task_context(name, span) {
             return self.error_expr(span);
         }
         // `send` and `latest` are typed by what they are handed rather than by a signature, the
@@ -653,7 +652,9 @@ impl Checker {
             self.push(
                 Diagnostic::new(arg.span, message)
                     .label("not a `Slots`")
-                    .note("a slab comes from `slots_new`, as in `let s: Slots<I64> = slots_new(4)`"),
+                    .note(
+                        "a slab comes from `slots_new`, as in `let s: Slots<I64> = slots_new(4)`",
+                    ),
             );
             return None;
         };
@@ -796,8 +797,7 @@ impl Checker {
             checked.push(self.check_expr(&args[order[index]].value, Some(ty)));
         }
 
-        let needs = self.program.reactors[id.index()].uses.clone();
-        self.require_task_authority(&name, &needs, span);
+        self.require_task_context(&name, span);
         Expr {
             kind: ExprKind::SpawnReactor {
                 reactor: id,

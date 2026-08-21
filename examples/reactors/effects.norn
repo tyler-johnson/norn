@@ -17,9 +17,7 @@ struct Report {
     failed: I64
 }
 
-task fn deliver(id: I64) -> Outcome
-    uses { clock }
-{
+task fn deliver(id: I64) -> Outcome {
     await sleep(id)
     if id == 2 {
         Outcome.Failed
@@ -28,9 +26,7 @@ task fn deliver(id: I64) -> Outcome
     }
 }
 
-reactor Mailbox()
-    uses { clock }
-{
+reactor Mailbox() {
     input queued: I64 [capacity: 8, overflow: reject]
     input settled: Outcome [capacity: 8, overflow: reject]
 
@@ -58,9 +54,7 @@ reactor Mailbox()
     export signal report = Report(pending: pending, delivered: delivered, failed: failed)
 }
 
-task fn main() -> ()
-    uses { clock }
-{
+task fn main() -> () {
     let mailbox = spawn reactor Mailbox()
     await send(mailbox.queued, 1)
     await send(mailbox.queued, 2)

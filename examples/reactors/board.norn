@@ -24,9 +24,7 @@ reactor Board(seed: Shared<Snapshot>) {
     export signal title = headline
 }
 
-task fn main() -> ()
-    uses { clock }
-{
+task fn main() -> () {
     let board = spawn reactor Board(seed: shared(Snapshot(label: "start", total: 0)))
     print(latest(board.title))
     await send(board.publish, shared(Snapshot(label: "grown", total: 42)))

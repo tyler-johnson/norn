@@ -39,9 +39,7 @@ task fn record(feed: History) -> ()
     await send(feed.recorded, 5)
 }
 
-task fn main() -> ()
-    uses { clock }
-{
+task fn main() -> () {
     let mut seed: Buf<I64> = empty()
     let mut n = 0
     while n < 4 {

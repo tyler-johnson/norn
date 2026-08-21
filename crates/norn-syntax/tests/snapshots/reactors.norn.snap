@@ -70,7 +70,6 @@
   (fn drive task
     (params (param limit I64))
     (ret unit)
-    (uses clock)
     (block
       (let gate (spawn-reactor Gate (arg limit (path limit))))
       (await (call (path send) (arg (path gate.opened)) (arg unit)))
@@ -142,9 +141,7 @@ reactor Meter(window: I64) {
     export signal mean = total / window
 }
 
-task fn drive(limit: I64) -> ()
-    uses { clock }
-{
+task fn drive(limit: I64) -> () {
     let gate = spawn reactor Gate(limit: limit)
     await send(gate.opened, ())
     print(latest(gate.snapshot))

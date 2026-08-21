@@ -31,17 +31,17 @@ error: references are not part of Norn
    = note: call sites stay unmarked — the signature is where the contract lives
 
 error: Norn has no borrows
-  --> borrows.norn:32:24
+  --> borrows.norn:30:24
    |
-32 |             let held = &listener
+30 |             let held = &listener
    |                        ^^^^^^^^^ `&` takes nothing to take
    = note: pass the value itself: reading does not consume it
    = note: whether a call consumes is its signature's to declare (`sink T`), never the call site's
 
 error: Norn has no borrows
-  --> borrows.norn:43:26
+  --> borrows.norn:39:26
    |
-43 |     match await tcp_read(&conn) {
+39 |     match await tcp_read(&conn) {
    |                          ^^^^^ `&` takes nothing to take
    = note: pass the value itself: reading does not consume it
    = note: whether a call consumes is its signature's to declare (`sink T`), never the call site's

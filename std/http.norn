@@ -87,9 +87,7 @@ export fn response_head(status: I64, content_length: I64) -> String {
 // socket stays with its owner. `leftover` collects any body bytes that arrived alongside the
 // head, truncated to the declared length so a pipelined next request — which every response's
 // `Connection: close` has already declined — is dropped rather than mistaken for body.
-export task fn read_request(conn: Connection) -> Result<Request, IoError>
-    uses { net.io }
-{
+export task fn read_request(conn: Connection) -> Result<Request, IoError> {
     let mut gathered = bytes("")
     loop {
         match head(gathered) {
@@ -114,18 +112,14 @@ export task fn read_request(conn: Connection) -> Result<Request, IoError>
 // Send a whole response — head and body in one buffer, the runtime's partial-write cursor doing
 // the chunking — and close the connection. Closing on the failure path too is why the write is
 // awaited into a value rather than `?`-returned: nothing here leaks a close to task teardown.
-export task fn respond(conn: sink Connection, status: I64, body: String) -> Result<(), IoError>
-    uses { net.io }
-{
+export task fn respond(conn: sink Connection, status: I64, body: String) -> Result<(), IoError> {
     let payload = bytes(body)
     let outcome = await tcp_write(conn, bytes(response_head(status, bytes_len(payload))) + payload)
     await tcp_close(conn)
     outcome
 }
 
-export task fn respond_empty(conn: sink Connection, status: I64) -> Result<(), IoError>
-    uses { net.io }
-{
+export task fn respond_empty(conn: sink Connection, status: I64) -> Result<(), IoError> {
     await respond(conn, status, "")
 }
 
@@ -133,18 +127,14 @@ export task fn respond_empty(conn: sink Connection, status: I64) -> Result<(), I
 // length, then chunks ride `flow_next` into `tcp_write`. Both handles are sunk here and closed
 // on every path — the read-mode `stream` helper is what keeps a mid-body failure from leaving
 // either to task teardown, the same split as std/flow's `pipe`.
-export task fn respond_flow(conn: sink Connection, status: I64, body: sink Flow<Bytes>) -> Result<(), IoError>
-    uses { net.io }
-{
+export task fn respond_flow(conn: sink Connection, status: I64, body: sink Flow<Bytes>) -> Result<(), IoError> {
     let outcome = await stream(conn, body, status)
     await flow_close(body)
     await tcp_close(conn)
     outcome
 }
 
-task fn stream(conn: Connection, body: Flow<Bytes>, status: I64) -> Result<(), IoError>
-    uses { net.io }
-{
+task fn stream(conn: Connection, body: Flow<Bytes>, status: I64) -> Result<(), IoError> {
     await tcp_write(conn, bytes(response_head(status, flow_len(body))))?
     loop {
         let chunk = await flow_next(body)?
@@ -160,17 +150,13 @@ task fn stream(conn: Connection, body: Flow<Bytes>, status: I64) -> Result<(), I
 // on every path. One chunk local per iteration is the demand claim's new home: nothing beyond a
 // single read is ever held, and the slice keeps a final over-full read from writing past the
 // declared length.
-export task fn save_body(conn: Connection, req: Request, sink: sink File) -> Result<I64, IoError>
-    uses { net.io }
-{
+export task fn save_body(conn: Connection, req: Request, sink: sink File) -> Result<I64, IoError> {
     let outcome = await receive(conn, sink, req)
     await file_close(sink)
     outcome
 }
 
-task fn receive(conn: Connection, sink: File, req: Request) -> Result<I64, IoError>
-    uses { net.io }
-{
+task fn receive(conn: Connection, sink: File, req: Request) -> Result<I64, IoError> {
     await file_write(sink, req.leftover)?
     let mut written = bytes_len(req.leftover)
     while written < req.content_length {

@@ -15,8 +15,6 @@ reactor Watcher(threshold: I64) {
     }
 }
 
-task fn notify(level: I64) -> ()
-    uses { clock }
-{
+task fn notify(level: I64) -> () {
     await sleep(1)
 }

@@ -900,6 +900,8 @@ impl Checker {
         // The trait's declared modes, pinned like an impl's: a stub is bodiless twice over.
         self.param_modes.push(modes);
         self.mode_pinned.push(vec![true; params.len()]);
+        self.declared_uses.push(None);
+        self.uses_spans.push(None);
         self.program.fns.push(FnDef {
             name,
             type_params: Vec::new(),
@@ -1040,9 +1042,9 @@ impl Checker {
             .collect();
         let ret = self.subst(&ret, &args, at, 0);
         let name = self.instance_name(&self.program.fns[template.index()].name.clone(), &args);
-        let (is_task, uses, span) = {
+        let (is_task, span) = {
             let def = &self.program.fns[template.index()];
-            (def.is_task, def.uses.clone(), def.span)
+            (def.is_task, def.span)
         };
         let id = FnId(self.program.fns.len() as u32);
         // Move errors in an instance body carry the template's spans, so they render against the
@@ -1057,11 +1059,17 @@ impl Checker {
             .push(self.param_modes[template.index()].clone());
         self.mode_pinned
             .push(self.mode_pinned[template.index()].clone());
+        // The template's written clause, spans and all: an instance inherits the assertion the
+        // template made, so `infer_uses` checks it once per instance and the span dedupe collapses
+        // the report back to the one place it was written.
+        self.declared_uses
+            .push(self.declared_uses[template.index()].clone());
+        self.uses_spans.push(self.uses_spans[template.index()]);
         self.program.fns.push(FnDef {
             name,
             type_params: Vec::new(),
             is_task,
-            uses,
+            uses: Vec::new(),
             params: params.len(),
             modes: Vec::new(),
             locals: Vec::new(),
@@ -1166,8 +1174,7 @@ impl Checker {
         let instance = self.request_fn_instance(template, instance_args, span, 0);
         let ret = self.signatures[instance.index()].1.clone();
         let ty = if is_task {
-            let needs = self.program.fns[instance.index()].uses.clone();
-            self.require_task_authority(display, &needs, span);
+            self.require_task_context(display, span);
             Ty::Task(Box::new(ret))
         } else {
             ret

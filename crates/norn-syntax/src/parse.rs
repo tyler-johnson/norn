@@ -489,7 +489,7 @@ impl Parser {
             None
         };
 
-        let mut uses = Vec::new();
+        let mut uses = None;
         if self.at(&TokenKind::Kw(Kw::Uses)) {
             let uses_span = self.peek().span;
             if !is_task {
@@ -501,7 +501,7 @@ impl Parser {
                         ),
                 );
             }
-            uses = self.uses_clause()?;
+            uses = Some(self.uses_clause()?);
         }
 
         let body = self.block()?;
@@ -576,16 +576,22 @@ impl Parser {
     }
 
     /// `uses { clock, net.io }`. The caller has already decided whether a `uses` is allowed here.
-    fn uses_clause(&mut self) -> PResult<Vec<Path>> {
-        self.expect(TokenKind::Kw(Kw::Uses))?;
+    ///
+    /// Writing the clause at all is what it means: an absent one is inferred, so the empty
+    /// `uses { }` is a real spelling — the assertion that a task reaches nothing.
+    fn uses_clause(&mut self) -> PResult<UsesClause> {
+        let start = self.expect(TokenKind::Kw(Kw::Uses))?.span;
         self.expect(TokenKind::LBrace)?;
-        let mut uses = Vec::new();
+        let mut paths = Vec::new();
         while !self.at(&TokenKind::RBrace) && !self.at_eof() {
-            uses.push(self.path()?);
+            paths.push(self.path()?);
             self.separator(&TokenKind::RBrace, "capability")?;
         }
-        self.expect(TokenKind::RBrace)?;
-        Ok(uses)
+        let end = self.expect(TokenKind::RBrace)?.span;
+        Ok(UsesClause {
+            paths,
+            span: start.to(end),
+        })
     }
 
     /// `export trait Display { fn to_string(value: Self) -> String }`. Members are signatures
@@ -629,7 +635,7 @@ impl Parser {
         } else {
             None
         };
-        let mut uses = Vec::new();
+        let mut uses = None;
         if self.at(&TokenKind::Kw(Kw::Uses)) {
             let uses_span = self.peek().span;
             if !is_task {
@@ -641,8 +647,9 @@ impl Parser {
                         ),
                 );
             }
-            uses = self.uses_clause()?;
-            end = uses.last().map_or(end, |path| path.span);
+            let clause = self.uses_clause()?;
+            end = clause.span;
+            uses = Some(clause);
         }
         if self.at(&TokenKind::LBrace) {
             let span = self.peek().span;
@@ -723,9 +730,9 @@ impl Parser {
         let name = self.ident()?;
         let (params, _) = self.param_list()?;
         let uses = if self.at(&TokenKind::Kw(Kw::Uses)) {
-            self.uses_clause()?
+            Some(self.uses_clause()?)
         } else {
-            Vec::new()
+            None
         };
 
         self.expect(TokenKind::LBrace)?;

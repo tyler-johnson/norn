@@ -76,7 +76,6 @@
   (fn read_request export task
     (params (param conn Connection))
     (ret (ty Result Request IoError))
-    (uses net.io)
     (block
       (let gathered mut (call (path bytes) (arg (str ""))))
       (loop
@@ -125,7 +124,6 @@
   (fn respond export task
     (params (param conn sink Connection) (param status I64) (param body String))
     (ret (ty Result unit IoError))
-    (uses net.io)
     (block
       (let payload (call (path bytes) (arg (path body))))
       (let outcome
@@ -148,7 +146,6 @@
   (fn respond_empty export task
     (params (param conn sink Connection) (param status I64))
     (ret (ty Result unit IoError))
-    (uses net.io)
     (block
       (await
         (call (path respond) (arg (path conn)) (arg (path status)) (arg (str ""))))))
@@ -158,7 +155,6 @@
       (param status I64)
       (param body sink (ty Flow Bytes)))
     (ret (ty Result unit IoError))
-    (uses net.io)
     (block
       (let outcome
         (await
@@ -173,7 +169,6 @@
   (fn stream task
     (params (param conn Connection) (param body (ty Flow Bytes)) (param status I64))
     (ret (ty Result unit IoError))
-    (uses net.io)
     (block
       (try
         (await
@@ -198,7 +193,6 @@
   (fn save_body export task
     (params (param conn Connection) (param req Request) (param sink sink File))
     (ret (ty Result I64 IoError))
-    (uses net.io)
     (block
       (let outcome
         (await
@@ -208,7 +202,6 @@
   (fn receive task
     (params (param conn Connection) (param sink File) (param req Request))
     (ret (ty Result I64 IoError))
-    (uses net.io)
     (block
       (try
         (await (call (path file_write) (arg (path sink)) (arg (path req.leftover)))))
@@ -681,9 +674,7 @@ export fn response_head(status: I64, content_length: I64) -> String {
     "HTTP/1.1 " + to_string(status) + " " + reason(status) + "\r\nContent-Length: " + to_string(content_length) + "\r\nConnection: close\r\n\r\n"
 }
 
-export task fn read_request(conn: Connection) -> Result<Request, IoError>
-    uses { net.io }
-{
+export task fn read_request(conn: Connection) -> Result<Request, IoError> {
     let mut gathered = bytes("")
     loop {
         match head(gathered) {
@@ -705,33 +696,25 @@ export task fn read_request(conn: Connection) -> Result<Request, IoError>
     }
 }
 
-export task fn respond(conn: sink Connection, status: I64, body: String) -> Result<(), IoError>
-    uses { net.io }
-{
+export task fn respond(conn: sink Connection, status: I64, body: String) -> Result<(), IoError> {
     let payload = bytes(body)
     let outcome = await tcp_write(conn, bytes(response_head(status, bytes_len(payload))) + payload)
     await tcp_close(conn)
     outcome
 }
 
-export task fn respond_empty(conn: sink Connection, status: I64) -> Result<(), IoError>
-    uses { net.io }
-{
+export task fn respond_empty(conn: sink Connection, status: I64) -> Result<(), IoError> {
     await respond(conn, status, "")
 }
 
-export task fn respond_flow(conn: sink Connection, status: I64, body: sink Flow<Bytes>) -> Result<(), IoError>
-    uses { net.io }
-{
+export task fn respond_flow(conn: sink Connection, status: I64, body: sink Flow<Bytes>) -> Result<(), IoError> {
     let outcome = await stream(conn, body, status)
     await flow_close(body)
     await tcp_close(conn)
     outcome
 }
 
-task fn stream(conn: Connection, body: Flow<Bytes>, status: I64) -> Result<(), IoError>
-    uses { net.io }
-{
+task fn stream(conn: Connection, body: Flow<Bytes>, status: I64) -> Result<(), IoError> {
     await tcp_write(conn, bytes(response_head(status, flow_len(body))))?
     loop {
         let chunk = await flow_next(body)?
@@ -742,17 +725,13 @@ task fn stream(conn: Connection, body: Flow<Bytes>, status: I64) -> Result<(), I
     }
 }
 
-export task fn save_body(conn: Connection, req: Request, sink: sink File) -> Result<I64, IoError>
-    uses { net.io }
-{
+export task fn save_body(conn: Connection, req: Request, sink: sink File) -> Result<I64, IoError> {
     let outcome = await receive(conn, sink, req)
     await file_close(sink)
     outcome
 }
 
-task fn receive(conn: Connection, sink: File, req: Request) -> Result<I64, IoError>
-    uses { net.io }
-{
+task fn receive(conn: Connection, sink: File, req: Request) -> Result<I64, IoError> {
     await file_write(sink, req.leftover)?
     let mut written = bytes_len(req.leftover)
     while written < req.content_length {

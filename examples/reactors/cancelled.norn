@@ -11,16 +11,12 @@ struct Pair {
     finished: I64
 }
 
-task fn slow(id: I64) -> I64
-    uses { clock }
-{
+task fn slow(id: I64) -> I64 {
     await sleep(1000)
     id
 }
 
-reactor Slow()
-    uses { clock }
-{
+reactor Slow() {
     input start: I64 [capacity: 4, overflow: reject]
     input settled: I64 [capacity: 4, overflow: reject]
 
@@ -39,9 +35,7 @@ reactor Slow()
     export signal counts = Pair(started: started, finished: finished)
 }
 
-task fn main() -> ()
-    uses { clock }
-{
+task fn main() -> () {
     scope {
         let slow = spawn reactor Slow()
         await send(slow.start, 1)

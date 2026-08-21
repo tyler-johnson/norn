@@ -35,7 +35,6 @@
   (fn load_config task
     (params (param path Path))
     (ret (ty Result Config LoadError))
-    (uses fs.read)
     (block
       (let config
         (try
@@ -44,7 +43,6 @@
   (fn greet task
     (params (param path Path) (param id UserId))
     (ret (ty Result String))
-    (uses fs.read net.connect clock)
     (block
       (let config (try (await (call (path load_config) (arg (path path))))))
       (let profile
@@ -118,16 +116,12 @@ export task fn fetch_profile(base: Url, id: UserId) -> Result<Profile, FetchErro
     return await response.json<Profile>(limit: 2.mebibytes)?
 }
 
-task fn load_config(path: Path) -> Result<Config, LoadError>
-    uses { fs.read }
-{
+task fn load_config(path: Path) -> Result<Config, LoadError> {
     let config = await fs.read_json<Config>(path)?
     return Ok(config)
 }
 
-task fn greet(path: Path, id: UserId) -> Result<String>
-    uses { fs.read, net.connect, clock }
-{
+task fn greet(path: Path, id: UserId) -> Result<String> {
     let config = await load_config(path)?
     let profile = await fetch_profile(config.upstream, id)?
     return Ok(config.greeting + ", " + profile.display_name)

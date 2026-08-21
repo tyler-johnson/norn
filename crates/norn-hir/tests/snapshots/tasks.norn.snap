@@ -1,35 +1,27 @@
 error: `spawn` needs a task that produces (), and this one produces I64
-  --> tasks.norn:20:5
+  --> tasks.norn:14:5
    |
-20 |     spawn counted()
+14 |     spawn counted()
    |     ^^^^^^^^^^^^^^^ nothing would receive the value
    = note: there are no task handles in v0, so a spawned task has to say what happens to its own result
 
 error: this builds a task and then discards it
-  --> tasks.norn:27:5
+  --> tasks.norn:19:5
    |
-27 |     work()
+19 |     work()
    |     ^^^^^^ the task never runs
    = note: `await` it to run it here, or `spawn` it to run it alongside
 
-error: `undeclared` does not declare the capability `clock`
-  --> tasks.norn:32:11
-   |
-32 |     await work()
-   |           ^^^^^^ `work` uses it
-   = note: a task's `uses { … }` set must cover every task it creates
-   = note: add it: `uses { clock }`
-
 error: unknown capability `net.write`
-  --> tasks.norn:37:12
+  --> tasks.norn:25:12
    |
-37 |     uses { net.write }
+25 |     uses { net.write }
    |            ^^^^^^^^^ not a capability v0 knows
    = note: the vocabulary is fixed: clock, net.listen, net.io, fs.read, fs.write
 
 error: `await` is only available inside a `task fn`
-  --> tasks.norn:44:5
+  --> tasks.norn:32:5
    |
-44 |     await work()
+32 |     await work()
    |     ^^^^^^^^^^^^ only a task may suspend
    = note: mark the enclosing function `task fn`

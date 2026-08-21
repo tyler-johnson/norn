@@ -5,9 +5,7 @@
 // the back edge, and a `break` from inside a `scope { }` leaves the scope before it leaves the
 // loop — the same unwinding a `return` does.
 
-task fn main()
-    uses { clock }
-{
+task fn main() {
     // A countdown: the condition re-evaluates before every pass.
     let mut n = 3
     while n > 0 {

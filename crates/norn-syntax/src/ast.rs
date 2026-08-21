@@ -141,8 +141,9 @@ pub struct FnDecl {
     pub type_params: Vec<TypeParam>,
     pub params: Vec<Param>,
     pub ret: Option<Type>,
-    /// The declared capability set. Checked, not inferred; empty until M4 gives it meaning.
-    pub uses: Vec<Path>,
+    /// The written capability set, if one was written at all. Absent means inferred, which is the
+    /// everyday spelling; present is an assertion the checker holds the body to exactly.
+    pub uses: Option<UsesClause>,
     pub body: Block,
     pub span: Span,
 }
@@ -168,6 +169,17 @@ pub enum ParamMode {
     Mut(Span),
 }
 
+/// A written `uses { … }`. The span covers the whole clause, so a set that asserts too much can
+/// be pointed at as a unit; each capability keeps its own path span for the one that is wrong.
+///
+/// Written at all is the whole distinction: an absent clause asks the compiler to infer the set,
+/// and `uses { }` asserts the empty one. A `Vec` could not tell those apart.
+#[derive(Debug)]
+pub struct UsesClause {
+    pub paths: Vec<Path>,
+    pub span: Span,
+}
+
 /// `export trait Display { fn to_string(value: Self) -> String }` — a named set of function
 /// signatures a type can implement. Members are signatures only; every body lives in an `impl`.
 /// `Self` is an ordinary identifier here, resolved by the checker rather than the grammar.
@@ -190,7 +202,7 @@ pub struct FnSig {
     pub type_params: Vec<TypeParam>,
     pub params: Vec<Param>,
     pub ret: Option<Type>,
-    pub uses: Vec<Path>,
+    pub uses: Option<UsesClause>,
     pub span: Span,
 }
 
@@ -213,8 +225,9 @@ pub struct ReactorDecl {
     pub exported: Option<Span>,
     pub name: Ident,
     pub params: Vec<Param>,
-    /// The capability set of the effects this reactor launches. Its spawner's set must cover it.
-    pub uses: Vec<Path>,
+    /// The written capability set of the effects this reactor launches, if one was written.
+    /// Absent means inferred from the members; present is an assertion, exactly as on a `fn`.
+    pub uses: Option<UsesClause>,
     pub members: Vec<Member>,
     pub span: Span,
 }

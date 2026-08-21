@@ -408,6 +408,10 @@ impl Checker {
                 // read parameter is an error `infer_sinks` reports rather than a mode it flips.
                 self.param_modes.push(wanted_modes);
                 self.mode_pinned.push(vec![true; params.len()]);
+                // A trait member cannot be a `task` yet, so an impl method declares no
+                // capabilities of its own; whatever its body reaches is inferred like any other.
+                self.declared_uses.push(None);
+                self.uses_spans.push(None);
                 self.program.fns.push(FnDef {
                     name: format!("{trait_name}.{name} for {receiver_name}"),
                     type_params: Vec::new(),

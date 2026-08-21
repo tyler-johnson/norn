@@ -272,9 +272,7 @@ fn render(entries: List<Post>) -> String {
 
 // ── A session: create, edit, delete, query, watch ───────────────────────────
 
-task fn main() -> ()
-    uses { clock }
-{
+task fn main() -> () {
     let subscriber = spawn reactor Subscriber()
     let index = spawn reactor ByAuthor(subscriber: subscriber)
     let posts = spawn reactor PostPartition(index: index)

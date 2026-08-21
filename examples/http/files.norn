@@ -18,17 +18,13 @@
 import { to_string } from "std/fmt"
 import { read_request, respond, respond_empty, respond_flow, save_body, Request } from "std/http"
 
-task fn upload(conn: Connection, req: Request) -> Result<(), IoError>
-    uses { net.io, fs.write }
-{
+task fn upload(conn: Connection, req: Request) -> Result<(), IoError> {
     let sink = await file_create("." + req.path)?
     let saved = await save_body(conn, req, sink)?
     await respond_empty(conn, 204)
 }
 
-task fn download(conn: Connection, req: Request) -> Result<(), IoError>
-    uses { net.io, fs.read }
-{
+task fn download(conn: Connection, req: Request) -> Result<(), IoError> {
     match await flow_of_file("." + req.path) {
         Ok(body) => await respond_flow(conn, 200, body)
         Err(IoError.NotFound) => await respond(conn, 404, "not found\n")
@@ -36,9 +32,7 @@ task fn download(conn: Connection, req: Request) -> Result<(), IoError>
     }
 }
 
-task fn route(conn: Connection, req: Request) -> Result<(), IoError>
-    uses { net.io, fs.read, fs.write }
-{
+task fn route(conn: Connection, req: Request) -> Result<(), IoError> {
     if has_dotdot(req.path) {
         return await respond(conn, 400, "bad path\n")
     }
@@ -49,9 +43,7 @@ task fn route(conn: Connection, req: Request) -> Result<(), IoError>
     }
 }
 
-task fn serve(conn: Connection) -> ()
-    uses { net.io, fs.read, fs.write }
-{
+task fn serve(conn: Connection) -> () {
     match await read_request(conn) {
         Ok(req) => match await route(conn, req) {
             Ok(_) => ()
@@ -62,9 +54,7 @@ task fn serve(conn: Connection) -> ()
     }
 }
 
-task fn accept_loop(listener: sink Listener) -> ()
-    uses { net.io, fs.read, fs.write }
-{
+task fn accept_loop(listener: sink Listener) -> () {
     scope {
         loop {
             match await tcp_accept(listener) {
@@ -75,9 +65,7 @@ task fn accept_loop(listener: sink Listener) -> ()
     }
 }
 
-task fn main() -> Result<(), IoError>
-    uses { clock, net.listen, net.io, fs.read, fs.write }
-{
+task fn main() -> Result<(), IoError> {
     let listener = await tcp_listen(0)?
     print(to_string(listener_port(listener)))
     scope {

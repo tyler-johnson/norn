@@ -5,9 +5,7 @@
 // each connection is born and dies inside one pass.
 
 // The first pass closes the connection; the second would close nothing.
-task fn closes_every_pass(conn: Connection, passes: I64) -> ()
-    uses { net.io }
-{
+task fn closes_every_pass(conn: Connection, passes: I64) -> () {
     let mut n = passes
     while n > 0 {
         await tcp_close(conn)
@@ -16,9 +14,7 @@ task fn closes_every_pass(conn: Connection, passes: I64) -> ()
 }
 
 // A `continue` feeds the back edge, so a move on its path is a move the next pass sees.
-task fn moves_then_continues(conn: Connection, retry: Bool) -> ()
-    uses { net.io }
-{
+task fn moves_then_continues(conn: Connection, retry: Bool) -> () {
     loop {
         if retry {
             await tcp_close(conn)
@@ -40,9 +36,7 @@ fn consumes(conn: sink Connection) -> Bool {
 }
 
 // Legal: the listener is only read, never moved, and each pass declares its own connection.
-task fn accepts_forever(listener: Listener) -> ()
-    uses { net.io }
-{
+task fn accepts_forever(listener: Listener) -> () {
     loop {
         match await tcp_accept(listener) {
             Ok(conn) => await tcp_close(conn)
@@ -53,9 +47,7 @@ task fn accepts_forever(listener: Listener) -> ()
 
 // Legal: the body moves the connection out and puts a fresh one back, so the back edge sees the
 // name owning a value again — net-unmoved.
-task fn replaces_each_pass(listener: Listener, passes: I64) -> Result<(), IoError>
-    uses { net.io }
-{
+task fn replaces_each_pass(listener: Listener, passes: I64) -> Result<(), IoError> {
     let mut conn = await tcp_accept(listener)?
     let mut n = passes
     while n > 0 {

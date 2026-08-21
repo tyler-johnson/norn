@@ -15,9 +15,7 @@
 
 import { wait } from "std/time"
 
-reactor Ticker(ms: I64)
-    uses { clock }
-{
+reactor Ticker(ms: I64) {
     input tick: () [capacity: 1, overflow: reject]
 
     state n: I64 = 0
@@ -30,9 +28,7 @@ reactor Ticker(ms: I64)
     export signal count = n
 }
 
-task fn main() -> ()
-    uses { clock }
-{
+task fn main() -> () {
     let ticker = spawn reactor Ticker(ms: 10)
 
     // There is no on-spawn hook — a reactor only ever reacts. The first tick is the task's

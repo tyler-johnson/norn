@@ -98,9 +98,7 @@ fn a_name_survives_what_only_looks_like_a_move() {
     accepted(
         "a diverging branch moves nothing downstream",
         "\
-task fn main(conn: Connection, bad: Bool) -> ()
-    uses { net.io }
-{
+task fn main(conn: Connection, bad: Bool) -> () {
     if bad {
         await tcp_close(conn)
         return ()
@@ -114,9 +112,7 @@ task fn main(conn: Connection, bad: Bool) -> ()
     accepted(
         "reassignment revives a name",
         "\
-task fn main(first: Connection, second: Connection) -> ()
-    uses { net.io }
-{
+task fn main(first: Connection, second: Connection) -> () {
     let mut held = first
     await tcp_close(held)
     held = second
@@ -135,9 +131,7 @@ struct Session {
     opened: I64
 }
 
-task fn main(session: Session) -> ()
-    uses { net.io }
-{
+task fn main(session: Session) -> () {
     match session {
         Session(conn: conn, opened: _) => await tcp_close(conn)
     }
@@ -398,18 +392,14 @@ enum Carrier {
     Wrapped(Connection)
 }
 
-task fn close_carried(carrier: Carrier) -> ()
-    uses { net.io }
-{
+task fn close_carried(carrier: Carrier) -> () {
     match carrier {
         Carrier.Empty => ()
         Carrier.Wrapped(conn) => await tcp_close(conn)
     }
 }
 
-task fn main(carrier: Carrier) -> ()
-    uses { net.io }
-{
+task fn main(carrier: Carrier) -> () {
     await close_carried(carrier)
 }
 ",
@@ -495,16 +485,12 @@ fn modes_make_reads_unmarked() {
     accepted(
         "an owned resource passed to a reader is still owned after the call",
         "\
-task fn watch(conn: Connection) -> ()
-    uses { net.io }
-{
+task fn watch(conn: Connection) -> () {
     let data = await tcp_read(conn)
     ()
 }
 
-task fn main(conn: Connection) -> ()
-    uses { net.io }
-{
+task fn main(conn: Connection) -> () {
     await watch(conn)
     await tcp_close(conn)
 }
@@ -516,21 +502,15 @@ task fn main(conn: Connection) -> ()
     accepted(
         "sink inference reaches through a two-hop chain",
         "\
-task fn close_it(conn: Connection) -> ()
-    uses { net.io }
-{
+task fn close_it(conn: Connection) -> () {
     await tcp_close(conn)
 }
 
-task fn wrap(conn: Connection) -> ()
-    uses { net.io }
-{
+task fn wrap(conn: Connection) -> () {
     await close_it(conn)
 }
 
-task fn main(conn: Connection) -> ()
-    uses { net.io }
-{
+task fn main(conn: Connection) -> () {
     await wrap(conn)
 }
 ",
@@ -897,6 +877,134 @@ fn accepted(what: &str, source: &str) {
 }
 
 /// A diagnostic should say what is wrong once, not once per expression that touched the bad value.
+#[test]
+fn capabilities_are_inferred() {
+    // The everyday spelling: nothing is written, and the authority a body reaches is worked out.
+    accepted(
+        "a task fn needs no clause to call a builtin that wants authority",
+        "\
+task fn main() -> () {
+    await sleep(1)
+}
+",
+    );
+
+    // Inference reaches through calls, which is the whole reason the clause was ceremony: only
+    // `nap` touches a builtin, and `main` two hops up gets the capability all the same.
+    accepted(
+        "capabilities propagate up a call chain",
+        "\
+task fn nap() -> () {
+    await sleep(1)
+}
+
+task fn wrap() -> () {
+    await nap()
+}
+
+task fn main() -> () {
+    await wrap()
+}
+",
+    );
+
+    // A written clause is an assertion, and one that matches the inferred set is simply true.
+    accepted(
+        "a written clause that matches the body is accepted",
+        "\
+task fn main() -> ()
+    uses { clock }
+{
+    await sleep(1)
+}
+",
+    );
+
+    // The empty clause is a real spelling — the assertion that a task reaches nothing at all.
+    accepted(
+        "`uses { }` asserts the empty set",
+        "\
+task fn main() -> ()
+    uses { }
+{
+    print(\"nothing the world needs authority for\")
+}
+",
+    );
+
+    // Recursion is exactly what a fixpoint is for: `drain` reads its own set while computing it,
+    // and the sweep that follows sees the growth. No clause has to be written to break the loop.
+    accepted(
+        "a recursive task fn infers its own set",
+        "\
+task fn drain(left: I64) -> () {
+    if left > 0 {
+        await sleep(1)
+        await drain(left - 1)
+    }
+}
+
+task fn main() -> ()
+    uses { clock }
+{
+    await drain(3)
+}
+",
+    );
+
+    // Through a generic instance: the set is a per-instance fact, inferred on the concrete body
+    // monomorphization produced, the way a parameter mode is.
+    accepted(
+        "capabilities reach through a generic instance",
+        "\
+task fn pause<T>(value: T) -> T {
+    await sleep(1)
+    value
+}
+
+task fn main() -> ()
+    uses { clock }
+{
+    let held = await pause<I64>(7)
+    print(held)
+}
+",
+    );
+
+    // Up through a reactor: the handler is where `after` names the task, the reactor's set is its
+    // members', and the spawner reaches all of it through the handle.
+    accepted(
+        "a spawner reaches what the reactor it spawns reaches",
+        "\
+reactor Beeper(every: I64) {
+    input rang: () [capacity: 8, overflow: reject]
+
+    state rings: I64 = 0
+
+    on rang() {
+        rings = rings + 1
+        after beep(every)
+    }
+
+    export signal count = rings
+}
+
+task fn beep(every: I64) -> () {
+    await sleep(every)
+}
+
+task fn main() -> ()
+    uses { clock }
+{
+    scope {
+        let beeper = spawn reactor Beeper(every: 10)
+        await send(beeper.rang, ())
+    }
+}
+",
+    );
+}
+
 #[test]
 fn one_mistake_reports_once() {
     let source = "\
