@@ -411,6 +411,21 @@ impl Checker {
                 .map(|p| (p.name.name.clone(), self.resolve_param_ty(&p.ty)))
                 .collect();
             let (modes, pinned) = written_modes(&decl.params);
+            // A task runs after the call that builds it returns, and a writeback lands when the
+            // call returns — by then there is no caller frame to write into. Refused until
+            // writebacks meet the resumed-await protocol.
+            if decl.is_task {
+                for p in &decl.params {
+                    if let ast::ParamMode::Mut(at) = p.mode {
+                        self.push(
+                            Diagnostic::new(at, "`mut` does not apply to a `task fn`")
+                                .label("a task runs after the call that builds it returns")
+                                .note("a writeback lands when the call returns, and the task has not run by then; return the new value from the task instead")
+                                .note("task writebacks wait on the resumed-await protocol"),
+                        );
+                    }
+                }
+            }
             let ret = decl.ret.as_ref().map_or(Ty::Unit, |ty| self.resolve_ty(ty));
             self.type_params_in_scope.clear();
             let uses = self.capabilities(&decl.uses);
@@ -550,7 +565,8 @@ impl Checker {
         self.type_params_in_scope = self.program.fns[id.index()].type_params.clone();
         self.bounds_in_scope = self.fn_bounds[id.index()].clone();
         for ((name, ty), param) in params.iter().zip(&decl.params) {
-            self.declare_param(name.clone(), ty.clone(), param.name.span);
+            let mutable = matches!(param.mode, ast::ParamMode::Mut(_));
+            self.declare_param(name.clone(), ty.clone(), mutable, param.name.span);
         }
         let body = self.check_block(&decl.body, Some(&ret), decl.body.span);
         self.type_params_in_scope.clear();

@@ -1,0 +1,6 @@
+error: a reactor parameter has no mode
+ --> mut-parameter.norn:4:23
+  |
+4 | reactor Counter(step: mut I64) {
+  |                       ^^^ `mut` does not apply here
+  = note: `spawn reactor` always hands its arguments over; there is no call for a mode to describe

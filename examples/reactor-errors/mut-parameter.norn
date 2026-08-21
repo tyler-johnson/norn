@@ -1,0 +1,12 @@
+// A reactor parameter is state, written once when the reactor is created; spawning already
+// hands the arguments over, so there is no call for a mode to describe.
+
+reactor Counter(step: mut I64) {
+    input bumped: () [capacity: 8, overflow: reject]
+
+    state count: I64 = 0
+
+    on bumped() {
+        count = count + step
+    }
+}

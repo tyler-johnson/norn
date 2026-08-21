@@ -1,0 +1,21 @@
+error: `mut` does not apply to a `task fn`
+ --> mut-declarations.norn:6:21
+  |
+6 | task fn grow(count: mut I64) -> () {
+  |                     ^^^ a task runs after the call that builds it returns
+  = note: a writeback lands when the call returns, and the task has not run by then; return the new value from the task instead
+  = note: task writebacks wait on the resumed-await protocol
+
+error: `mut` is not yet a mode a trait can declare
+  --> mut-declarations.norn:12:25
+   |
+12 |     fn normalize(value: mut Self) -> ()
+   |                         ^^^ writeback methods come later
+   = note: declare the method `sink Self` and return the successor; the impl and every caller stay explicit about the new value
+
+error: `render` and `Render`'s declaration disagree about a parameter's mode
+  --> mut-declarations.norn:26:5
+   |
+26 |     fn render(value: mut Point) -> String {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ conflicting mode
+   = note: a parameter's mode is the trait's to declare: whether the caller keeps the value is part of the contract, and every impl spells the same one

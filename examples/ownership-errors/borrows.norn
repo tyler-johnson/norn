@@ -1,6 +1,6 @@
 // Where `&` gets a teaching answer instead of a meaning (BOOTSTRAP §8 item 5). References are
 // not part of Norn: reads are unmarked and take nothing, a parameter that consumes declares
-// `sink`, and mutation will be declared `mut` in its own wave. Each declaration here is wrong in
+// `sink`, and a parameter that is written back declares `mut`. Each declaration here is wrong in
 // exactly one way, and each answer names the spelling that replaced the borrow.
 
 // A struct field owns; `&` does not name a type.
@@ -18,7 +18,7 @@ fn hand_back(conn: Connection) -> &Connection {
     conn
 }
 
-// `&mut`: mutation is declared in the signature, and it is the next wave's `mut`.
+// `&mut`: mutation is declared in the signature — `mut T` — and call sites stay unmarked.
 fn rewrite(conn: &mut Connection) -> () {
     ()
 }

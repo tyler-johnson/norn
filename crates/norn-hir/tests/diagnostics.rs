@@ -460,6 +460,42 @@ fn main() -> () {
     );
 }
 
+/// The `mut` wave's declaration half: a `mut` parameter is assignable in its own body — the
+/// callee's copy is what the writeback returns — and the mode column copies through generic
+/// instantiation like any written mode. Call-site enforcement is the wave's next commit.
+#[test]
+fn mut_parameters_are_declared() {
+    accepted(
+        "a `mut` parameter is assignable in its body",
+        "\
+fn bump(count: mut I64) -> () {
+    count = count + 1
+}
+
+fn main() -> () {
+    let mut total = 0
+    bump(total)
+    print(total)
+}
+",
+    );
+
+    accepted(
+        "a generic template declares `mut` and instantiates",
+        "\
+fn reset<T>(slot: mut T, value: T) -> () {
+    slot = value
+}
+
+fn main() -> () {
+    let mut n = 3
+    reset(n, 0)
+    print(n)
+}
+",
+    );
+}
+
 /// Generic *types* land ahead of the corpus that dogfoods them — std/list and the run example
 /// arrive later in the item 7 wave — so the acceptance side is pinned here: instantiation by
 /// annotation, by expectation, by field inference, through patterns, and inside reactor state.

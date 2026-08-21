@@ -1,0 +1,29 @@
+// Where a declared `mut` is refused (BOOTSTRAP §8 item 5). The mode landed for plain functions;
+// these are the declarations writebacks do not reach yet, and each answer says why.
+
+// A task fn: the body runs after the call that built it returned, so there is no caller frame
+// for the writeback to land in.
+task fn grow(count: mut I64) -> () {
+    ()
+}
+
+// A trait: writeback methods wait on their first consumer.
+trait Normalize {
+    fn normalize(value: mut Self) -> ()
+}
+
+// An impl that writes a mode its trait did not declare: the mode is the trait's half of the
+// contract, and every impl spells the same one.
+trait Render {
+    fn render(value: Self) -> String
+}
+
+struct Point {
+    x: I64
+}
+
+impl Render for Point {
+    fn render(value: mut Point) -> String {
+        "point"
+    }
+}

@@ -127,6 +127,18 @@ impl Checker {
                     .map(|p| (p.name.name.clone(), self.resolve_param_ty(&p.ty)))
                     .collect();
                 let (modes, _) = super::item::written_modes(&member.params);
+                // Writeback methods wait on their first consumer: `mut Self` would hand every
+                // method call a receiver writeback, and nothing exercises that path until the
+                // sequence wave. Declared refusal, same shape as `task` above.
+                for p in &member.params {
+                    if let ast::ParamMode::Mut(at) = p.mode {
+                        self.push(
+                            Diagnostic::new(at, "`mut` is not yet a mode a trait can declare")
+                                .label("writeback methods come later")
+                                .note("declare the method `sink Self` and return the successor; the impl and every caller stay explicit about the new value"),
+                        );
+                    }
+                }
                 let ret = member
                     .ret
                     .as_ref()
@@ -379,7 +391,7 @@ impl Checker {
                         Diagnostic::new(
                             member.span,
                             format!(
-                                "`{name}` and `{trait_name}`'s declaration disagree about `sink`"
+                                "`{name}` and `{trait_name}`'s declaration disagree about a parameter's mode"
                             ),
                         )
                         .label("conflicting mode")

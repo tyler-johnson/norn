@@ -28,8 +28,8 @@ impl Checker {
         self.push(
             Diagnostic::new(span, "references are not part of Norn")
                 .label("`&mut` names a borrow, and there are none")
-                .note("mutation is declared in the signature — `mut T`, the next wave of BOOTSTRAP §8 item 5")
-                .note("until it lands, take the value and return the successor, or hold it in a reactor's `state`"),
+                .note("mutation is a mode: declare the parameter `x: mut T`, and the callee's result is written back to the caller's variable when the call returns")
+                .note("call sites stay unmarked — the signature is where the contract lives"),
         );
     }
 
@@ -404,8 +404,10 @@ impl Checker {
         self.declare_role(name, ty, mutable, LocalRole::Ordinary, span)
     }
 
-    pub(super) fn declare_param(&mut self, name: String, ty: Ty, span: Span) -> LocalId {
-        self.declare_role(name, ty, false, LocalRole::Ordinary, span)
+    /// A parameter. Only a `mut` parameter is assignable in its body: the callee works on its
+    /// own copy and the writeback returns it, so assigning is how the new value takes shape.
+    pub(super) fn declare_param(&mut self, name: String, ty: Ty, mutable: bool, span: Span) -> LocalId {
+        self.declare_role(name, ty, mutable, LocalRole::Ordinary, span)
     }
 
     pub(super) fn declare_role(
