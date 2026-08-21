@@ -516,6 +516,12 @@ pub struct FnDef {
     pub uses: Vec<Capability>,
     /// Parameters occupy the first `params` slots of `locals`.
     pub params: usize,
+    /// The settled mode column, one entry per parameter — written, trait-pinned, or inferred.
+    /// Empty while checking runs; filled once at the end, after sink inference and move checking
+    /// settle it. This is the moment modes stop being a checker-private fact: NIR copies the
+    /// column so both engines can pair a `Mut` argument's place with the writeback its return
+    /// performs.
+    pub modes: Vec<Mode>,
     pub locals: Vec<LocalDef>,
     pub ret: Ty,
     pub body: Expr,

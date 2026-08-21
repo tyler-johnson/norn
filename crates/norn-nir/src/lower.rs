@@ -212,6 +212,7 @@ fn lower_fn(program: &hir::Program, def: &hir::FnDef) -> Function {
             FnKind::Plain
         },
         params: def.params,
+        modes: def.modes.clone(),
         locals: lowerer.locals,
         tys: lowerer.tys,
         ret: lowerer.ret,
@@ -407,13 +408,32 @@ impl Lowerer<'_> {
             }
             hir::ExprKind::ShortCircuit { and, lhs, rhs } => self.short_circuit(*and, lhs, rhs),
             hir::ExprKind::Call { callee, args } => {
-                let args = args.iter().map(|arg| self.expr(arg)).collect();
+                let args: Vec<Operand> = args.iter().map(|arg| self.expr(arg)).collect();
                 let temp = Place::local(self.temp(ty.clone()));
                 // A call to a `task fn` builds a task rather than pushing a frame. Nothing runs
                 // until something awaits or spawns it.
                 let rvalue = if self.program.fns[callee.index()].is_task {
+                    // A task fn never declares `mut` — refused at declaration — so building one
+                    // drops the argument places with nothing to write back into.
+                    debug_assert!(
+                        !self.program.fns[callee.index()]
+                            .modes
+                            .contains(&hir::Mode::Mut)
+                    );
                     Rvalue::Task(callee.index(), args)
                 } else {
+                    // The checker guarantees every `Mut` position holds a place: the writeback
+                    // target is the argument operand's own place, and the call's own result
+                    // lands in a fresh temporary, so the two writes can never alias.
+                    debug_assert!(
+                        self.program.fns[callee.index()]
+                            .modes
+                            .iter()
+                            .zip(&args)
+                            .all(|(mode, arg)| {
+                                *mode != hir::Mode::Mut || matches!(arg, Operand::Copy(_))
+                            })
+                    );
                     Rvalue::Call(callee.index(), args)
                 };
                 self.emit(temp.clone(), rvalue);

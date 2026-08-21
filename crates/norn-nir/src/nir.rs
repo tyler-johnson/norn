@@ -10,7 +10,7 @@
 
 use std::rc::Rc;
 
-use norn_hir::hir::{BinOp, Builtin, EnumId, Overflow, Ty, UnOp};
+use norn_hir::hir::{BinOp, Builtin, EnumId, Mode, Overflow, Ty, UnOp};
 
 pub type BlockId = usize;
 pub type LocalId = usize;
@@ -168,6 +168,10 @@ pub struct Function {
     pub name: String,
     pub kind: FnKind,
     pub params: usize,
+    /// The mode of each parameter, in lockstep with `locals[..params]` — the checker's settled
+    /// column, copied so both engines can pair a `Mut` argument's place with the writeback the
+    /// call's return performs. `Read` and `Sink` change nothing at run time.
+    pub modes: Vec<Mode>,
     pub locals: Vec<String>,
     /// The type of each local, in lockstep with `locals` — temporaries append to both.
     pub tys: Vec<Ty>,
@@ -633,8 +637,23 @@ fn print_rvalue(program: &Program, function: &Function, rvalue: &Rvalue) -> Stri
             binary_name(*op),
             print_operand(program, function, rhs)
         ),
+        // A `Mut` position prints its operand behind `mut`: the writeback pair is derived, and
+        // the text should show where the call writes.
         Rvalue::Call(id, operands) => {
-            format!("call {}#{id}({})", program.fns[*id].name, args(operands))
+            let callee = &program.fns[*id];
+            let printed = operands
+                .iter()
+                .enumerate()
+                .map(|(index, o)| {
+                    let arg = print_operand(program, function, o);
+                    match callee.modes.get(index) {
+                        Some(Mode::Mut) => format!("mut {arg}"),
+                        _ => arg,
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("call {}#{id}({printed})", callee.name)
         }
         Rvalue::Builtin(builtin, operands) => {
             format!("builtin {}({})", builtin.name(), args(operands))

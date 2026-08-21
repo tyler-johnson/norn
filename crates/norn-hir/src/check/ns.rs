@@ -203,6 +203,13 @@ impl Checker {
         // enforce: every executable body is concrete by now, so a mode is a per-instance fact.
         self.infer_sinks();
         self.check_moves();
+        // The settled modes become part of the program, rows padded to arity with `Read` — a
+        // lifted body's row is shorter than its arity, and its parameters are reactor members.
+        for (index, def) in self.program.fns.iter_mut().enumerate() {
+            let mut modes = self.param_modes.get(index).cloned().unwrap_or_default();
+            modes.resize(def.params, Mode::Read);
+            def.modes = modes;
+        }
     }
 
     /// One phase, over every module in input order.

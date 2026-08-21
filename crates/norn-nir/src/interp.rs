@@ -17,7 +17,7 @@ use std::rc::Rc;
 use std::cell::RefCell;
 
 use norn_hir::hir;
-use norn_hir::hir::{BinOp, Builtin, EnumId, UnOp, io_error};
+use norn_hir::hir::{BinOp, Builtin, EnumId, Mode, UnOp, io_error};
 use norn_rt::graph::{Handled, InputSpec, NodeSpec, ReactorSpec};
 use norn_rt::{Body, Cx, Effect, Engine, Graph, ReactorId, Runtime, Step, Update};
 
@@ -72,6 +72,9 @@ struct Frame {
     instr: usize,
     /// Where this frame's result goes in its caller.
     dest: Option<Place>,
+    /// The `mut` pairs: each parameter slot here is copied back into its caller place when this
+    /// frame returns. Empty for root frames and awaited tasks — a task fn never declares `mut`.
+    writebacks: Vec<(LocalId, Place)>,
 }
 
 /// The result of a whole program: what `main` produced, and the trace of how it got there.
@@ -178,6 +181,7 @@ fn new_frame(program: &Program, function: FnId, args: Vec<Value>, dest: Option<P
         block: 0,
         instr: 0,
         dest,
+        writebacks: Vec::new(),
     }
 }
 
@@ -243,7 +247,24 @@ impl Interpreter<'_> {
                                 args.iter().map(|arg| read_operand(frame, arg)).collect();
                             let dest = place.clone();
                             let callee = *callee;
-                            frames.push(new_frame(self.program, callee, arguments, Some(dest)));
+                            // A `Mut` position's writeback pair is derived here: the parameter
+                            // slot, and the argument operand's own place in this frame.
+                            let writebacks: Vec<(LocalId, Place)> = self.program.fns[callee]
+                                .modes
+                                .iter()
+                                .enumerate()
+                                .filter(|(_, mode)| **mode == Mode::Mut)
+                                .map(|(index, _)| {
+                                    let Operand::Copy(place) = &args[index] else {
+                                        unreachable!("a `mut` argument is a place");
+                                    };
+                                    (index, place.clone())
+                                })
+                                .collect();
+                            let mut pushed =
+                                new_frame(self.program, callee, arguments, Some(dest));
+                            pushed.writebacks = writebacks;
+                            frames.push(pushed);
                             continue;
                         }
                         let value = self.eval(frame, cx.as_deref_mut(), rvalue)?;
@@ -375,7 +396,16 @@ impl Interpreter<'_> {
                     let value = read_operand(frame, operand);
                     let finished = frames.pop().expect("the frame being returned from");
                     match (finished.dest, frames.last_mut()) {
-                        (Some(dest), Some(caller)) => write_place(caller, &dest, value),
+                        (Some(dest), Some(caller)) => {
+                            // Writebacks land first, the result second. The order is
+                            // unobservable — the result's destination is a fresh temporary and
+                            // never aliases a writeback root — and a trap never reaches here,
+                            // so a trapping callee writes nothing back.
+                            for (param, place) in &finished.writebacks {
+                                write_place(caller, place, finished.locals[*param].clone());
+                            }
+                            write_place(caller, &dest, value);
+                        }
                         // The outermost frame returning is the task finishing.
                         _ => return Ok(Step::Done(value)),
                     }

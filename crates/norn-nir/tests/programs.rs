@@ -105,6 +105,60 @@ fn main() -> I64 {
     assert_eq!(trap.function, "pick");
 }
 
+/// The `mut` wave's writeback semantics (BOOTSTRAP §8 item 5), inline until the corpus example
+/// arrives with the codegen commit: the callee's copy lands in the caller's place when the call
+/// returns — a bare local, a nested field chain, forwarding through two frames, a loop — and a
+/// copy taken before the call keeps its value, because the writeback copies on write.
+#[test]
+fn mut_parameters_write_back() {
+    let source = "\
+struct Point {
+    x: I64
+    y: I64
+}
+
+struct Nested {
+    at: Point
+}
+
+fn bump(count: mut I64) -> () {
+    count = count + 1
+}
+
+fn twice(count: mut I64) -> () {
+    bump(count)
+    bump(count)
+}
+
+fn main() -> I64 {
+    let mut total = 0
+    bump(total)
+    twice(total)
+    let mut n = 0
+    while n < 3 {
+        bump(total)
+        n = n + 1
+    }
+    let mut spot = Nested(at: Point(x: 10, y: 20))
+    let kept = spot
+    bump(spot.at.x)
+    total * 10000 + spot.at.x * 100 + kept.at.x
+}
+";
+    let parsed = parse(source);
+    assert!(parsed.ok());
+    let checked = norn_hir::check(&parsed.module);
+    assert!(checked.ok(), "{:?}", checked.errors);
+    let nir = lower(&checked.program);
+    let printed = print(&nir);
+    assert!(printed.contains("mut _"), "no `mut` operand printed:\n{printed}");
+    let main = checked.program.main.unwrap();
+    let mut out = Captured::default();
+    let value = run(&nir, main.index(), &mut out).expect("runs");
+    // total 0 → 6 across the calls and the loop; spot.at.x 10 → 11; kept untouched at 10.
+    assert_eq!(norn_nir::interp::render(&nir, &value), "61110");
+}
+
 #[test]
 fn division_by_zero_traps() {
     let source = "fn main() -> I64 {\n    let zero = 0\n    10 / zero\n}\n";

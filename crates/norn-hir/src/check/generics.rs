@@ -900,6 +900,7 @@ impl Checker {
             is_task: false,
             uses: Vec::new(),
             params: params.len(),
+            modes: Vec::new(),
             locals: Vec::new(),
             ret,
             body: Expr {
@@ -1055,6 +1056,7 @@ impl Checker {
             is_task,
             uses,
             params: params.len(),
+            modes: Vec::new(),
             locals: Vec::new(),
             ret,
             body: Expr {
