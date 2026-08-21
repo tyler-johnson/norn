@@ -179,10 +179,11 @@ The borrow-era discipline — a reference writable only in parameter position, n
 one, `spawn`/`after` refusing borrowed arguments as the whole escape analysis — turned out to be
 the destination rather than a stopgap, and the modes wave finished the thought: there are no
 reference types anywhere, parameters carry modes instead (`T` reads, `sink T` consumes, `mut T`
-next), and the task-escape rule survives as its modes-era successor — work started by `spawn` or
-`after` must own its affine arguments, so the callee's parameter must be Sink. A direct
-`await f(x)` follows the modes alone, because the awaiting task is parked for the duration.
-`&mut` still gets a diagnostic rather than a meaning, now naming `mut T` as what is coming.
+writes back), and the task-escape rule survives as its modes-era successor — work started by
+`spawn` or `after` must own its affine arguments, so the callee's parameter must be Sink. A
+direct `await f(x)` follows the modes alone, because the awaiting task is parked for the
+duration. `&mut` still gets a diagnostic rather than a meaning, now naming the `mut T` that
+landed in its place.
 
 The cut worth defending is **static reactor graphs**. Dynamic switching is where graph arenas,
 region reclamation, and subscription lifetimes all become load-bearing — it is the majority of
@@ -533,18 +534,50 @@ Ordered roughly by when it becomes worth doing, not by importance:
    signature (`mut T`, the next wave)". borrows.norn is now that teaching set, one diagnostic per
    declaration; sink-errors.norn pins the wave's three new rejections.
 
-   The two waves after this one, unchanged in scope: **the `mut` wave** (the one that touches NIR
-   and both engines): writeback pairs in the call encoding, interp copy-in/copy-out via the
-   existing caller-dest mechanism, codegen real `&mut` — semantically copy-in/copy-out,
-   representationally in place, sound because argument-list exclusivity refuses the same root
-   twice when one use writes; `mut` declared, never inferred (a writeback changes the caller's
-   value), and refused on `task fn`s until writebacks meet the resumed-await protocol. `Mode`
-   grows a variant, not a type — that extensibility is why the mode lives on the parameter.
-   **The sequence wave** (what was 5b): the contiguous COW-copyable sequence, first `mut`
-   consumer `push(mut buf, x)`, and the in-place-vs-threaded-clone measurement — whose baseline
-   is the `x = f(x)` revive idiom the corpus deliberately kept. Partial-move tracking stays
-   never: flat rejection plus `match` remains the answer, because a half-moved struct has no name
-   in this language.
+   **The `mut` wave landed 2026-08-20** — the first mode NIR and both engines learn about, and
+   the wave went exactly where the plan said it would: `Mode` grew a variant, not a type. The
+   surface: `fn bump(count: mut I64)` writes back, `bump(total)` is the unmarked call, the
+   caller's variable must be `let mut` — what can be assigned is what can be written back, one
+   story — and a `mut` parameter is itself assignable in its body and forwards at `mut`
+   positions, which is also the only way it forwards.
+
+   The mechanics, checker first. `mut` parses trivially (`Kw::Mut` is reserved — no `sink`-style
+   lookahead), `ast::Param` grew a `ParamMode` enum so every consumer decides exhaustively, and
+   `written_modes` maps it declared-and-pinned: never inferred, and sink inference reads a `Mut`
+   position as a live place, never a consumption. A `mut` argument must be a place — a variable
+   or a field chain rooted at one, refused for literals and call results ("no home to write back
+   to"), refused through `Shared`, refused at `state`/signal/message/reactor-param roots (a
+   state writeback would land beside the turn's SetSlot commit, so the diagnostic teaches the
+   three-line read/pass/assign-back idiom). **Argument-list exclusivity is root-level and
+   per-call**: a root appearing twice is refused when either appearance is at a `Mut` position —
+   mut+mut, mut+read, mut+sink, and disjoint fields of one root alike — because the emitted
+   caller holds a `&mut` to the root for the whole list; two reads of one root stay legal.
+   Declared refusals: `task fn` parameters (a task runs after the building call returned —
+   writebacks wait on the resumed-await protocol), reactor parameters, and trait signatures
+   (writeback methods wait on their first consumer; `sink Self` plus a returned successor is the
+   answer meanwhile).
+
+   Then the engines. `hir::FnDef` and `nir::Function` carry the settled `modes` column — filled
+   once after inference and move checking, rows padded to arity with `Read` — and
+   `Rvalue::Call` itself did not change: the writeback target is the argument operand's own
+   place, so each engine derives the pairs by zipping callee modes against arguments, and the
+   NIR printer shows where a call writes (`call bump#0(mut _0/total)`). The interpreter grew a
+   `writebacks` list on `Frame`, drained by `Term::Return` through the same `write_place` the
+   caller-dest mechanism always used — writebacks land before the result, unobservable because
+   the result's destination is a fresh temporary. Codegen emits `a{i}: &mut Repr` and stays
+   literal copy-in/copy-out around it: seed `(*a{i}).clone()`, write `*a{i} = l{i}` back at
+   every return — which is what makes a trapping callee write nothing back in either engine, the
+   property traps_match now pins — with a `mut_place_expr` (`Rc::make_mut` down the field
+   chain) lending the `&mut` at call sites. In-place mutation inside the body is the sequence
+   wave's measurement, not an assumption. examples/run/writeback.norn referees the whole story
+   through the differential oracle; there was no corpus migration, because the first real
+   consumer arrives next wave.
+
+   **The wave after this one, unchanged in scope: the sequence wave** (what was 5b): the
+   contiguous COW-copyable sequence, first `mut` consumer `push(mut buf, x)`, and the
+   in-place-vs-threaded-clone measurement — whose baseline is the `x = f(x)` revive idiom the
+   corpus deliberately kept. Partial-move tracking stays never: flat rejection plus `match`
+   remains the answer, because a half-moved struct has no name in this language.
 6. **Move checking for ordinary values, and `Shared<T>`.** Both wait on a typed value
    representation — and the representation landed first, as its own wave: **6a, typed NIR and a
    typed backend (2026-08-19), zero surface change.** The item decomposed as 6a, 6b (`Shared<T>`,

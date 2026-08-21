@@ -539,7 +539,7 @@ log(body)
 
 Call sites are unmarked for all three modes. The information lives in the signature, written or inferred, and surfacing it is the compiler's and the IDE's job — the one deliberate asymmetry is that `mut` must be written in the signature, because a writeback changes the caller's value and that is worth stating up front. A mode is a calling convention, not a type: no field, return, payload, or `let` can hold "a borrowed `T`", because the concept does not exist. What references would have provided — cheap access to a value someone else owns — comes back through modes, `Shared<T>`, and copy-on-write containers, none of which introduce aliasing a program can observe.
 
-> **Status (2026-08-19).** This section records the decided design. v0 at this date still carries the previous surface — ordinary values move, and reads are spelled `&T` positionally, per `BOOTSTRAP.md` §8 item 6c — and the modes wave that replaces it is `BOOTSTRAP.md` §8 item 5. `mut` will be refused on `task fn`s until writebacks meet the resumed-await protocol.
+> **Status (2026-08-20).** This section is live: the modes wave and the `mut` wave of `BOOTSTRAP.md` §8 item 5 have both landed, so v0 speaks exactly the surface above — reads unmarked, `sink` consuming, `mut` writing back, call sites bare. Still ahead of the design as written: `mut` on `task fn`s stays refused until writebacks meet the resumed-await protocol, trait signatures cannot declare `mut` until writeback methods have a consumer, and the sequence wave carries the first real `mut` consumer, `push(mut buf, x)`.
 
 ### Value semantics make the heap acyclic
 
