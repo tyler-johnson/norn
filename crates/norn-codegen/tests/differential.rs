@@ -92,10 +92,11 @@ fn traps_match() {
             "fn main() -> () {\n    let nan = 0.0 / 0.0\n    print(nan < 1.0)\n}\n",
         ),
         (
-            // A callee that mutates its `mut` copy and then traps writes nothing back in either
-            // engine: the interpreter never reaches the return that drains the writebacks, and
-            // the emitted `?` propagates before the `*a0 = …` copy-out. Copy-in/copy-out is what
-            // makes the two agree byte-for-byte here — an in-place callee would half-write.
+            // A callee that mutates its `mut` parameter and then traps: the interpreter never
+            // reaches the return that drains the writebacks, while the emitted body has already
+            // written the pointee in place. The divergence is unobservable — traps are fatal,
+            // so nothing ever reads the caller's place again — and the pinned bytes here are the
+            // trap text, which interpolates the same computed count in both engines.
             "mut-writeback-trap",
             "fn wreck(count: mut I64) -> I64 {\n    count = count + 1\n    let zero = 0\n    count / zero\n}\n\nfn main() -> I64 {\n    let mut total = 5\n    wreck(total)\n}\n",
         ),

@@ -724,9 +724,14 @@ impl Emitter<'_> {
         let mut out = String::new();
         for i in 0..function.params {
             let repr = self.repr(&function.tys[i]);
-            // A `Mut` parameter is a real `&mut`: semantically copy-in/copy-out — the body works
-            // on its own local, written back at every return — representationally a pointer,
-            // sound because argument-list exclusivity leaves nothing else aliasing the pointee.
+            // A `Mut` parameter is a real `&mut`, and the body works directly on the pointee —
+            // no seeded local, no copy-out. Semantically still copy-in/copy-out: argument-list
+            // exclusivity leaves nothing else aliasing the pointee, so an in-place write is
+            // unobservable — except after a callee trap, where the interpreter's copy discards
+            // and this backend has already written. Traps are fatal and no construct observes a
+            // caller's place afterwards; the `bytes_slice`-style documented divergence, now on
+            // the write path. Working at refcount 1 is what lets a slab op's `Rc::make_mut`
+            // mutate in place — the sequence wave's measurement.
             match function.modes.get(i) {
                 Some(hir::Mode::Mut) => out.push_str(&format!(", a{i}: &mut {repr}")),
                 _ => out.push_str(&format!(", a{i}: {repr}")),
@@ -738,20 +743,17 @@ impl Emitter<'_> {
     /// Locals as `Option<Repr>`: parameters `Some`, the rest `None`. The checker proves every
     /// read is initialized; `rustc`'s definite-assignment cannot see that across the state loop,
     /// and `Option` is what satisfies it without inventing base values for recursive types.
+    ///
+    /// A `Mut` parameter has no local at all: every read, lend, and write goes through `a{i}`
+    /// directly — the base selection in `read_place_expr`/`mut_place_expr`/`write_stmt` — so the
+    /// pointee is the body's working value and a return has nothing to copy out.
     fn local_decls(&self, function: &Function) -> Vec<String> {
         (0..function.locals.len())
+            .filter(|&i| function.modes.get(i) != Some(&hir::Mode::Mut))
             .map(|i| {
                 let repr = self.repr(&function.tys[i]);
                 if i < function.params {
-                    match function.modes.get(i) {
-                        // The copy-in half: the body's local is the callee's own copy, and the
-                        // pointee stays untouched until a return writes it back — which is also
-                        // what keeps a trapping body from ever half-writing the caller.
-                        Some(hir::Mode::Mut) => {
-                            format!("let mut l{i}: Option<{repr}> = Some((*a{i}).clone());")
-                        }
-                        _ => format!("let mut l{i}: Option<{repr}> = Some(a{i});"),
-                    }
+                    format!("let mut l{i}: Option<{repr}> = Some(a{i});")
                 } else {
                     format!("let mut l{i}: Option<{repr}> = None;")
                 }
@@ -989,19 +991,8 @@ impl Emitter<'_> {
                         "return Ok(Cont::Return(wrap_{}({value})));",
                         self.key(&function.ret)
                     )],
-                    // The copy-out half: `ret` binds first — the return operand may read a `Mut`
-                    // parameter's own local — then each writeback lands in its pointee. A task
-                    // fn never declares `Mut`, and a handler's padded column is all `Read`.
-                    _ if function.modes.contains(&hir::Mode::Mut) => {
-                        let mut lines = vec![format!("let ret = {value};")];
-                        for (i, mode) in function.modes.iter().enumerate() {
-                            if *mode == hir::Mode::Mut {
-                                lines.push(format!("*a{i} = l{i}.take().unwrap();"));
-                            }
-                        }
-                        lines.push("return Ok(ret);".into());
-                        lines
-                    }
+                    // No copy-out: a `Mut` parameter's body worked on the pointee all along, so
+                    // the writeback already happened, write by write.
                     _ => vec![format!("return Ok({value});")],
                 }
             }
@@ -1379,15 +1370,31 @@ impl Emitter<'_> {
     }
 
     /// A place read: the local, then the typed projection path — `&`-steps through struct
-    /// fields, a match per downcast — with one clone at the end.
+    /// fields, a match per downcast — with one clone at the end. A `Mut` parameter's base is the
+    /// pointee itself: it has no local, and `(*a{i})` is the working value.
     fn read_place_expr(&self, function: &Function, ctx: Ctx, place: &Place) -> String {
+        if function.modes.get(place.local) == Some(&hir::Mode::Mut) {
+            if place.proj.is_empty() {
+                return format!("(*a{}).clone()", place.local);
+            }
+            return self.read_proj_expr(
+                function,
+                format!("let cur = &*a{};", place.local),
+                place,
+            );
+        }
         let base = format!("{}l{}", ctx.locals(), place.local);
         if place.proj.is_empty() {
             return format!("{base}.clone().unwrap()");
         }
+        self.read_proj_expr(function, format!("let cur = {base}.as_ref().unwrap();"), place)
+    }
+
+    /// The projection tail of a place read, from whatever `&Repr`-producing head fits the base.
+    fn read_proj_expr(&self, function: &Function, head: String, place: &Place) -> String {
         let fname = name_lit(function);
         let mut ty = function.tys[place.local].clone();
-        let mut out = format!("{{ let cur = {base}.as_ref().unwrap();");
+        let mut out = format!("{{ {head}");
         for proj in &place.proj {
             let step_ty = self.program.ty_of_proj(&ty, proj);
             match proj {
@@ -1433,13 +1440,22 @@ impl Emitter<'_> {
     /// A place lent for writing: a `&mut` to the value at `place`, copy-on-write through each
     /// `Rc`-stored step exactly like `write_stmt`. `mut` arguments are checker-restricted to
     /// struct-field chains the same way writes are, so `Deref` and `Downcast` cannot appear.
+    /// A `Mut` parameter lends its pointee straight through — forwarding `mut` is a reborrow.
     fn mut_place_expr(&self, function: &Function, ctx: Ctx, place: &Place) -> String {
-        let base = format!("{}l{}", ctx.locals(), place.local);
-        if place.proj.is_empty() {
-            return format!("{base}.as_mut().unwrap()");
-        }
+        let head = if function.modes.get(place.local) == Some(&hir::Mode::Mut) {
+            if place.proj.is_empty() {
+                return format!("&mut *a{}", place.local);
+            }
+            format!("let cur = &mut *a{};", place.local)
+        } else {
+            let base = format!("{}l{}", ctx.locals(), place.local);
+            if place.proj.is_empty() {
+                return format!("{base}.as_mut().unwrap()");
+            }
+            format!("let cur = {base}.as_mut().unwrap();")
+        };
         let mut ty = function.tys[place.local].clone();
-        let mut out = format!("{{ let cur = {base}.as_mut().unwrap();");
+        let mut out = format!("{{ {head}");
         for proj in &place.proj {
             let Proj::Field(index) = proj else {
                 panic!("a `mut` argument projected through an enum or a shared value");
@@ -1461,13 +1477,22 @@ impl Emitter<'_> {
 
     /// A place write. Projected writes are checker-restricted to struct-field chains, and each
     /// `Rc`-stored step copies on write through `Rc::make_mut`, exactly like the interpreter.
+    /// A `Mut` parameter is written through its pointer — the in-place half of the writeback.
     fn write_stmt(&self, function: &Function, ctx: Ctx, place: &Place, value: &str) -> String {
-        let base = format!("{}l{}", ctx.locals(), place.local);
-        if place.proj.is_empty() {
-            return format!("{base} = Some({value});");
-        }
+        let head = if function.modes.get(place.local) == Some(&hir::Mode::Mut) {
+            if place.proj.is_empty() {
+                return format!("*a{} = {value};", place.local);
+            }
+            format!("let cur = &mut *a{};", place.local)
+        } else {
+            let base = format!("{}l{}", ctx.locals(), place.local);
+            if place.proj.is_empty() {
+                return format!("{base} = Some({value});");
+            }
+            format!("let cur = {base}.as_mut().unwrap();")
+        };
         let mut ty = function.tys[place.local].clone();
-        let mut out = format!("{{ let cur = {base}.as_mut().unwrap();");
+        let mut out = format!("{{ {head}");
         for (position, proj) in place.proj.iter().enumerate() {
             let Proj::Field(index) = proj else {
                 panic!("a write projected through an enum or a shared value");
