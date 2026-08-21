@@ -573,11 +573,49 @@ Ordered roughly by when it becomes worth doing, not by importance:
    through the differential oracle; there was no corpus migration, because the first real
    consumer arrives next wave.
 
-   **The wave after this one, unchanged in scope: the sequence wave** (what was 5b): the
-   contiguous COW-copyable sequence, first `mut` consumer `push(mut buf, x)`, and the
-   in-place-vs-threaded-clone measurement — whose baseline is the `x = f(x)` revive idiom the
-   corpus deliberately kept. Partial-move tracking stays never: flat rejection plus `match`
-   remains the answer, because a half-moved struct has no name in this language.
+   **The sequence wave landed 2026-08-20 — the third wave, and the item is closed.** The
+   surface: `Slots<T>`, the copyable slab — COW inside the ops, "Swift with safe ops": copying
+   one is a refcount bump, and every write op does the storage-uniqueness check internally
+   through `Rc::make_mut`, in place when unique, one storage clone when shared, unobservably
+   either way — and on it `std/buf`'s `Buf<T>`, the contiguous sequence as an ordinary exported
+   struct `{ storage: Slots<T>, len: I64 }` with `empty`/`push`/`pop`/`get`/`set`/`length`,
+   `push` the first real `mut` consumer. Affine elements are refused at the spelling and
+   re-checked at monomorphization (the `Shared` pattern), so `affine_seen`'s explicit
+   `Slots(_) => false` arm is truthful for every value that can exist.
+
+   The five builtins — `slots_new`/`len`/`get`/`set`/`take` — are the first Mut-mode rows in the
+   builtin table, and the mode column was the whole enforcement story: moves.rs routes builtin
+   rows through the same `arguments()`/`mutate()` dispatch calls ride, so place shape, `let mut`
+   roots, the state/Shared refusals, and root-level exclusivity all came free. Exclusivity has
+   one visible consequence std/buf works around by design: `slots_set(buf.storage, buf.len, x)`
+   is refused — the slab's root reappears at a read position — so `push` copies the index into a
+   `let` first, which is the diagnostic's own advice. Each engine grew a writeback path: the
+   interpreter reads the slab out of its place, mutates behind a bounds check that runs first (a
+   trap mutates nothing), and writes it back; codegen inlines the ops per site — the prelude is
+   generic-free — and lends the slab's own place, `Rc::make_mut` against the caller's storage.
+   `Slots<T>` joins `Shared<T>` in the boundary enum's per-instantiation variants; a struct
+   holding one crosses as its `S{id}` free.
+
+   The measurement, and the deferred half it needed: the mut wave's copy-in/copy-out seeding
+   held every `mut` body's storage at refcount ≥ 2, so this wave delivered in-place Mut
+   bodies — no seeded local, reads and writes through `(*a{i})`, no per-return copy-out;
+   semantically still copy-in/copy-out, with the only divergence observable after a fatal trap,
+   documented in the emitter and pinned by traps_match. 100,000 pushes run ~14.8s threaded
+   (`buf = pushed(buf, x)`, the revive baseline, whose every push clones the storage) and
+   ~0.007s in place — ~2000×, identical output: the quadratic against the amortized, which is
+   what the measurement was for.
+
+   Loose ends, recorded. std/buf's `set` enforces the *capacity* bound in v0 — std has no trap
+   primitive yet, and the gap slot is unobservable (get/pop are len-guarded, push overwrites
+   slot `len` before the length passes it, grow copies only the prefix); it tightens to the
+   length when std gains one. `is_unique` is deferred with its reason: under safe ops it is an
+   optimization hint with no consumer, so it waits, std-gated, for one. And the checker taught
+   the plan one thing: `push` is not turn-callable, because turn termination recurses
+   reachability and `grow`'s copy loop is statically reachable however rarely growth fires —
+   examples/reactors/history.norn teaches the turn-legal shape instead, a bounded ring updated
+   with the loop-free `set` through the state read/write/assign-back idiom. Partial-move
+   tracking stays never: flat rejection plus `match` remains the answer, because a half-moved
+   struct has no name in this language.
 6. **Move checking for ordinary values, and `Shared<T>`.** Both wait on a typed value
    representation — and the representation landed first, as its own wave: **6a, typed NIR and a
    typed backend (2026-08-19), zero surface change.** The item decomposed as 6a, 6b (`Shared<T>`,
@@ -868,13 +906,13 @@ Ordered roughly by when it becomes worth doing, not by importance:
     the sharing as much as a byte-pusher wants the buffer. Maps and sets follow them; `DESIGN.md`
     §11 wants the incremental kind, which is a propagation property and not a second type. `List<T>`
     is the cons list's name — `DESIGN.md`'s core semantics already writes `List<EffectRequest>`,
-    so the name was load-bearing before the library existed, and std/list now spells it — which
-    leaves the contiguous one's spelling the open question. That half's pricing gate has lifted —
-    item 6b's typed views price a buffer honestly, the same wave that made `Bytes` slices
-    zero-copy — so what the contiguous sequence waits on now is its mutation story:
-    `push(mut buf, x)` wants item 5's `mut` wave, and the type itself is item 5's third. Whatever
-    lands must make finiteness structural, because `for` earns its way into a turn only by being
-    bounded by the data (`DESIGN.md` §14).
+    so the name was load-bearing before the library existed, and std/list now spells it — and
+    the contiguous one's spelling is answered (2026-08-20): **`Buf<T>` in std/buf**, an ordinary
+    struct over item 5's `Slots<T>` slab, landed with the sequence wave (the record lives on
+    item 5). Finiteness is structural exactly as required: a turn may hold and read a `Buf` —
+    `length`/`get`/`set` are loop-free — while `push` is statically turn-unreachable through
+    `grow`'s copy loop, so whatever iterates inside a turn is still bounded by the data
+    (`DESIGN.md` §14).
     What never dissolves is a small intrinsic layer at the syscall boundary, which is also where
     `uses { … }` keeps doing its checking: the authority seam stays a closed, named table after
     every name above it has become a library.
