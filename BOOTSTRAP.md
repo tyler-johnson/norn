@@ -771,12 +771,49 @@ Ordered roughly by when it becomes worth doing, not by importance:
    inherent impls — methods come from traits only, so `req.header(h)` stays `header(req, h)`;
    extension methods on builtin types (`2.seconds` still waits); `self` receiver sugar; `where`
    clauses (still reserved); borrow receivers (`&Self` was refused here — landed with item 6c,
-   the trait declaring the receiver mode); and `task`
-   members with `uses` clauses (parse-permissive, check-refused — and the one construct with no
-   body for item 8's inference to read, which is why the clause is still parsed there). One plan amendment made in
+   the trait declaring the receiver mode); `task` members (landed 2026-08-21 with the wave
+   recorded below); and a `uses` clause on one — still parse-permissive, and now permanently
+   check-refused rather than deferred: a member has no body, and each impl's set is inferred from
+   the body that runs, so a clause at the trait would be a promise about code the trait cannot
+   see. One plan amendment made in
    flight: "unified under one trait" became *unified where the signatures agree* — `Display` is
    infallible rendering only, and std/bytes's fallible `to_string(Bytes) -> Option<String>`
    stays a free function, fallibility living in the type as the naming format demands.
+
+   **The reactor-traits wave landed 2026-08-21**, closing two of that ledger's entries at once and
+   for item 7's own reason — each half is the other's first consumer. A read-only abstraction over
+   a handle teaches a model the language does not have, because `send` suspends; and a `task`
+   member with nothing interesting to be a member *of* is a feature waiting for its first caller.
+
+   `task` members: a trait may declare `task fn`, conformance holds the impl to the same word in
+   both directions, and `call_method` grew `call_fn`'s task branch — one path types a concrete
+   impl method and the stub a bounded `T` calls through, the stub carrying the member's `task` so
+   the call types as `Ty::Task` inside a template where no impl is visible. Reactor receivers:
+   `Ty::Reactor` joined the impl-receiver whitelist it had only ever been missing from by
+   omission — the old catch-all said "not a named type" of `Gate`, which is precisely a named
+   type. A handle was already an ordinary value everywhere else (parameter, local, return, field,
+   payload, generic argument, reactor state), and the surface an impl on one reaches is exactly
+   the surface every other holder reaches: inputs and exported signals, never reactor-private
+   state. The handle's own surface wins — `gate.opened()` still teaches `send` and
+   `gate.healthy()` still teaches `latest`, both now pinned by snapshots rather than untested —
+   so the intercept probes without reporting and falls through to the impl scan on a miss, and a
+   method whose name would shadow an input or an export is refused at the impl, in a pass of its
+   own because impls are declared before `declare_reactors` fills in a reactor's members.
+
+   Capability inference needed no code at all, which is the part of the wave that looks like work
+   and is not: `infer_uses` runs after monomorphization over concrete bodies, `mono_callee`
+   already rewrites each trait-call stub to the impl method that runs, and a task method reaching
+   `sleep` therefore lands in its caller's inferred set through the fixpoint that was already
+   there — a caller asserting `uses { }` refused with the transitive chain, unchanged.
+   Purely static for the fourth wave running: no NIR or codegen snapshot moved a byte.
+   `examples/reactors/reactor-traits.norn` is the dogfood — a `Feed` with a `task fn` implemented
+   for two unrelated reactors and driven through `drive<T: Feed>`, a `Health` reading an exported
+   signal, and a `sink Self` shutdown that spends the handle, which is a one-shot contract nothing
+   else in the language could spell. It lives in the reactors corpus rather than `examples/run/`
+   because a reactor needs the virtual clock to be a golden file. Deliberately still out: trait
+   objects, and with them heterogeneous collections of handles — dispatch is static and a bound is
+   not a type, so a `List<T: Health>` over differently-typed reactors is existential dispatch and
+   a much larger question.
 8. **Capability inference, test handlers.** Decided 2026-08-19: inference is the destination — the
    compiler computes the set, and a written `uses` becomes an optional public bound, the same
    inferred-by-default, declared-as-assertion shape item 5 gives `sink` (`DESIGN.md` §6 carries
@@ -966,3 +1003,106 @@ Ordered roughly by when it becomes worth doing, not by importance:
     What never dissolves is a small intrinsic layer at the syscall boundary, which is also where
     every capability set is seeded: the authority seam stays a closed, named table after every
     name above it has become a library, and inference is a union over what a body reaches from it.
+13. **Reactor interfaces — plugin composition without a wiring root.** Raised 2026-08-22 from
+    `examples/reactors/chunk-systems.norn`, which is the problem stated in code: three systems
+    that do not know each other, wired by a `main` that knows all three. `Chunks` holds a
+    `Terrain` and pushes to it, so the dependency runs opposite to the way the decomposition
+    reads — a second consumer of the window is an edit to `Chunks` and to `reconcile`, never a
+    new file. What is wanted is the other direction: a consumer names a contract, a producer
+    satisfies one, and neither names the other.
+
+    The mechanism is an **interface** — a named subset of the handle surface, inputs and exports
+    with their message types, that a reactor satisfies structurally. Not a trait. A trait puts the
+    contract in an `impl` block, and for a reactor only half a contract can live there: a
+    publication derives from exports and could be written outside, but a subscription is an `on`
+    handler assigning `state`, which is the reactor's own body by construction. The contract
+    therefore belongs on the reactor, and an interface introduces no new visibility rule — §3's
+    rule that a handle exposes exactly its inputs and exports is what an interface takes a subset
+    of.
+
+    **It is half-built, which is why the cost is believable.** `Ty::Input(Box<Ty>)` and
+    `Ty::Signal(Box<Ty>)` already exist in the checker and are already documented unspellable:
+    `resolve_ty` never produces one, so no field, parameter, return, or payload can have the type,
+    and the only way to obtain one is `reactor.input` at the point of use. The runtime
+    representation is already erased — `Value::Input(ReactorId, usize)`, an id and an array index
+    — and `Builtin::Send` matches exactly that and calls `send(reactor, input, value)` without
+    ever seeing a type. So an interface value is a struct of ports, an interface-typed handle is a
+    few `(id, index)` pairs, and conformance is front-end work leaving no runtime residue. There
+    is no vtable because there is no code to dispatch to: a handle's only operations are
+    enqueue-to-mailbox and read-a-published-slot, and both were index operations already. That is
+    how "a bound is not a type" stands for traits while an interface *is* a type for handles —
+    the reactor boundary has been a uniform erased interface since M3. The minimum viable change
+    is a deletion rather than an abstraction: make `Input<T>` spellable and `Buf<Input<I64>>` is a
+    subscriber list; interfaces are the sugar that bundles ports which must travel together and
+    gives them a name to grep.
+
+    **Conformance is structural. Declaration buys ergonomics and error locality, never truth.**
+    The conforming set must be identical whether or not anything is declared, or nominal typing
+    has been rebuilt and the retrofit case — a library declaring an interface that matches another
+    library's popular reactor, without its cooperation — is lost, which is the case the whole item
+    exists for. On top of that: `is Interface` on a reactor you own enables implicit coercion at
+    use sites and pins the error at the reactor when an input is renamed, rather than scattering it
+    across every consumer; `as Interface` at the use site is the spelling when you own neither the
+    reactor nor its declaration. Go is the precedent for checking at the use site, and its
+    ecosystem's `var _ Iface = (*T)(nil)` idiom is the evidence that pure structural conformance
+    loses something worth declaring. A standalone `conform Chunks as ChunkSource`, enabling
+    coercion program-wide from one greppable site, is designed but **deferred** (2026-08-22) until
+    use-site projection proves noisy in practice. It needs no coherence rule when it arrives:
+    unlike a Rust impl it carries no code, only an assertion the compiler verifies independently,
+    so duplicate declarations are redundant rather than conflicting.
+
+    **Queue policy is part of an interface's contract, and `wait` is among the choices.** An
+    interface declares each port's policy, which answers the width-subtyping question the surface
+    otherwise leaves open: an interface constrains policy, because policy is the part of an input's
+    declaration the *sender* depends on. Once it is declared, an interface send knows everything a
+    direct send knows, so interfaces need no rule of their own here — whether `wait` is sound
+    turns on the sender's own position, a static fact the sender always knows and on which the
+    receiver's identity never bore. The refusal below is therefore shared with direct sends
+    rather than special to interfaces. Sequential fan-out to a `wait` port does couple
+    subscribers — a slow plugin delays the ones after it in the loop — but that is `wait` meaning
+    what it says, and a producer wanting subscribers to park independently fans out with `spawn`
+    instead of `await`.
+
+    **The gate is liveness, and it is not optional.** `send` to a stopped reactor is a silent
+    success (`graph.rs`'s alive check returns `Poll::Ready(())` — "a dead one is not an error to
+    send to"), and `latest` is `published.get(export).cloned()` with no aliveness check, so a
+    stopped reactor answers reads with a tombstone indistinguishable from data. Both are contained
+    today because handles are passed explicitly and the owning scope is visible in the source. Put
+    handles in a runtime collection and a subscriber list never shrinks, no send ever reports
+    failure, and §11's claim — that a disconnected session is "a cancelled task tree rather
+    than a collection of callbacks that must each remember to unsubscribe" — is exactly what a
+    hand-managed `Buf<Input<T>>` regresses. The runtime already knows: `reactor_alive` exists and
+    is simply not exposed. Spellable `Input<T>` must not land before it is.
+
+    **The `wait` defect this uncovered is independent of interfaces and should be fixed on its
+    own.** `Overflow::Wait` parks the sender on an unbounded `Vec<Waiting<V>>` that retains the
+    message, so the mailbox stays bounded while the waiter list absorbs the excess. That is real
+    backpressure when the sender's own progress is what produces messages — a task looping on
+    `await send(players.moved, pos)` stops, so the socket stops being drained. It is not
+    backpressure at all when the sender is a reactor's effect task: the `chunk-systems` trace shows
+    `R0` taking turns 0, 1, and 2 while `t3`, `t4`, and `t5` are all parked, each turn spawning a
+    *fresh* task, so a reactor pushing into a `wait` input accumulates parked tasks without ever
+    slowing down. Backpressure propagates from a task into a reactor and never from a reactor to a
+    reactor, because a reactor is driven by its inbox and its effects are fire-and-forget — forced
+    by turn semantics, since a reactor stalling on its outbox could not take turns at all and any
+    cycle would deadlock. Nothing refuses this today.
+
+    So the rule `wait` needs is positional, and it is the one interface sends share: refuse a
+    `send` to a `wait` port from anywhere reachable from an `after`, which is the same call-graph
+    reachability `check_turns`, `check/uses.rs`, and `infer_sinks` already walk. Refusing costs
+    nothing real — blocking there never saved the message, it queued the sender instead, the same
+    memory with less clarity — and the need behind it is served by a larger queue with an
+    observable overflow, or by a credit or ack input on the producer tracked in its own state,
+    which between reactors is the only place flow control can honestly live. Item 1's per-request
+    pending queue on `after` is the complementary fix and bounds the waiter list whatever the
+    policy. Whether `wait` should stay refused from effect positions *after* that bound exists is
+    a judgment call worth taking separately: it would be bounded but still lossy, so the port
+    would promise lossless delivery and the producer's effect queue would quietly drop instead.
+
+    What stays open: whether an interface may name exports as well as inputs, or only inputs
+    (a `Signal<T>` escaping its reactor is the grammatical guarantee `Ty::Signal`'s unspellability
+    exists to provide, and opening it trades a fact about the grammar for a check somebody has to
+    write); how a subscription's lifetime is owned, which is item 1's subscription-lifetime work
+    seen from the other side; and whether the compiler should emit the system-level edge set —
+    `norn graph --system` — now that `is`, `conform`, and `as` between them keep every conformance
+    enumerable from the source.
