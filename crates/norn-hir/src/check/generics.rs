@@ -893,6 +893,10 @@ impl Checker {
         let modes = self.traits[trait_id.index()].methods[position]
             .modes
             .clone();
+        // The stub carries the member's `task`, so a call on a bounded `T` types as `Ty::Task`
+        // inside the template — where no impl is visible and the trait is the only contract there
+        // is. Every impl spells the same word, so the instance agrees by conformance.
+        let is_task = self.traits[trait_id.index()].methods[position].is_task;
         let id = FnId(self.program.fns.len() as u32);
         self.fn_owner.push(self.current);
         self.fn_bounds.push(Vec::new());
@@ -905,7 +909,7 @@ impl Checker {
         self.program.fns.push(FnDef {
             name,
             type_params: Vec::new(),
-            is_task: false,
+            is_task,
             uses: Vec::new(),
             params: params.len(),
             modes: Vec::new(),

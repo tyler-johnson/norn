@@ -1,0 +1,349 @@
+=== nir ===
+enum Option #0 (None, Some(?))
+enum Result #1 (Ok(?), Err(?))
+enum IoError #2 (NotFound, Denied, InUse, Refused, Closed, Other(String))
+
+reactor Gate #0(I64)
+    node 0 limit: I64 param slot 0 arg 0 <- []
+    node 1 accepted: I64 state slot 1 init Gate.accepted.init#10 <- []
+    node 2 released: I64 state slot 2 init Gate.released.init#11 <- []
+    node 3 open: I64 signal Gate.open#12 <- [accepted, released]
+    node 4 healthy: Bool signal Gate.healthy#13 export <- [open, limit]
+    node 5 count: I64 signal Gate.count#14 export <- [accepted]
+    order [limit, accepted, released, open, healthy, count]
+    input 0 opened: () capacity 8 overflow reject handler Gate.on.opened#8
+        plan [accepted, open, healthy, count]
+    input 1 closed: () capacity 8 overflow reject handler Gate.on.closed#9
+        plan [released, open, healthy]
+    exports [healthy, count]
+
+reactor Pump #1(I64)
+    node 0 size: I64 param slot 0 arg 0 <- []
+    node 1 level: I64 state slot 1 init Pump.level.init#16 <- []
+    node 2 healthy: Bool signal Pump.healthy#17 export <- [level]
+    node 3 count: I64 signal Pump.count#18 export <- [level]
+    order [size, level, healthy, count]
+    input 0 filled: () capacity 8 overflow reject handler Pump.on.filled#15
+        plan [level, healthy, count]
+    exports [healthy, count]
+
+inert task fn drive #0(_0/handle: T) -> ()
+  b0:
+    return ()
+
+inert fn state_of #1(_0/handle: T) -> String
+  b0:
+    return ()
+
+task fn main #2() -> ()
+    local _0/gate: Gate
+    local _1/pump: Pump
+    local _2: Gate
+    local _3: Pump
+    local _4: Task<()>
+    local _5: ()
+    local _6: Task<()>
+    local _7: ()
+    local _8: Task<()>
+    local _9: ()
+    local _10: String
+    local _11: ()
+    local _12: String
+    local _13: ()
+    local _14: Signal<I64>
+    local _15: I64
+    local _16: ()
+    local _17: Signal<I64>
+    local _18: I64
+    local _19: ()
+    local _20: Task<()>
+    local _21: ()
+    local _22: Task<()>
+    local _23: ()
+    local _24: ()
+  b0:
+    _2 = spawn reactor Gate#0(2)
+    _0/gate = _2
+    _3 = spawn reactor Pump#1(6)
+    _1/pump = _3
+    _4 = task drive<Gate>#21(_0/gate)
+    await _4 -> _5, resume b1
+  b1:
+    _6 = task drive<Pump>#22(_1/pump)
+    await _6 -> _7, resume b2
+  b2:
+    _8 = task builtin sleep(50)
+    await _8 -> _9, resume b3
+  b3:
+    _10 = call state_of<Gate>#23(_0/gate)
+    _11 = builtin print(_10)
+    _12 = call state_of<Pump>#24(_1/pump)
+    _13 = builtin print(_12)
+    _14 = export 1 of _0/gate
+    _15 = builtin latest(_14)
+    _16 = builtin print(_15)
+    _17 = export 1 of _1/pump
+    _18 = builtin latest(_17)
+    _19 = builtin print(_18)
+    _20 = task Shutdown.stop for Gate#7(_0/gate)
+    await _20 -> _21, resume b4
+  b4:
+    _22 = task builtin sleep(50)
+    await _22 -> _23, resume b5
+  b5:
+    _24 = builtin print("closed")
+    return _24
+
+fn Health.ok for Gate #3(_0/handle: Gate) -> Bool
+    local _1: Signal<Bool>
+    local _2: Bool
+  b0:
+    _1 = export 0 of _0/handle
+    _2 = builtin latest(_1)
+    return _2
+
+fn Health.ok for Pump #4(_0/handle: Pump) -> Bool
+    local _1: Signal<Bool>
+    local _2: Bool
+  b0:
+    _1 = export 0 of _0/handle
+    _2 = builtin latest(_1)
+    return _2
+
+task fn Feed.poke for Gate #5(_0/handle: Gate) -> ()
+    local _1: Input<()>
+    local _2: Task<()>
+    local _3: ()
+  b0:
+    _1 = input 0 of _0/handle
+    _2 = task builtin send(_1, ())
+    await _2 -> _3, resume b1
+  b1:
+    return _3
+
+task fn Feed.poke for Pump #6(_0/handle: Pump) -> ()
+    local _1: Input<()>
+    local _2: Task<()>
+    local _3: ()
+  b0:
+    _1 = input 0 of _0/handle
+    _2 = task builtin send(_1, ())
+    await _2 -> _3, resume b1
+  b1:
+    return _3
+
+task fn Shutdown.stop for Gate #7(_0/handle: Gate) -> ()
+    local _1: Input<()>
+    local _2: Task<()>
+    local _3: ()
+  b0:
+    _1 = input 1 of _0/handle
+    _2 = task builtin send(_1, ())
+    await _2 -> _3, resume b1
+  b1:
+    return _3
+
+fn Gate.on.opened #8(_0/limit: I64, _1/accepted: I64, _2/released: I64) -> ()
+    local _3: I64
+  b0:
+    _3 = _1/accepted add.i 1
+    _1/accepted = _3
+    set slot 1 = _1/accepted
+    return ()
+
+fn Gate.on.closed #9(_0/limit: I64, _1/accepted: I64, _2/released: I64) -> ()
+    local _3: I64
+  b0:
+    _3 = _2/released add.i 1
+    _2/released = _3
+    set slot 2 = _2/released
+    return ()
+
+fn Gate.accepted.init #10() -> I64
+  b0:
+    return 0
+
+fn Gate.released.init #11() -> I64
+  b0:
+    return 0
+
+fn Gate.open #12(_0/accepted: I64, _1/released: I64) -> I64
+    local _2: I64
+  b0:
+    _2 = _0/accepted sub.i _1/released
+    return _2
+
+fn Gate.healthy #13(_0/open: I64, _1/limit: I64) -> Bool
+    local _2: Bool
+  b0:
+    _2 = _0/open le _1/limit
+    return _2
+
+fn Gate.count #14(_0/accepted: I64) -> I64
+  b0:
+    return _0/accepted
+
+fn Pump.on.filled #15(_0/size: I64, _1/level: I64) -> ()
+    local _2: I64
+  b0:
+    _2 = _1/level add.i _0/size
+    _1/level = _2
+    set slot 1 = _1/level
+    return ()
+
+fn Pump.level.init #16() -> I64
+  b0:
+    return 0
+
+fn Pump.healthy #17(_0/level: I64) -> Bool
+    local _1: Bool
+  b0:
+    _1 = _0/level lt 10
+    return _1
+
+fn Pump.count #18(_0/level: I64) -> I64
+  b0:
+    return _0/level
+
+inert task fn Feed.poke for T #19(_0: ?) -> ()
+  b0:
+    return ()
+
+inert fn Health.ok for T #20(_0: ?) -> Bool
+  b0:
+    return ()
+
+task fn drive<Gate> #21(_0/handle: Gate) -> ()
+    local _1: Task<()>
+    local _2: ()
+    local _3: Task<()>
+    local _4: ()
+  b0:
+    _1 = task Feed.poke for Gate#5(_0/handle)
+    await _1 -> _2, resume b1
+  b1:
+    _3 = task Feed.poke for Gate#5(_0/handle)
+    await _3 -> _4, resume b2
+  b2:
+    return _4
+
+task fn drive<Pump> #22(_0/handle: Pump) -> ()
+    local _1: Task<()>
+    local _2: ()
+    local _3: Task<()>
+    local _4: ()
+  b0:
+    _1 = task Feed.poke for Pump#6(_0/handle)
+    await _1 -> _2, resume b1
+  b1:
+    _3 = task Feed.poke for Pump#6(_0/handle)
+    await _3 -> _4, resume b2
+  b2:
+    return _4
+
+fn state_of<Gate> #23(_0/handle: Gate) -> String
+    local _1: String
+    local _2: Bool
+  b0:
+    _2 = call Health.ok for Gate#3(_0/handle)
+    branch _2 ? b1 : b2
+  b1:
+    _1 = "healthy"
+    goto b3
+  b2:
+    _1 = "over"
+    goto b3
+  b3:
+    return _1
+
+fn state_of<Pump> #24(_0/handle: Pump) -> String
+    local _1: String
+    local _2: Bool
+  b0:
+    _2 = call Health.ok for Pump#4(_0/handle)
+    branch _2 ? b1 : b2
+  b1:
+    _1 = "healthy"
+    goto b3
+  b2:
+    _1 = "over"
+    goto b3
+  b3:
+    return _1
+
+=== graph ===
+reactor Gate #0(I64)
+    node 0 limit: I64 param slot 0 arg 0 <- []
+    node 1 accepted: I64 state slot 1 init Gate.accepted.init#10 <- []
+    node 2 released: I64 state slot 2 init Gate.released.init#11 <- []
+    node 3 open: I64 signal Gate.open#12 <- [accepted, released]
+    node 4 healthy: Bool signal Gate.healthy#13 export <- [open, limit]
+    node 5 count: I64 signal Gate.count#14 export <- [accepted]
+    order [limit, accepted, released, open, healthy, count]
+    input 0 opened: () capacity 8 overflow reject handler Gate.on.opened#8
+        plan [accepted, open, healthy, count]
+    input 1 closed: () capacity 8 overflow reject handler Gate.on.closed#9
+        plan [released, open, healthy]
+    exports [healthy, count]
+
+reactor Pump #1(I64)
+    node 0 size: I64 param slot 0 arg 0 <- []
+    node 1 level: I64 state slot 1 init Pump.level.init#16 <- []
+    node 2 healthy: Bool signal Pump.healthy#17 export <- [level]
+    node 3 count: I64 signal Pump.count#18 export <- [level]
+    order [size, level, healthy, count]
+    input 0 filled: () capacity 8 overflow reject handler Pump.on.filled#15
+        plan [level, healthy, count]
+    exports [healthy, count]
+
+=== output ===
+healthy
+over
+2
+12
+closed
+=== result ===
+()
+=== trace ===
+0ms t0 spawn main root
+0ms t0 resume
+0ms R0 create Gate in t0
+0ms R0 publish 0
+0ms R1 create Pump in t0
+0ms R1 publish 0
+0ms t0 park timer 50ms
+0ms R0 turn 0 opened
+0ms R0 commit accepted
+0ms R0 recompute open
+0ms R0 recompute healthy
+0ms R0 recompute count
+0ms R0 publish 1
+0ms R1 turn 0 filled
+0ms R1 commit level
+0ms R1 recompute healthy
+0ms R1 recompute count
+0ms R1 publish 1
+0ms R0 turn 1 opened
+0ms R0 commit accepted
+0ms R0 recompute open
+0ms R0 recompute healthy
+0ms R0 recompute count
+0ms R0 publish 2
+0ms R1 turn 1 filled
+0ms R1 commit level
+0ms R1 recompute healthy
+0ms R1 recompute count
+0ms R1 publish 2
+50ms -- clock
+50ms t0 resume
+50ms t0 park timer 100ms
+50ms R0 turn 2 closed
+50ms R0 commit released
+50ms R0 recompute open
+50ms R0 recompute healthy
+50ms R0 publish 3
+100ms -- clock
+100ms t0 resume
+100ms R0 stop
+100ms R1 stop
+100ms t0 done

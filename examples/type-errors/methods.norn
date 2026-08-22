@@ -64,3 +64,37 @@ impl Consume for User {
 fn consumes_twice(user: User) -> String {
     user.consume() + user.consume()
 }
+
+reactor Gate(limit: I64) {
+    input opened: () [capacity: 4, overflow: reject]
+
+    state accepted: I64 = 0
+
+    on opened() {
+        accepted = accepted + 1
+    }
+
+    export signal healthy = accepted <= limit
+}
+
+trait Close {
+    task fn close(handle: sink Self) -> ()
+}
+
+impl Close for Gate {
+    task fn close(handle: sink Self) -> () {
+        await send(handle.opened, ())
+    }
+}
+
+// A handle's own member surface wins over any impl, however many traits `Gate` has: an input is a
+// mailbox and an exported signal is read, so neither is ever a method. The teach is which builtin
+// reaches the member, because that is the thing the writer meant.
+task fn drive(gate: Gate) -> () {
+    let a = gate.opened()
+    let b = gate.healthy()
+    // `close` declares `sink Self`, so the handle's name dies at the call. A handle is copyable and
+    // the assertion holds anyway — revoking the name is what writing `sink` means.
+    await gate.close()
+    await gate.close()
+}

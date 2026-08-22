@@ -45,3 +45,45 @@ error: `contains` requires `T: Eq`, and `Post` is not `Eq`
 56 |     let a = contains(Post(id: 1), Post(id: 1))
    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `T` is `Post` here
    = note: `Eq` is compiler-defined: exactly `I64`, `F64`, `Bool`, `String`, and `Bytes` satisfy it until derived equality lands (BOOTSTRAP.md §8 item 9)
+
+error: a trait member declares no capabilities
+  --> traits.norn:64:9
+   |
+64 |         uses { clock }
+   |         ^^^^^^^^^^^^^^ `uses` on a trait member
+   = note: the trait fixes the signature; what a method reaches is its own impl's business, inferred from that impl's body like any other function's
+
+error: `wake` and `Wake`'s declaration disagree about whether the method is a task
+  --> traits.norn:78:5
+   |
+78 |     fn wake(value: Self) -> () {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ plain `fn` here
+   = note: `Wake` declares `task fn wake`; whether a call builds a task is part of the contract, and every impl spells the same word
+
+error: `rest` and `Rest`'s declaration disagree about whether the method is a task
+  --> traits.norn:84:5
+   |
+84 |     task fn rest(value: Self) -> () {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `task fn` here
+   = note: `Rest` declares `fn rest`; whether a call builds a task is part of the contract, and every impl spells the same word
+
+error: an impl function declares no capabilities
+  --> traits.norn:96:9
+   |
+96 |         uses { clock }
+   |         ^^^^^^^^^^^^^^ `uses` on a method
+   = note: what the body reaches is inferred; a method's caller sees that set through the call like any other
+
+error: `Meter` already has an input named `tick`
+   --> traits.norn:122:8
+    |
+122 |     fn tick(value: Self) -> I64 {
+    |        ^^^^ a method may not shadow a member
+    = note: `handle.tick` reaches the member and `handle.tick()` would reach the method; the handle's own surface wins, so give the method another name
+
+error: `Meter` already has an exported signal named `level`
+   --> traits.norn:126:8
+    |
+126 |     fn level(value: Self) -> I64 {
+    |        ^^^^^ a method may not shadow a member
+    = note: `handle.level` reaches the member and `handle.level()` would reach the method; the handle's own surface wins, so give the method another name

@@ -1005,6 +1005,244 @@ task fn main() -> ()
     );
 }
 
+/// Rejection, inline: the program must fail to check and the first thing said about it must be
+/// the thing under test. Beside `accepted` because half of these rules are only visible from the
+/// side that refuses.
+fn refused(what: &str, source: &str, needle: &str) {
+    let parsed = parse(source);
+    assert!(parsed.ok(), "{what}: did not parse");
+    let checked = norn_hir::check(&parsed.module);
+    assert!(!checked.ok(), "{what}: checked cleanly");
+    let rendered = render_all(&SourceFile::new("test", source), &checked.errors);
+    assert!(
+        rendered.contains(needle),
+        "{what}: no diagnostic said {needle:?}\n{rendered}"
+    );
+}
+
+/// Traits over reactor handles, and `task` members. Two halves of one wave because each is the
+/// other's first consumer: a handle abstraction that cannot `send` teaches a model the language
+/// does not have.
+#[test]
+fn traits_carry_tasks_and_reactors() {
+    // A `task` member, implemented and awaited. The receiver reads, so `bed` survives the call.
+    accepted(
+        "a trait member may be a task",
+        "\
+trait Rest {
+    task fn rest(value: Self) -> ()
+}
+
+struct Bed {
+    size: I64
+}
+
+impl Rest for Bed {
+    task fn rest(value: Self) -> () {
+        await sleep(value.size)
+    }
+}
+
+task fn main() -> ()
+    uses { clock }
+{
+    let bed = Bed(size: 1)
+    await bed.rest()
+    print(bed.size)
+}
+",
+    );
+
+    // The capability crosses the impl with no new code: `mono_callee` rewrites the stub to the
+    // method that runs, so the instance body carries a real edge and the fixpoint walks it.
+    accepted(
+        "a task method's capability reaches its caller through a bound",
+        "\
+trait Rest {
+    task fn rest(value: Self) -> ()
+}
+
+struct Bed {
+    size: I64
+}
+
+impl Rest for Bed {
+    task fn rest(value: Self) -> () {
+        await sleep(value.size)
+    }
+}
+
+task fn nap<T: Rest>(value: T) -> () {
+    await value.rest()
+}
+
+task fn main() -> ()
+    uses { clock }
+{
+    await nap(Bed(size: 1))
+}
+",
+    );
+
+    // And the assertion is held to it, transitively — the half that would be silent if the set
+    // stopped at the trait's bodiless signature.
+    refused(
+        "an empty clause cannot cover a task method that sleeps",
+        "\
+trait Rest {
+    task fn rest(value: Self) -> ()
+}
+
+struct Bed {
+    size: I64
+}
+
+impl Rest for Bed {
+    task fn rest(value: Self) -> () {
+        await sleep(value.size)
+    }
+}
+
+task fn main() -> ()
+    uses { }
+{
+    let bed = Bed(size: 1)
+    await bed.rest()
+}
+",
+        "`main` does not declare the capability `clock`",
+    );
+
+    // The receiver the whitelist used to drop: a handle is an ordinary value, and an impl on one
+    // reaches exactly the inputs and exported signals any other holder does.
+    accepted(
+        "a reactor handle implements a trait",
+        "\
+trait Health {
+    fn ok(handle: Self) -> Bool
+}
+
+reactor Gate(limit: I64) {
+    input opened: () [capacity: 4, overflow: reject]
+
+    state accepted: I64 = 0
+
+    on opened() {
+        accepted = accepted + 1
+    }
+
+    export signal healthy = accepted <= limit
+}
+
+impl Health for Gate {
+    fn ok(handle: Self) -> Bool {
+        latest(handle.healthy)
+    }
+}
+
+task fn main() -> () {
+    let gate = spawn reactor Gate(limit: 2)
+    print(gate.ok())
+}
+",
+    );
+
+    // Static polymorphism over two unrelated reactors: one written call, two instances, each
+    // resolved to its own impl. A bound is not a type, so nothing here is heterogeneous.
+    accepted(
+        "one generic call resolves a different reactor impl per instance",
+        "\
+trait Feed {
+    task fn poke(handle: Self) -> ()
+}
+
+reactor Gate() {
+    input opened: () [capacity: 4, overflow: reject]
+
+    state accepted: I64 = 0
+
+    on opened() {
+        accepted = accepted + 1
+    }
+
+    export signal count = accepted
+}
+
+reactor Pump() {
+    input filled: () [capacity: 4, overflow: reject]
+
+    state level: I64 = 0
+
+    on filled() {
+        level = level + 1
+    }
+
+    export signal count = level
+}
+
+impl Feed for Gate {
+    task fn poke(handle: Self) -> () {
+        await send(handle.opened, ())
+    }
+}
+
+impl Feed for Pump {
+    task fn poke(handle: Self) -> () {
+        await send(handle.filled, ())
+    }
+}
+
+task fn drive<T: Feed>(handle: T) -> () {
+    await handle.poke()
+}
+
+task fn main() -> () {
+    let gate = spawn reactor Gate()
+    let pump = spawn reactor Pump()
+    await drive(gate)
+    await drive(pump)
+    print(latest(gate.count) + latest(pump.count))
+}
+",
+    );
+
+    // A one-shot handle contract. `sink` is assertive on a copyable value, so the name dies at the
+    // call even though a handle is nothing but a number — which is the only way to say "this
+    // handle is spent" at all.
+    accepted(
+        "a `sink Self` method spends a reactor handle",
+        "\
+trait Shutdown {
+    task fn stop(handle: sink Self) -> ()
+}
+
+reactor Gate() {
+    input closed: () [capacity: 4, overflow: reject]
+
+    state released: I64 = 0
+
+    on closed() {
+        released = released + 1
+    }
+
+    export signal count = released
+}
+
+impl Shutdown for Gate {
+    task fn stop(handle: sink Self) -> () {
+        await send(handle.closed, ())
+    }
+}
+
+task fn main() -> () {
+    let gate = spawn reactor Gate()
+    await gate.stop()
+    print(\"spent\")
+}
+",
+    );
+}
+
 #[test]
 fn one_mistake_reports_once() {
     let source = "\

@@ -46,3 +46,29 @@ error: `user` was given away
    |     ^^^^ given here
    = note: a `User` copies, but it was handed to a `sink` parameter, and the name does not survive that
    = note: `let kept = user` before the call keeps a copy under a name of its own
+
+error: `opened` is an input, not a method
+  --> methods.norn:94:13
+   |
+94 |     let a = gate.opened()
+   |             ^^^^^^^^^^^^^ an input is a mailbox
+   = note: put a message in it with `send(handle.opened, …)`
+
+error: `healthy` is an exported signal, not a method
+  --> methods.norn:95:13
+   |
+95 |     let b = gate.healthy()
+   |             ^^^^^^^^^^^^^^ a signal is read, not called
+   = note: read its latest published value with `latest(handle.healthy)`
+
+error: `gate` was given away
+  --> methods.norn:99:11
+   |
+99 |     await gate.close()
+   |           ^^^^ used here
+  --> methods.norn:98:11
+   |
+98 |     await gate.close()
+   |           ^^^^ given here
+   = note: a `Gate` copies, but it was handed to a `sink` parameter, and the name does not survive that
+   = note: `let kept = gate` before the call keeps a copy under a name of its own

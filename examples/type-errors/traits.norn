@@ -55,3 +55,75 @@ impl Label for Post {}
 fn main() {
     let a = contains(Post(id: 1), Post(id: 1))
 }
+
+// A trait member declares no capabilities. The clause parses — the grammar is permissive about
+// member shapes — and is refused here permanently: what a method reaches is a fact about the impl
+// that runs, and the trait can see none of those bodies.
+trait Ping {
+    task fn ping(value: Self) -> ()
+        uses { clock }
+}
+
+// Whether a call builds a task is part of the contract, so the impl spells the same word. Both
+// directions are wrong in the same way.
+trait Wake {
+    task fn wake(value: Self) -> ()
+}
+
+trait Rest {
+    fn rest(value: Self) -> ()
+}
+
+impl Wake for Post {
+    fn wake(value: Self) -> () {
+        print("awake")
+    }
+}
+
+impl Rest for Post {
+    task fn rest(value: Self) -> () {
+        print("resting")
+    }
+}
+
+// An impl function declares no capabilities either, for the same reason from the other side.
+trait Nap {
+    task fn nap(value: Self) -> ()
+}
+
+impl Nap for Post {
+    task fn nap(value: Self) -> ()
+        uses { clock }
+    {
+        await sleep(1)
+    }
+}
+
+reactor Meter(limit: I64) {
+    input tick: () [capacity: 4, overflow: reject]
+
+    state count: I64 = 0
+
+    on tick() {
+        count = count + 1
+    }
+
+    export signal level = count
+}
+
+// A handle's member surface is fixed before its methods are: `meter.tick` and `meter.tick()` would
+// name two unrelated things, so a method may not shadow an input or an exported signal.
+trait Shadow {
+    fn tick(value: Self) -> I64
+    fn level(value: Self) -> I64
+}
+
+impl Shadow for Meter {
+    fn tick(value: Self) -> I64 {
+        0
+    }
+
+    fn level(value: Self) -> I64 {
+        1
+    }
+}

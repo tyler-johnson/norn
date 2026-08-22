@@ -40,6 +40,9 @@ pub(super) struct TraitDef {
 /// else reads.
 pub(super) struct TraitMethod {
     pub(super) name: String,
+    /// Whether a call to it builds a task. The trait's to declare, like the modes: whether the
+    /// caller has to `await` is part of the contract, so every impl spells the same word.
+    pub(super) is_task: bool,
     pub(super) params: Vec<(String, Ty)>,
     pub(super) modes: Vec<Mode>,
     pub(super) ret: Ty,
@@ -101,13 +104,15 @@ impl Checker {
                     );
                     continue;
                 }
-                if member.is_task {
+                // `task` is a member's to declare; its capabilities are not. A clause here would
+                // be a promise about bodies the trait cannot see — each impl reaches what it
+                // reaches, and `infer_uses` reads that off the body that runs.
+                if let Some(clause) = &member.uses {
                     self.push(
-                        Diagnostic::new(member.name.span, "a trait member is a plain `fn` for now")
-                            .label("`task` on a trait member")
-                            .note("task methods and their capability clauses arrive with a later milestone"),
+                        Diagnostic::new(clause.span, "a trait member declares no capabilities")
+                            .label("`uses` on a trait member")
+                            .note("the trait fixes the signature; what a method reaches is its own impl's business, inferred from that impl's body like any other function's"),
                     );
-                    continue;
                 }
                 if !member.type_params.is_empty() {
                     self.push(
@@ -170,6 +175,7 @@ impl Checker {
                 }
                 methods.push(TraitMethod {
                     name: member.name.name.clone(),
+                    is_task: member.is_task,
                     params,
                     modes,
                     ret,
@@ -217,6 +223,9 @@ impl Checker {
                 Ty::I64 | Ty::F64 | Ty::Bool | Ty::Str | Ty::Bytes => None,
                 Ty::Struct(id) => Some(self.struct_owner[id.index()]),
                 Ty::Enum(id) => Some(self.enum_owner[id.index()]),
+                // A handle is an ordinary value, and an impl on one has exactly the access any
+                // other holder of the handle has: inputs and exported signals, nothing private.
+                Ty::Reactor(id) => Some(self.reactor_owner[id.index()]),
                 other => {
                     let name = self.program.ty_name(other);
                     self.push(
@@ -279,14 +288,15 @@ impl Checker {
             let mut methods: Vec<(String, Option<FnId>)> = Vec::new();
             for member in &decl.fns {
                 let name = member.name.name.clone();
-                if member.is_task {
+                // The same rule as at the trait, from the other side: an impl function's
+                // capabilities are inferred from its body, so a written clause would be an
+                // assertion nothing reads. Refused rather than silently dropped.
+                if let Some(clause) = &member.uses {
                     self.push(
-                        Diagnostic::new(member.name.span, "a trait member is a plain `fn` for now")
-                            .label("`task` on an impl function")
-                            .note("task methods and their capability clauses arrive with a later milestone"),
+                        Diagnostic::new(clause.span, "an impl function declares no capabilities")
+                            .label("`uses` on a method")
+                            .note("what the body reaches is inferred; a method's caller sees that set through the call like any other"),
                     );
-                    methods.push((name, None));
-                    continue;
                 }
                 if !member.type_params.is_empty() {
                     self.push(
@@ -400,6 +410,35 @@ impl Checker {
                     methods.push((name, None));
                     continue;
                 }
+                // And whether it is a task, for the same reason: `await value.poke()` is the
+                // caller's spelling, and it cannot depend on which impl the receiver selected.
+                let wanted_task = self.traits[trait_id.index()].methods[position].is_task;
+                if member.is_task != wanted_task {
+                    let (found, asked) = if member.is_task {
+                        ("`task fn` here", "fn")
+                    } else {
+                        ("plain `fn` here", "task fn")
+                    };
+                    self.push(
+                        Diagnostic::new(
+                            member.span,
+                            format!(
+                                "`{name}` and `{trait_name}`'s declaration disagree about whether the method is a task"
+                            ),
+                        )
+                        .label(found)
+                        .note(format!("`{trait_name}` declares `{asked} {name}`; whether a call builds a task is part of the contract, and every impl spells the same word")),
+                    );
+                    methods.push((name, None));
+                    continue;
+                }
+                // A handle's member surface is fixed before its methods are: `gate.healthy` and
+                // `gate.healthy()` would name two unrelated things. Deferred, because an impl is
+                // declared before any reactor's members exist.
+                if let Ty::Reactor(reactor) = &receiver {
+                    self.reactor_methods
+                        .push((self.current, *reactor, name.clone(), member.name.span));
+                }
                 let id = FnId(self.program.fns.len() as u32);
                 self.fn_owner.push(self.current);
                 self.fn_bounds.push(Vec::new());
@@ -408,14 +447,16 @@ impl Checker {
                 // read parameter is an error `infer_sinks` reports rather than a mode it flips.
                 self.param_modes.push(wanted_modes);
                 self.mode_pinned.push(vec![true; params.len()]);
-                // A trait member cannot be a `task` yet, so an impl method declares no
-                // capabilities of its own; whatever its body reaches is inferred like any other.
+                // A trait member declares no capabilities and neither does an impl function:
+                // there is no assertion to hold this body to, and whatever it reaches is inferred
+                // like any other function's — including through a bounded `T`, because
+                // `mono_callee` rewrites every stub to the impl method that runs.
                 self.declared_uses.push(None);
                 self.uses_spans.push(None);
                 self.program.fns.push(FnDef {
                     name: format!("{trait_name}.{name} for {receiver_name}"),
                     type_params: Vec::new(),
-                    is_task: false,
+                    is_task: wanted_task,
                     uses: Vec::new(),
                     params: params.len(),
                     modes: Vec::new(),
@@ -563,21 +604,30 @@ impl Checker {
             );
             return self.error_expr(span);
         }
-        // A reactor handle keeps its own member surface: the answer is the one field access
-        // gives, and the teach is which builtin reaches the member.
-        if let Ty::Reactor(_) = receiver.ty {
-            let member = self.field_access(receiver, method, span);
-            match member.ty {
-                Ty::Error => return self.error_expr(span),
-                Ty::Input(_) => self.push(
+        // A reactor handle keeps its own member surface, and it wins: `gate.opened()` means the
+        // input however many impls `Gate` has. The probe is a pure lookup rather than a call to
+        // `field_access`, which would report an unknown member — here an unknown member is just a
+        // name the impl scan below should get a chance at.
+        if let Ty::Reactor(id) = receiver.ty {
+            let reactor = &self.program.reactors[id.index()];
+            let input = reactor.input(&method.name).is_some();
+            let exported = reactor
+                .exports
+                .iter()
+                .any(|node| reactor.nodes[node.index()].name == method.name);
+            if input {
+                self.push(
                     Diagnostic::new(span, format!("`{}` is an input, not a method", method.name))
                         .label("an input is a mailbox")
                         .note(format!(
                             "put a message in it with `send(handle.{}, …)`",
                             method.name
                         )),
-                ),
-                _ => self.push(
+                );
+                return self.error_expr(span);
+            }
+            if exported {
+                self.push(
                     Diagnostic::new(
                         span,
                         format!("`{}` is an exported signal, not a method", method.name),
@@ -587,9 +637,9 @@ impl Checker {
                         "read its latest published value with `latest(handle.{})`",
                         method.name
                     )),
-                ),
+                );
+                return self.error_expr(span);
             }
-            return self.error_expr(span);
         }
         // A type parameter's methods come from its declared bounds — propagation by declaration,
         // never a search of the impls, because inside the template nothing concrete exists to
@@ -756,7 +806,8 @@ impl Checker {
 
     /// The rewrite that makes a method a plain call: the receiver becomes the first argument,
     /// and everything after it is checked the way `call_fn` checks arguments. Impl functions are
-    /// never generic and never tasks this wave, so neither branch of `call_fn` is needed. The
+    /// never generic, so `call_fn`'s template branch is not needed; its task branch is, and one
+    /// path here serves both a concrete impl method and the stub a bounded `T` calls through. The
     /// receiver needs no adaptation: reading is unmarked, and whether the method consumes it is
     /// the mode column's fact, enforced by `check_moves` like any other argument.
     fn call_method(
@@ -777,13 +828,58 @@ impl Checker {
         for (index, (_, ty)) in params.iter().skip(1).enumerate() {
             checked.push(self.check_expr(&args[order[index]].value, Some(ty)));
         }
+        let ty = if self.program.fns[id.index()].is_task {
+            self.require_task_context(display, span);
+            Ty::Task(Box::new(ret))
+        } else {
+            ret
+        };
         Expr {
             kind: ExprKind::Call {
                 callee: id,
                 args: checked,
             },
-            ty: ret,
+            ty,
             span,
         }
+    }
+
+    /// A method on a reactor handle may not take the name of a member the handle already has.
+    /// The two spellings are distinguishable — `gate.healthy` against `gate.healthy()` — but a
+    /// reader should not have to know that the parens decide which of two unrelated things is
+    /// named, so the collision is refused where it is written.
+    ///
+    /// Its own pass because impls are declared before `declare_reactors` fills in a reactor's
+    /// inputs and exports; the names to check against do not exist yet when the impl is read.
+    pub(super) fn check_reactor_methods(&mut self) {
+        let pending = std::mem::take(&mut self.reactor_methods);
+        let mut errors: Vec<(usize, Diagnostic)> = Vec::new();
+        for (module, id, name, span) in pending {
+            let reactor = &self.program.reactors[id.index()];
+            let what = if reactor.input(&name).is_some() {
+                "an input"
+            } else if reactor
+                .exports
+                .iter()
+                .any(|node| reactor.nodes[node.index()].name == name)
+            {
+                "an exported signal"
+            } else {
+                continue;
+            };
+            let reactor_name = reactor.name.clone();
+            errors.push((
+                module,
+                Diagnostic::new(
+                    span,
+                    format!("`{reactor_name}` already has {what} named `{name}`"),
+                )
+                .label("a method may not shadow a member")
+                .note(format!(
+                    "`handle.{name}` reaches the member and `handle.{name}()` would reach the method; the handle's own surface wins, so give the method another name"
+                )),
+            ));
+        }
+        self.report(errors);
     }
 }

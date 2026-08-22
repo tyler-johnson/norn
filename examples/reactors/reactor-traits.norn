@@ -1,0 +1,129 @@
+// Traits on reactor handles, and task members in traits.
+//
+// A handle is an ordinary value — it already passes as a parameter, sits in a struct, and rides a
+// generic argument — so the only thing it was missing was a trait. An impl on one gets exactly the
+// surface any other holder of the handle has: the inputs and the exported signals, never anything
+// the reactor keeps private. That is why this is safe without a new rule; the constraint is the one
+// every caller already lives under.
+//
+// The half that makes it useful is `task fn` in a trait: `send` suspends, so an abstraction over
+// "give this reactor a message" cannot be written at all without it. Both halves land here.
+
+trait Health {
+    fn ok(handle: Self) -> Bool
+}
+
+trait Feed {
+    task fn poke(handle: Self) -> ()
+}
+
+// A one-shot contract on a handle: `sink Self` takes the caller's name, which is a promise about
+// the handle nothing else in the language could make.
+trait Shutdown {
+    task fn stop(handle: sink Self) -> ()
+}
+
+reactor Gate(limit: I64) {
+    input opened: () [capacity: 8, overflow: reject]
+    input closed: () [capacity: 8, overflow: reject]
+
+    state accepted: I64 = 0
+    state released: I64 = 0
+
+    on opened() {
+        accepted = accepted + 1
+    }
+
+    on closed() {
+        released = released + 1
+    }
+
+    signal open = accepted - released
+
+    export signal healthy = open <= limit
+    export signal count = accepted
+}
+
+reactor Pump(size: I64) {
+    input filled: () [capacity: 8, overflow: reject]
+
+    state level: I64 = 0
+
+    on filled() {
+        level = level + size
+    }
+
+    export signal healthy = level < 10
+    export signal count = level
+}
+
+// `healthy` is exported by both, so both impls read it — but they are two different signals on two
+// different reactors, and which one is read is settled per instantiation.
+impl Health for Gate {
+    fn ok(handle: Self) -> Bool {
+        latest(handle.healthy)
+    }
+}
+
+impl Health for Pump {
+    fn ok(handle: Self) -> Bool {
+        latest(handle.healthy)
+    }
+}
+
+impl Feed for Gate {
+    task fn poke(handle: Self) -> () {
+        await send(handle.opened, ())
+    }
+}
+
+impl Feed for Pump {
+    task fn poke(handle: Self) -> () {
+        await send(handle.filled, ())
+    }
+}
+
+impl Shutdown for Gate {
+    task fn stop(handle: sink Self) -> () {
+        await send(handle.closed, ())
+    }
+}
+
+// Static polymorphism over two unrelated reactors: one written call, two instances, each resolved
+// to its own impl by monomorphization. A bound is not a type, so this is `drive<Gate>` and
+// `drive<Pump>` — never one function holding either.
+task fn drive<T: Feed>(handle: T) -> () {
+    await handle.poke()
+    await handle.poke()
+}
+
+fn state_of<T: Health>(handle: T) -> String {
+    if handle.ok() {
+        "healthy"
+    } else {
+        "over"
+    }
+}
+
+task fn main() -> () {
+    let gate = spawn reactor Gate(limit: 2)
+    let pump = spawn reactor Pump(size: 6)
+
+    await drive(gate)
+    await drive(pump)
+
+    // Sending only queues. Parking here is what lets both reactors take their turns, so the reads
+    // below are of graphs that have seen every message.
+    await sleep(50)
+
+    print(state_of(gate))
+    print(state_of(pump))
+    print(latest(gate.count))
+    print(latest(pump.count))
+
+    // `stop` declares `sink Self`, so `gate` is gone from here on — a handle contract the language
+    // had no way to spell before a trait member could be a task.
+    await gate.stop()
+    await sleep(50)
+    print("closed")
+}

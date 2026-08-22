@@ -377,6 +377,9 @@ struct Checker {
     /// Every impl in the program, in declaration order — the table method resolution scans.
     /// Methods are receiver-keyed rather than imported, so the scan is global on purpose.
     impls: Vec<ImplDef>,
+    /// Methods written for a reactor receiver, as (module, reactor, name, span): the collision
+    /// check `check_reactor_methods` runs once the reactors' own members exist.
+    reactor_methods: Vec<(usize, ReactorId, String, Span)>,
     /// What `Self` names where the current signature or body sits: the reserved parameter slot
     /// inside a trait declaration, the receiver type inside an impl, nothing anywhere else.
     self_ty: Option<Ty>,

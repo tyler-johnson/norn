@@ -127,6 +127,7 @@ impl Checker {
                 methods: Vec::new(),
             }],
             impls: Vec::new(),
+            reactor_methods: Vec::new(),
             self_ty: None,
             fn_bounds: Vec::new(),
             bounds_in_scope: Vec::new(),
@@ -185,6 +186,9 @@ impl Checker {
         // Reactors are declared, scanned, and checked between signatures and bodies, because a
         // `task fn` body may mention a reactor and a node body may call any function.
         self.each(inputs, Checker::declare_reactors);
+        // Now that every reactor's members exist, an impl written for a handle can be held to
+        // them: a method may not take the name of an input or an exported signal.
+        self.check_reactor_methods();
         let graphs: Vec<Vec<Wiring>> = inputs
             .iter()
             .enumerate()
