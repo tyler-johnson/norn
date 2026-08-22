@@ -1,0 +1,175 @@
+// Three systems that compose without knowing about each other.
+//
+// The claim is about decomposition. A chunk loader written as one reactor would hold player
+// positions, the active window, and terrain residency in one state space, and every handler would
+// be able to touch all of it. Split into three, each system's state is its own and the seams are
+// typed: `Terrain` never learns what a player is, `Chunks` never learns what terrain data costs,
+// and `Players` never learns what a chunk is for. What each one exports is the whole of what the
+// others can see.
+//
+// The mechanism is `after`. A handler may not `send` — a turn is pure, and a system that could
+// poke another mid-turn would let it observe a half-settled graph — so a system commits its own
+// state, publishes its snapshot, and only then does `after` start the task that carries the
+// message on. `reconcile` is that task for the Chunks→Terrain seam, and it is also where the
+// iteration lives, because a turn has no loops either: turns must provably end, so fanning one
+// window change out to a chunk-at-a-time diff is task work by construction.
+//
+// Wiring runs the other way from the dependency. `Chunks` is handed a `Terrain` and pushes to it;
+// there is no way for `Terrain` to declare that it listens. That is the honest limitation here —
+// adding a second consumer of the window (lighting, network replication) means editing `Chunks`
+// and `reconcile`, not writing a new system that subscribes. A handle is an ordinary value, so
+// late binding through an input can invert it, and a trait on the handle can abstract the one
+// consumer; neither gives a set of subscribers.
+
+struct Span {
+    lo: I64
+    hi: I64
+}
+
+// ---- Terrain: owns terrain data, and nothing else knows how it is stored ----
+
+// Generation is slow work over an owned request, so it runs outside the turn and re-enters as an
+// ordinary input. This is `EffectResult → ReactorMailbox → a later turn`, the same loop
+// `examples/reactors/effects.norn` isolates.
+task fn generate(chunk: I64) -> I64 {
+    await sleep(10)
+    chunk
+}
+
+reactor Terrain() {
+    input load: I64 [capacity: 64, overflow: reject]
+    input unload: I64 [capacity: 64, overflow: reject]
+    input ready: I64 [capacity: 64, overflow: reject]
+
+    state requested: I64 = 0
+    state resident: I64 = 0
+    state evicted: I64 = 0
+
+    on load(chunk) {
+        requested = requested + 1
+        after generate(chunk) -> ready
+    }
+
+    on ready(chunk) {
+        resident = resident + 1
+    }
+
+    on unload(chunk) {
+        resident = resident - 1
+        evicted = evicted + 1
+    }
+
+    export signal live = resident
+    export signal dropped = evicted
+
+    // Every requested chunk is resident, evicted, or still generating — so this settles to zero
+    // only because no chunk is ever unloaded before its `generate` returns. The identity is the
+    // versioning assumption written as a signal.
+    export signal pending = requested - resident - evicted
+}
+
+// ---- Chunks: owns which chunks are active, and knows nothing about terrain data ----
+
+// The diff between two windows, one message at a time. A handler could not write this: it has a
+// loop, and it sends. Both are exactly what `after` moves out of the turn.
+task fn reconcile(terrain: Terrain, old: Span, new: Span) -> () {
+    let mut leaving: I64 = old.lo
+    while leaving <= old.hi {
+        if leaving < new.lo || leaving > new.hi {
+            await send(terrain.unload, leaving)
+        }
+        leaving = leaving + 1
+    }
+    let mut arriving: I64 = new.lo
+    while arriving <= new.hi {
+        if arriving < old.lo || arriving > old.hi {
+            await send(terrain.load, arriving)
+        }
+        arriving = arriving + 1
+    }
+}
+
+reactor Chunks(terrain: Terrain, radius: I64) {
+    input centred: I64 [capacity: 16, overflow: reject]
+
+    // `lo > hi` is the empty window: at spawn nothing is loaded, and the first `centred` therefore
+    // diffs against nothing and loads the whole span.
+    state lo: I64 = 1
+    state hi: I64 = 0
+
+    on centred(chunk) {
+        let was = Span(lo: lo, hi: hi)
+        lo = chunk - radius
+        hi = chunk + radius
+        after reconcile(terrain, was, Span(lo: chunk - radius, hi: chunk + radius))
+    }
+
+    export signal window = Span(lo: lo, hi: hi)
+    export signal active = hi - lo + 1
+}
+
+// ---- Players: owns position, and publishes only the transitions ----
+
+task fn recentre(chunks: Chunks, chunk: I64) -> () {
+    await send(chunks.centred, chunk)
+}
+
+reactor Players(chunks: Chunks, size: I64) {
+    input moved: I64 [capacity: 64, overflow: reject]
+
+    state x: I64 = 0
+    state chunk: I64 = 0
+    state joined: Bool = false
+    state crossings: I64 = 0
+
+    // `joined` is load-bearing, not defensive. A `state` initialiser runs before any turn exists,
+    // so a player standing at chunk 0 has a `chunk` of 0 that no turn ever established — and
+    // without the flag the first move would compare equal and the initial window would never
+    // load. There is no turn at spawn; a system that derives "what changed" has to be told when
+    // it starts.
+    on moved(pos) {
+        x = pos
+        if !joined || pos / size != chunk {
+            joined = true
+            chunk = pos / size
+            crossings = crossings + 1
+            after recentre(chunks, pos / size)
+        }
+    }
+
+    export signal at = x
+    export signal moves = crossings
+}
+
+// Spawn order is the wiring order, which is what makes the dependency visible: `Chunks` cannot be
+// built before the `Terrain` it pushes to.
+task fn main() -> () {
+    let terrain = spawn reactor Terrain()
+    let chunks = spawn reactor Chunks(terrain: terrain, radius: 1)
+    let players = spawn reactor Players(chunks: chunks, size: 16)
+
+    // Each move is given time to settle before the next. An in-flight `generate` whose chunk is
+    // unloaded before it finishes would decrement `resident` for a chunk that never arrived, and
+    // nothing in the language prevents that: an effect's result carries no version saying which
+    // state it was computed for. Spacing the moves sidesteps it; it does not fix it.
+    await send(players.moved, 4)
+    await sleep(50)
+    print(latest(chunks.window))
+    print(latest(terrain.live))
+
+    await send(players.moved, 9)
+    await sleep(20)
+    print(latest(players.moves))
+
+    await send(players.moved, 20)
+    await sleep(50)
+    print(latest(chunks.window))
+    print(latest(terrain.live))
+
+    await send(players.moved, 40)
+    await sleep(50)
+    print(latest(chunks.window))
+    print(latest(terrain.live))
+    print(latest(terrain.dropped))
+    print(latest(terrain.pending))
+}

@@ -1,0 +1,686 @@
+=== nir ===
+struct Span #0 (lo: I64, hi: I64)
+enum Option #0 (None, Some(?))
+enum Result #1 (Ok(?), Err(?))
+enum IoError #2 (NotFound, Denied, InUse, Refused, Closed, Other(String))
+
+reactor Terrain #0()
+    node 0 requested: I64 state slot 0 init Terrain.requested.init#7 <- []
+    node 1 resident: I64 state slot 1 init Terrain.resident.init#8 <- []
+    node 2 evicted: I64 state slot 2 init Terrain.evicted.init#9 <- []
+    node 3 live: I64 signal Terrain.live#10 export <- [resident]
+    node 4 dropped: I64 signal Terrain.dropped#11 export <- [evicted]
+    node 5 pending: I64 signal Terrain.pending#12 export <- [requested, resident, evicted]
+    order [requested, resident, evicted, live, dropped, pending]
+    input 0 load: I64 capacity 64 overflow reject handler Terrain.on.load#4
+        plan [requested, pending]
+    input 1 unload: I64 capacity 64 overflow reject handler Terrain.on.unload#5
+        plan [resident, evicted, live, dropped, pending]
+    input 2 ready: I64 capacity 64 overflow reject handler Terrain.on.ready#6
+        plan [resident, live, pending]
+    exports [live, dropped, pending]
+
+reactor Chunks #1(Terrain, I64)
+    node 0 terrain: Terrain param slot 0 arg 0 <- []
+    node 1 radius: I64 param slot 1 arg 1 <- []
+    node 2 lo: I64 state slot 2 init Chunks.lo.init#14 <- []
+    node 3 hi: I64 state slot 3 init Chunks.hi.init#15 <- []
+    node 4 window: Span signal Chunks.window#16 export <- [lo, hi]
+    node 5 active: I64 signal Chunks.active#17 export <- [hi, lo]
+    order [terrain, radius, lo, hi, window, active]
+    input 0 centred: I64 capacity 16 overflow reject handler Chunks.on.centred#13
+        plan [lo, hi, window, active]
+    exports [window, active]
+
+reactor Players #2(Chunks, I64)
+    node 0 chunks: Chunks param slot 0 arg 0 <- []
+    node 1 size: I64 param slot 1 arg 1 <- []
+    node 2 x: I64 state slot 2 init Players.x.init#19 <- []
+    node 3 chunk: I64 state slot 3 init Players.chunk.init#20 <- []
+    node 4 joined: Bool state slot 4 init Players.joined.init#21 <- []
+    node 5 crossings: I64 state slot 5 init Players.crossings.init#22 <- []
+    node 6 at: I64 signal Players.at#23 export <- [x]
+    node 7 moves: I64 signal Players.moves#24 export <- [crossings]
+    order [chunks, size, x, chunk, joined, crossings, at, moves]
+    input 0 moved: I64 capacity 64 overflow reject handler Players.on.moved#18
+        plan [x, chunk, joined, crossings, at, moves]
+    exports [at, moves]
+
+task fn generate #0(_0/chunk: I64) -> I64
+    local _1: Task<()>
+    local _2: ()
+  b0:
+    _1 = task builtin sleep(10)
+    await _1 -> _2, resume b1
+  b1:
+    return _0/chunk
+
+task fn reconcile #1(_0/terrain: Terrain, _1/old: Span, _2/new: Span) -> ()
+    local _3/leaving: I64
+    local _4/arriving: I64
+    local _5: Bool
+    local _6: ()
+    local _7: Bool
+    local _8: Bool
+    local _9: Bool
+    local _10: Input<I64>
+    local _11: Task<()>
+    local _12: ()
+    local _13: I64
+    local _14: Bool
+    local _15: ()
+    local _16: Bool
+    local _17: Bool
+    local _18: Bool
+    local _19: Input<I64>
+    local _20: Task<()>
+    local _21: ()
+    local _22: I64
+  b0:
+    _3/leaving = _1/old.0
+    goto b1
+  b1:
+    _5 = _3/leaving le _1/old.1
+    branch _5 ? b3 : b2
+  b2:
+    _4/arriving = _2/new.0
+    goto b10
+  b3:
+    _8 = _3/leaving lt _2/new.0
+    _7 = _8
+    branch _7 ? b5 : b4
+  b4:
+    _9 = _3/leaving gt _2/new.1
+    _7 = _9
+    goto b5
+  b5:
+    branch _7 ? b6 : b7
+  b6:
+    _10 = input 1 of _0/terrain
+    _11 = task builtin send(_10, _3/leaving)
+    await _11 -> _12, resume b9
+  b7:
+    _6 = ()
+    goto b8
+  b8:
+    _13 = _3/leaving add.i 1
+    _3/leaving = _13
+    goto b1
+  b9:
+    _6 = _12
+    goto b8
+  b10:
+    _14 = _4/arriving le _2/new.1
+    branch _14 ? b12 : b11
+  b11:
+    return ()
+  b12:
+    _17 = _4/arriving lt _1/old.0
+    _16 = _17
+    branch _16 ? b14 : b13
+  b13:
+    _18 = _4/arriving gt _1/old.1
+    _16 = _18
+    goto b14
+  b14:
+    branch _16 ? b15 : b16
+  b15:
+    _19 = input 0 of _0/terrain
+    _20 = task builtin send(_19, _4/arriving)
+    await _20 -> _21, resume b18
+  b16:
+    _15 = ()
+    goto b17
+  b17:
+    _22 = _4/arriving add.i 1
+    _4/arriving = _22
+    goto b10
+  b18:
+    _15 = _21
+    goto b17
+
+task fn recentre #2(_0/chunks: Chunks, _1/chunk: I64) -> ()
+    local _2: Input<I64>
+    local _3: Task<()>
+    local _4: ()
+  b0:
+    _2 = input 0 of _0/chunks
+    _3 = task builtin send(_2, _1/chunk)
+    await _3 -> _4, resume b1
+  b1:
+    return _4
+
+task fn main #3() -> ()
+    local _0/terrain: Terrain
+    local _1/chunks: Chunks
+    local _2/players: Players
+    local _3: Terrain
+    local _4: Chunks
+    local _5: Players
+    local _6: Input<I64>
+    local _7: Task<()>
+    local _8: ()
+    local _9: Task<()>
+    local _10: ()
+    local _11: Signal<Span>
+    local _12: Span
+    local _13: ()
+    local _14: Signal<I64>
+    local _15: I64
+    local _16: ()
+    local _17: Input<I64>
+    local _18: Task<()>
+    local _19: ()
+    local _20: Task<()>
+    local _21: ()
+    local _22: Signal<I64>
+    local _23: I64
+    local _24: ()
+    local _25: Input<I64>
+    local _26: Task<()>
+    local _27: ()
+    local _28: Task<()>
+    local _29: ()
+    local _30: Signal<Span>
+    local _31: Span
+    local _32: ()
+    local _33: Signal<I64>
+    local _34: I64
+    local _35: ()
+    local _36: Input<I64>
+    local _37: Task<()>
+    local _38: ()
+    local _39: Task<()>
+    local _40: ()
+    local _41: Signal<Span>
+    local _42: Span
+    local _43: ()
+    local _44: Signal<I64>
+    local _45: I64
+    local _46: ()
+    local _47: Signal<I64>
+    local _48: I64
+    local _49: ()
+    local _50: Signal<I64>
+    local _51: I64
+    local _52: ()
+  b0:
+    _3 = spawn reactor Terrain#0()
+    _0/terrain = _3
+    _4 = spawn reactor Chunks#1(_0/terrain, 1)
+    _1/chunks = _4
+    _5 = spawn reactor Players#2(_1/chunks, 16)
+    _2/players = _5
+    _6 = input 0 of _2/players
+    _7 = task builtin send(_6, 4)
+    await _7 -> _8, resume b1
+  b1:
+    _9 = task builtin sleep(50)
+    await _9 -> _10, resume b2
+  b2:
+    _11 = export 0 of _1/chunks
+    _12 = builtin latest(_11)
+    _13 = builtin print(_12)
+    _14 = export 0 of _0/terrain
+    _15 = builtin latest(_14)
+    _16 = builtin print(_15)
+    _17 = input 0 of _2/players
+    _18 = task builtin send(_17, 9)
+    await _18 -> _19, resume b3
+  b3:
+    _20 = task builtin sleep(20)
+    await _20 -> _21, resume b4
+  b4:
+    _22 = export 1 of _2/players
+    _23 = builtin latest(_22)
+    _24 = builtin print(_23)
+    _25 = input 0 of _2/players
+    _26 = task builtin send(_25, 20)
+    await _26 -> _27, resume b5
+  b5:
+    _28 = task builtin sleep(50)
+    await _28 -> _29, resume b6
+  b6:
+    _30 = export 0 of _1/chunks
+    _31 = builtin latest(_30)
+    _32 = builtin print(_31)
+    _33 = export 0 of _0/terrain
+    _34 = builtin latest(_33)
+    _35 = builtin print(_34)
+    _36 = input 0 of _2/players
+    _37 = task builtin send(_36, 40)
+    await _37 -> _38, resume b7
+  b7:
+    _39 = task builtin sleep(50)
+    await _39 -> _40, resume b8
+  b8:
+    _41 = export 0 of _1/chunks
+    _42 = builtin latest(_41)
+    _43 = builtin print(_42)
+    _44 = export 0 of _0/terrain
+    _45 = builtin latest(_44)
+    _46 = builtin print(_45)
+    _47 = export 1 of _0/terrain
+    _48 = builtin latest(_47)
+    _49 = builtin print(_48)
+    _50 = export 2 of _0/terrain
+    _51 = builtin latest(_50)
+    _52 = builtin print(_51)
+    return _52
+
+fn Terrain.on.load #4(_0/chunk: I64, _1/requested: I64, _2/resident: I64, _3/evicted: I64) -> ()
+    local _4: I64
+    local _5: Task<I64>
+  b0:
+    _4 = _1/requested add.i 1
+    _1/requested = _4
+    set slot 0 = _1/requested
+    _5 = task generate#0(_0/chunk)
+    emit _5 -> input 2
+    return ()
+
+fn Terrain.on.unload #5(_0/chunk: I64, _1/requested: I64, _2/resident: I64, _3/evicted: I64) -> ()
+    local _4: I64
+    local _5: I64
+  b0:
+    _4 = _2/resident sub.i 1
+    _2/resident = _4
+    set slot 1 = _2/resident
+    _5 = _3/evicted add.i 1
+    _3/evicted = _5
+    set slot 2 = _3/evicted
+    return ()
+
+fn Terrain.on.ready #6(_0/chunk: I64, _1/requested: I64, _2/resident: I64, _3/evicted: I64) -> ()
+    local _4: I64
+  b0:
+    _4 = _2/resident add.i 1
+    _2/resident = _4
+    set slot 1 = _2/resident
+    return ()
+
+fn Terrain.requested.init #7() -> I64
+  b0:
+    return 0
+
+fn Terrain.resident.init #8() -> I64
+  b0:
+    return 0
+
+fn Terrain.evicted.init #9() -> I64
+  b0:
+    return 0
+
+fn Terrain.live #10(_0/resident: I64) -> I64
+  b0:
+    return _0/resident
+
+fn Terrain.dropped #11(_0/evicted: I64) -> I64
+  b0:
+    return _0/evicted
+
+fn Terrain.pending #12(_0/requested: I64, _1/resident: I64, _2/evicted: I64) -> I64
+    local _3: I64
+    local _4: I64
+  b0:
+    _3 = _0/requested sub.i _1/resident
+    _4 = _3 sub.i _2/evicted
+    return _4
+
+fn Chunks.on.centred #13(_0/chunk: I64, _1/terrain: Terrain, _2/radius: I64, _3/lo: I64, _4/hi: I64) -> ()
+    local _5/was: Span
+    local _6: Span
+    local _7: I64
+    local _8: I64
+    local _9: I64
+    local _10: I64
+    local _11: Span
+    local _12: Task<()>
+  b0:
+    _6 = Span(_3/lo, _4/hi)
+    _5/was = _6
+    _7 = _0/chunk sub.i _2/radius
+    _3/lo = _7
+    set slot 2 = _3/lo
+    _8 = _0/chunk add.i _2/radius
+    _4/hi = _8
+    set slot 3 = _4/hi
+    _9 = _0/chunk sub.i _2/radius
+    _10 = _0/chunk add.i _2/radius
+    _11 = Span(_9, _10)
+    _12 = task reconcile#1(_1/terrain, _5/was, _11)
+    emit _12
+    return ()
+
+fn Chunks.lo.init #14() -> I64
+  b0:
+    return 1
+
+fn Chunks.hi.init #15() -> I64
+  b0:
+    return 0
+
+fn Chunks.window #16(_0/lo: I64, _1/hi: I64) -> Span
+    local _2: Span
+  b0:
+    _2 = Span(_0/lo, _1/hi)
+    return _2
+
+fn Chunks.active #17(_0/hi: I64, _1/lo: I64) -> I64
+    local _2: I64
+    local _3: I64
+  b0:
+    _2 = _0/hi sub.i _1/lo
+    _3 = _2 add.i 1
+    return _3
+
+fn Players.on.moved #18(_0/pos: I64, _1/chunks: Chunks, _2/size: I64, _3/x: I64, _4/chunk: I64, _5/joined: Bool, _6/crossings: I64) -> ()
+    local _7: ()
+    local _8: Bool
+    local _9: Bool
+    local _10: I64
+    local _11: Bool
+    local _12: I64
+    local _13: I64
+    local _14: I64
+    local _15: Task<()>
+  b0:
+    _3/x = _0/pos
+    set slot 2 = _3/x
+    _9 = not _5/joined
+    _8 = _9
+    branch _8 ? b2 : b1
+  b1:
+    _10 = _0/pos div.i _2/size
+    _11 = _10 ne _4/chunk
+    _8 = _11
+    goto b2
+  b2:
+    branch _8 ? b3 : b4
+  b3:
+    _5/joined = true
+    set slot 4 = _5/joined
+    _12 = _0/pos div.i _2/size
+    _4/chunk = _12
+    set slot 3 = _4/chunk
+    _13 = _6/crossings add.i 1
+    _6/crossings = _13
+    set slot 5 = _6/crossings
+    _14 = _0/pos div.i _2/size
+    _15 = task recentre#2(_1/chunks, _14)
+    emit _15
+    _7 = ()
+    goto b5
+  b4:
+    _7 = ()
+    goto b5
+  b5:
+    return _7
+
+fn Players.x.init #19() -> I64
+  b0:
+    return 0
+
+fn Players.chunk.init #20() -> I64
+  b0:
+    return 0
+
+fn Players.joined.init #21() -> Bool
+  b0:
+    return false
+
+fn Players.crossings.init #22() -> I64
+  b0:
+    return 0
+
+fn Players.at #23(_0/x: I64) -> I64
+  b0:
+    return _0/x
+
+fn Players.moves #24(_0/crossings: I64) -> I64
+  b0:
+    return _0/crossings
+
+=== graph ===
+reactor Terrain #0()
+    node 0 requested: I64 state slot 0 init Terrain.requested.init#7 <- []
+    node 1 resident: I64 state slot 1 init Terrain.resident.init#8 <- []
+    node 2 evicted: I64 state slot 2 init Terrain.evicted.init#9 <- []
+    node 3 live: I64 signal Terrain.live#10 export <- [resident]
+    node 4 dropped: I64 signal Terrain.dropped#11 export <- [evicted]
+    node 5 pending: I64 signal Terrain.pending#12 export <- [requested, resident, evicted]
+    order [requested, resident, evicted, live, dropped, pending]
+    input 0 load: I64 capacity 64 overflow reject handler Terrain.on.load#4
+        plan [requested, pending]
+    input 1 unload: I64 capacity 64 overflow reject handler Terrain.on.unload#5
+        plan [resident, evicted, live, dropped, pending]
+    input 2 ready: I64 capacity 64 overflow reject handler Terrain.on.ready#6
+        plan [resident, live, pending]
+    exports [live, dropped, pending]
+
+reactor Chunks #1(Terrain, I64)
+    node 0 terrain: Terrain param slot 0 arg 0 <- []
+    node 1 radius: I64 param slot 1 arg 1 <- []
+    node 2 lo: I64 state slot 2 init Chunks.lo.init#14 <- []
+    node 3 hi: I64 state slot 3 init Chunks.hi.init#15 <- []
+    node 4 window: Span signal Chunks.window#16 export <- [lo, hi]
+    node 5 active: I64 signal Chunks.active#17 export <- [hi, lo]
+    order [terrain, radius, lo, hi, window, active]
+    input 0 centred: I64 capacity 16 overflow reject handler Chunks.on.centred#13
+        plan [lo, hi, window, active]
+    exports [window, active]
+
+reactor Players #2(Chunks, I64)
+    node 0 chunks: Chunks param slot 0 arg 0 <- []
+    node 1 size: I64 param slot 1 arg 1 <- []
+    node 2 x: I64 state slot 2 init Players.x.init#19 <- []
+    node 3 chunk: I64 state slot 3 init Players.chunk.init#20 <- []
+    node 4 joined: Bool state slot 4 init Players.joined.init#21 <- []
+    node 5 crossings: I64 state slot 5 init Players.crossings.init#22 <- []
+    node 6 at: I64 signal Players.at#23 export <- [x]
+    node 7 moves: I64 signal Players.moves#24 export <- [crossings]
+    order [chunks, size, x, chunk, joined, crossings, at, moves]
+    input 0 moved: I64 capacity 64 overflow reject handler Players.on.moved#18
+        plan [x, chunk, joined, crossings, at, moves]
+    exports [at, moves]
+
+=== output ===
+Span(lo: -1, hi: 1)
+3
+1
+Span(lo: 0, hi: 2)
+3
+Span(lo: 1, hi: 3)
+3
+2
+0
+=== result ===
+()
+=== trace ===
+0ms t0 spawn main root
+0ms t0 resume
+0ms R0 create Terrain in t0
+0ms R0 publish 0
+0ms R1 create Chunks in t0
+0ms R1 publish 0
+0ms R2 create Players in t0
+0ms R2 publish 0
+0ms t0 park timer 50ms
+0ms R2 turn 0 moved
+0ms R2 commit x
+0ms R2 commit chunk
+0ms R2 commit joined
+0ms R2 commit crossings
+0ms R2 recompute at
+0ms R2 recompute moves
+0ms R2 publish 1
+0ms t1 spawn recentre in t0
+0ms R2 effect recentre t1
+0ms t1 resume
+0ms t1 done
+0ms R1 turn 0 centred
+0ms R1 commit lo
+0ms R1 commit hi
+0ms R1 recompute window
+0ms R1 recompute active
+0ms R1 publish 1
+0ms t2 spawn reconcile in t0
+0ms R1 effect reconcile t2
+0ms t2 resume
+0ms t2 done
+0ms R0 turn 0 load
+0ms R0 commit requested
+0ms R0 recompute pending
+0ms R0 publish 1
+0ms t3 spawn generate in t0
+0ms R0 effect generate t3 -> ready
+0ms t3 resume
+0ms t3 park timer 10ms
+0ms R0 turn 1 load
+0ms R0 commit requested
+0ms R0 recompute pending
+0ms R0 publish 2
+0ms t4 spawn generate in t0
+0ms R0 effect generate t4 -> ready
+0ms t4 resume
+0ms t4 park timer 10ms
+0ms R0 turn 2 load
+0ms R0 commit requested
+0ms R0 recompute pending
+0ms R0 publish 3
+0ms t5 spawn generate in t0
+0ms R0 effect generate t5 -> ready
+0ms t5 resume
+0ms t5 park timer 10ms
+10ms -- clock
+10ms t3 resume
+10ms t3 done
+10ms t4 resume
+10ms t4 done
+10ms t5 resume
+10ms t5 done
+10ms R0 turn 3 ready
+10ms R0 commit resident
+10ms R0 recompute live
+10ms R0 recompute pending
+10ms R0 publish 4
+10ms R0 turn 4 ready
+10ms R0 commit resident
+10ms R0 recompute live
+10ms R0 recompute pending
+10ms R0 publish 5
+10ms R0 turn 5 ready
+10ms R0 commit resident
+10ms R0 recompute live
+10ms R0 recompute pending
+10ms R0 publish 6
+50ms -- clock
+50ms t0 resume
+50ms t0 park timer 70ms
+50ms R2 turn 1 moved
+50ms R2 commit x
+50ms R2 recompute at
+50ms R2 recompute moves
+50ms R2 publish 2
+70ms -- clock
+70ms t0 resume
+70ms t0 park timer 120ms
+70ms R2 turn 2 moved
+70ms R2 commit x
+70ms R2 commit chunk
+70ms R2 commit joined
+70ms R2 commit crossings
+70ms R2 recompute at
+70ms R2 recompute moves
+70ms R2 publish 3
+70ms t6 spawn recentre in t0
+70ms R2 effect recentre t6
+70ms t6 resume
+70ms t6 done
+70ms R1 turn 1 centred
+70ms R1 commit lo
+70ms R1 commit hi
+70ms R1 recompute window
+70ms R1 recompute active
+70ms R1 publish 2
+70ms t7 spawn reconcile in t0
+70ms R1 effect reconcile t7
+70ms t7 resume
+70ms t7 done
+70ms R0 turn 6 unload
+70ms R0 commit resident
+70ms R0 commit evicted
+70ms R0 recompute live
+70ms R0 recompute dropped
+70ms R0 recompute pending
+70ms R0 publish 7
+70ms R0 turn 7 load
+70ms R0 commit requested
+70ms R0 recompute pending
+70ms R0 publish 8
+70ms t8 spawn generate in t0
+70ms R0 effect generate t8 -> ready
+70ms t8 resume
+70ms t8 park timer 80ms
+80ms -- clock
+80ms t8 resume
+80ms t8 done
+80ms R0 turn 8 ready
+80ms R0 commit resident
+80ms R0 recompute live
+80ms R0 recompute pending
+80ms R0 publish 9
+120ms -- clock
+120ms t0 resume
+120ms t0 park timer 170ms
+120ms R2 turn 3 moved
+120ms R2 commit x
+120ms R2 commit chunk
+120ms R2 commit joined
+120ms R2 commit crossings
+120ms R2 recompute at
+120ms R2 recompute moves
+120ms R2 publish 4
+120ms t9 spawn recentre in t0
+120ms R2 effect recentre t9
+120ms t9 resume
+120ms t9 done
+120ms R1 turn 2 centred
+120ms R1 commit lo
+120ms R1 commit hi
+120ms R1 recompute window
+120ms R1 recompute active
+120ms R1 publish 3
+120ms t10 spawn reconcile in t0
+120ms R1 effect reconcile t10
+120ms t10 resume
+120ms t10 done
+120ms R0 turn 9 unload
+120ms R0 commit resident
+120ms R0 commit evicted
+120ms R0 recompute live
+120ms R0 recompute dropped
+120ms R0 recompute pending
+120ms R0 publish 10
+120ms R0 turn 10 load
+120ms R0 commit requested
+120ms R0 recompute pending
+120ms R0 publish 11
+120ms t11 spawn generate in t0
+120ms R0 effect generate t11 -> ready
+120ms t11 resume
+120ms t11 park timer 130ms
+130ms -- clock
+130ms t11 resume
+130ms t11 done
+130ms R0 turn 11 ready
+130ms R0 commit resident
+130ms R0 recompute live
+130ms R0 recompute pending
+130ms R0 publish 12
+170ms -- clock
+170ms t0 resume
+170ms R0 stop
+170ms R1 stop
+170ms R2 stop
+170ms t0 done
