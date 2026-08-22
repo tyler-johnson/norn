@@ -112,7 +112,8 @@ Alternatives considered:
   outermost scope — which always existed as a backstop — is the right default owner, and the
   mandatory wrapper was pure ceremony.)
 - **Reactors** — static graphs only: `input` with declared capacity and overflow policy, `state`,
-  `signal`, `on` handlers, `after` effect requests, `export`, `latest`, and `send`.
+  `signal`, `on` handlers, an `init` startup turn, `after` effect requests, `export`, `latest`, and
+  `send`.
   A reactor has an authority set as a task does: the union of what its handlers reach, inferred
   like any other, and a spawner reaches all of it through the handle.
 
@@ -1151,67 +1152,101 @@ Ordered roughly by when it becomes worth doing, not by importance:
     seen from the other side; and whether the compiler should emit the system-level edge set —
     `norn graph --system` — now that `is`, `conform`, and `as` between them keep every conformance
     enumerable from the source.
-14. **The init turn.** Raised 2026-08-22. A reactor can derive at creation but cannot *act* there:
-    whoever spawns it must perform its startup, which means the spawner knows its protocol. The
-    gap is narrow and the fix is narrower than it first looks, because creation is already a turn.
-    `create_reactor` fills slots from the declared initialisers, runs one pass over `order`, and
-    publishes version 0 — its own comment says "the same pass a turn runs, over `order` instead of
-    a plan." What it lacks is a handler body and the effect launch every other turn ends with.
-    `after` is the whole of the point: an `init` that could not request an effect would only
-    respell a state initialiser.
+14. **The init turn — landed.** Raised and shipped 2026-08-22. A reactor could derive at creation
+    but not *act* there: whoever spawned it had to perform its startup, which meant the spawner knew
+    its protocol. The gap was narrow and the fix narrower than it first looked, because creation is
+    already a turn. `create_reactor` fills slots from the declared initialisers, runs one pass over
+    `order`, and publishes version 0 — its own comment says "the same pass a turn runs, over `order`
+    instead of a plan." What it lacked was a handler body and the effect launch every other turn
+    ends with. `after` was the whole of the point: an `init` that could not request an effect would
+    only respell a state initialiser.
 
     So the model adds no publish. **`publish 0` already is the init turn**, and an `init` block
     supplies the body it never had: at creation, slots take their declared values, `init` runs,
-    propagation settles `order`, version 0 publishes, effects launch. A reactor without `init`
-    skips the second step, which is exactly today — no snapshot in the corpus moves a byte, and the
-    differential oracle sees nothing. Folding into version 0 rather than queueing a turn 0 is what
-    the existing invariant wants: `create_reactor` publishes at creation so that "there is never a
-    moment when a handle exists and has no snapshot behind it", and a queued init turn would
-    reintroduce exactly that moment in a subtler form — `latest` would stay total while returning
-    the value `init` existed to correct. Creation therefore stays synchronous and `spawn reactor`
-    hands back a reactor that has already run. That it now launches effects is not a new kind of
-    work: `spawn reactor` already runs user code and already returns `Result<_, Trap>`, and
-    `launch_effect` creates a task without parking, so nothing about it suspends.
+    propagation settles `order`, version 0 publishes, effects launch. A reactor without `init` skips
+    the second step, which is exactly today — and the prediction held to the byte: blessing the
+    reactor corpus after the change rewrote no existing snapshot, and the differential oracle saw
+    nothing. Folding into version 0 rather than queueing a turn 0 is what the existing invariant
+    wants: `create_reactor` publishes at creation so that "there is never a moment when a handle
+    exists and has no snapshot behind it", and a queued init turn would reintroduce exactly that
+    moment in a subtler form — `latest` would stay total while returning the value `init` existed to
+    correct. Creation therefore stays synchronous and `spawn reactor` hands back a reactor that has
+    already run. That it now launches effects is not a new kind of work: `spawn reactor` already ran
+    user code and already returned `Result<_, Trap>`, and `launch_effect` creates a task without
+    parking, so nothing about it suspends. One ordering moved to make room: `attach_reactor` now
+    runs *above* the effect launch rather than after the publish, so the scope owns the reactor
+    before any effect of its exists.
 
     **The spelling is `init { }`, not `on init`.** `on` declares an input — `merged-handlers.norn`
     leans on precisely that, where the handler's queue clause is what brings the input into being —
-    and nothing can send to `init`: no message, no capacity, no overflow, and exactly one run. It
-    should be **contextual** rather than reserved, on the `sink` precedent: every reactor member
-    already starts with a keyword, so `init` in member position is unambiguous without burning a
-    word that `fn init()` and `state init: Config` have every right to. It is free today — absent
-    from `lex.rs`'s `RESERVED` and used as an identifier nowhere in `examples/` or `std/`.
+    and nothing can send to `init`: no message, no capacity, no overflow, and exactly one run. It is
+    **contextual** rather than reserved, on the `sink` precedent: every reactor member already
+    starts with a keyword, so `init` in member position is unambiguous without burning a word that
+    `fn init()` and `state init: Config` have every right to. `RESERVED` is untouched, the parser
+    dispatches on a bare `TokenKind::Ident("init")`, and four tests in `norn-syntax/tests/rules.rs`
+    pin the member form, the round trip, that `fn init` and `state init: I64` still parse as names,
+    and that a second `init` parses — a checker question, not a grammar one, exactly as on `On`.
 
     State initialisers stay at their declarations. Every slot needs a value before propagation, and
     a declaration-site initialiser guarantees that structurally, where a body is a statement
     sequence that may assign on one branch of an `if` and not the other — making it the sole source
-    would buy nothing and cost definite-assignment analysis. Two further things fall out free. Init
+    would buy nothing and cost definite-assignment analysis. Two further things fell out free. Init
     needs no plan: its propagation *is* `order`, the pass creation already runs, and per-input plans
     stay per-input. And init may not read a signal, by the rule that governs every handler and the
     rule that governs every state initialiser (`DESIGN.md` §3 — a `state` initialiser "may not call
     one, because it runs before any turn has given the nodes it derives from a value"); one reason
-    now covers both. `check_turns` and `check/uses.rs` treat it as another handler, the latter with
-    the `after`-head-call subtlety already documented on item 8. `after` itself needs nothing
-    new: `check_after` gates on one flag, `in_handler`, set for a member where `reactor.rs`
-    enters a handler, and the completion arrow resolves against the reactor's own inputs
-    exactly as it does in an `on` body — so `init { after load(lo, hi) -> loaded }` starts the
-    reactor's own state machine from creation, which is the shape most init bodies want. Only
-    the diagnostic moves: "`after` is only available inside an `on` handler" has to name
-    `init` as well.
+    covers both.
+
+    What it cost, layer by layer, is the measure of how narrow the gap was. `ast::MemberKind::Init`
+    and one parser arm. `hir::ReactorDef.init: Option<FnId>`, declared as `<Reactor>.init` and
+    checked through the *existing* handler path minus the message binding — `in_handler = true` is
+    what makes `after` legal and slots writable — plus a spanned refusal of the second `init`. Two
+    one-line pushes in the checker passes: into `check_turns`'s `turn_fns`, so init is subject to no
+    loops, no recursion, no `send`, no `latest`; and into `check/uses.rs`'s `members_of`, so its
+    capabilities join the reactor's union. `check_effect_backpressure` needed *nothing* — it
+    iterates every non-inert fn and collects `after_roots` from each body, so an init member fn is
+    picked up for free — and `init-rules.norn` proves that rather than assuming it. `nir::Reactor`
+    carries the id through; `verify_turns` treats it as a handler. `ReactorSpec.has_init`, a
+    `Graph<V>::init` beside `handle`, and `Event::Init` rendering as one `init` line, emitted only
+    where a spec has a body. Both engines implement the new method — the interpreter mirroring
+    `handle` minus the message, the emitter an `fn init` arm set beside `create`/`handle` —
+    and the differential oracle agrees on the corpus example and on a slot-less reactor besides.
+
+    The graph printer got the line the item asked for, above the inputs and with no `plan` beneath
+    it, because init's plan is the `order` printed directly above:
+    `init handler Cache.init#8`. The lowered name landed as `Chunks.init#N` as designed, adjacent to
+    the state initialisers' `Chunks.lo.init#N` and distinguishable by the field name in the middle.
+    And the diagnostic moved exactly as predicted, one snapshot line in
+    `effect-outside-handler.norn.snap`: "`after` is only available inside an `on` handler or
+    `init`". One the item had not named moved with it — `LocalRole::State`'s "can only be assigned
+    inside an `on` handler" gates on the same flag and had the same half-truth in it.
+
+    `examples/reactors/init.norn` is the worked example: an `init` that both commits a cell and
+    requests an effect with a completion arrow, so the trace reads `create`, `init`, the commits,
+    `publish 0`, then `effect load t1 -> loaded` — and the message turns after it still start at
+    `turn 0`, because creation is the turn before the numbered ones.
+    `examples/reactor-errors/init-rules.norn` pins the four refusals in one file: a `loop` in
+    `init`, a `send` in `init`, an `after` reaching a `wait` port, and the second `init`.
 
     **What it is not for.** `examples/reactors/chunk-systems.norn`'s `joined: Bool` is a typing bug,
     not evidence for this item: `state chunk: I64 = 0` asserts a chunk no turn established, and
     `Option<I64>` states the truth with no language change. The contrast is `posts.norn`'s
     `busy: Bool = false`, where `false` genuinely holds at spawn. "The initial state is a lie" is a
-    typing problem with an existing answer; "a reactor cannot act at spawn" is this one.
+    typing problem with an existing answer; "a reactor cannot act at spawn" was this one. The fix is
+    still owed and is still a separate change.
 
-    The half this item deliberately leaves out is `self`. A reactor has no handle to itself —
-    there is no `self` anywhere in `norn-syntax` or `norn-hir`, and a trait's `handle: Self` is a
-    type with an explicitly named parameter — so `init` can reach downstream peers through its
-    constructor parameters but cannot register itself with anything. That is the half item 13 needs
-    for consumer-side registration, and it inherits item 13's gate: a self-handle escaping into
-    another reactor's collection is precisely the case liveness must be exposed before. The
-    `init`-without-`self` half stands alone and should not wait behind interfaces. Open when it is
-    built: the graph printer wants a line above the inputs, indexless and policy-less, whose plan is
-    `order`; and the lowered name `Chunks.init#N` sits adjacent to the state initialisers' existing
-    `Chunks.lo.init#N`, distinguishable by the field name in the middle but worth choosing on
-    purpose rather than colliding into.
+    The half this item deliberately left out is `self`. A reactor has no handle to itself — there is
+    no `self` anywhere in `norn-syntax` or `norn-hir`, and a trait's `handle: Self` is a type with an
+    explicitly named parameter — so `init` can reach downstream peers through its constructor
+    parameters but cannot register itself with anything. That is the half item 13 needs for
+    consumer-side registration, and it inherits item 13's gate: a self-handle escaping into another
+    reactor's collection is precisely the case liveness must be exposed before. The
+    `init`-without-`self` half stands alone and did not wait behind interfaces.
+
+    Two unrelated defects surfaced while building it, neither this item's and neither introduced by
+    it — both reproduce with `init` deleted, and both are recorded here only so they are not lost. A
+    reactor with a signal and *zero* slots panics at creation on `graph.rs`'s "a reactor with a
+    signal has at least one slot", which is a real shape the corpus happens never to write. And
+    `print(7)` inside a `task fn`, in a program where no `I64` otherwise crosses an engine boundary,
+    generates a call to a `render_top_i64` the emitter's registry never emits — a boundary-key gap
+    with no reactor in it at all.
