@@ -210,6 +210,10 @@ impl Checker {
         // body reaches, and a written `uses { … }` is checked against that rather than consulted
         // while the body is walked.
         self.infer_uses();
+        // The `wait` rule, on the same settled call graph: whether `Overflow::Wait` is sound is
+        // a fact about where the sender stands, and after monomorphization every `after` operand
+        // names a concrete function to walk from.
+        self.check_effect_backpressure();
         // Sink inference runs immediately before `check_moves`, on the same tables it will
         // enforce: every executable body is concrete by now, so a mode is a per-instance fact.
         self.infer_sinks();

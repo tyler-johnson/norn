@@ -36,7 +36,7 @@ reactor ByAuthor #1(Subscriber)
     node 7 count: I64 signal ByAuthor.count#42 export <- [total]
     node 8 version: I64 signal ByAuthor.version#43 export <- [revision]
     order [subscriber, rows, total, revision, queued, busy, entries, count, version]
-    input 0 arrived: Delta capacity 64 overflow wait handler ByAuthor.on.arrived#38
+    input 0 arrived: Delta capacity 64 overflow reject handler ByAuthor.on.arrived#38
         plan [queued, busy]
     input 1 applied: Indexed capacity 8 overflow wait handler ByAuthor.on.applied#39
         plan [rows, total, revision, queued, busy, entries, count, version]
@@ -1256,7 +1256,7 @@ reactor ByAuthor #1(Subscriber)
     node 7 count: I64 signal ByAuthor.count#42 export <- [total]
     node 8 version: I64 signal ByAuthor.version#43 export <- [revision]
     order [subscriber, rows, total, revision, queued, busy, entries, count, version]
-    input 0 arrived: Delta capacity 64 overflow wait handler ByAuthor.on.arrived#38
+    input 0 arrived: Delta capacity 64 overflow reject handler ByAuthor.on.arrived#38
         plan [queued, busy]
     input 1 applied: Indexed capacity 8 overflow wait handler ByAuthor.on.applied#39
         plan [rows, total, revision, queued, busy, entries, count, version]

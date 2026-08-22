@@ -130,7 +130,10 @@ impl<'e, V: Clone> Core<'e, V> {
         // ReactorMailbox → a later turn`, as one field. Only *finishing* delivers — `cancel` does
         // not — which is what makes a cancelled effect observable as a cancel with no matching turn.
         if let Some(completion) = self.state(task).completion {
-            self.deliver(completion, value, task);
+            // `Pending` is not a failure and there is nothing here to do about it: the value is
+            // parked on a full `wait` mailbox and the reactor's next turn enqueues it. There is no
+            // task left to park either way — this one is already `Done` and detached.
+            let _parked = self.deliver(completion, value);
         }
     }
 

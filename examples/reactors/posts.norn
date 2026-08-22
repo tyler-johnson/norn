@@ -87,6 +87,9 @@ reactor PostPartition(index: ByAuthor) {
     }
 
     // Pressure is a value: how many deltas have committed here but not yet reached the index.
+    // This is also the whole of the flow control on the partition→index seam. It cannot be the
+    // index's queue policy: `deliver` below is an effect task, and parking one of those does not
+    // reach back to the reactor that spawned it — see `arrived`'s `reject`.
     export signal backlog = seq - acked
     export signal history = journal
 }
@@ -109,7 +112,12 @@ reactor ByAuthor(subscriber: Subscriber) {
     state queued: List<Delta> = List.Nil
     state busy: Bool = false
 
-    on arrived(delta: Delta) [capacity: 64, overflow: wait] {
+    // `reject`, not `wait`, and the reason is the seam rather than this reactor. `arrived` is
+    // fed by `deliver`, which is `PostPartition`'s effect task — a fresh one per turn — so
+    // parking it would slow nothing down and grow a waiter list instead of a mailbox. The
+    // checker refuses that position, and the flow control it points at is already here: the
+    // partition's `delivered` ack and its exported `backlog` are the credit the producer reads.
+    on arrived(delta: Delta) [capacity: 64, overflow: reject] {
         if busy {
             queued = List.Cons(delta, queued)
         } else {

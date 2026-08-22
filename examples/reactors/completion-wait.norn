@@ -1,0 +1,55 @@
+// A completion arriving at a full `wait` input, which is the one sender that cannot be parked.
+//
+// `send` from a task is backpressure: the task suspends, and when the mailbox drains it wakes and
+// re-asks. An `after … -> ready` completion has no such task left. The effect has *finished* —
+// `finish` sets the status to `Done` and detaches before it delivers — so there is nobody to
+// suspend, nobody to wake, and nothing to re-ask. The runtime therefore parks the value itself and
+// enqueues it when a later turn makes room, which is what this file pins.
+//
+// The arrangement forces the collision. `ready` has room for one message; three turns each request
+// a `generate` and all three sleeps expire on the same tick, so three completions land while the
+// reactor has taken no turn between them. Two of them meet a full mailbox.
+//
+// `pending` is the claim, as a signal: every requested chunk has either landed or is still in
+// flight, so it settles to zero exactly when nothing was dropped on the way in.
+
+task fn generate(n: I64) -> I64 {
+    await sleep(10)
+    n * n
+}
+
+reactor Squares() {
+    input start: I64 [capacity: 8, overflow: reject]
+
+    // Capacity one, so the second completion of the three has nowhere to go.
+    input ready: I64 [capacity: 1, overflow: wait]
+
+    state requested: I64 = 0
+    state landed: I64 = 0
+    state total: I64 = 0
+
+    on start(n) {
+        requested = requested + 1
+        after generate(n) -> ready
+    }
+
+    on ready(square) {
+        landed = landed + 1
+        total = total + square
+    }
+
+    export signal count = landed
+    export signal sum = total
+    export signal pending = requested - landed
+}
+
+task fn main() -> () {
+    let squares = spawn reactor Squares()
+    await send(squares.start, 2)
+    await send(squares.start, 3)
+    await send(squares.start, 4)
+    await sleep(100)
+    print(latest(squares.count))
+    print(latest(squares.sum))
+    print(latest(squares.pending))
+}

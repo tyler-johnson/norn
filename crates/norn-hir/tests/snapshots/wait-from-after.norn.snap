@@ -1,0 +1,23 @@
+error: this reaches `forward`, which sends to `Sink.absorbed`, a `wait` input
+  --> wait-from-after.norn:56:9
+   |
+56 |         after forward(sink, value)
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^ an effect cannot be given backpressure
+  --> wait-from-after.norn:31:11
+   |
+31 |     await send(sink.absorbed, value)
+   |           ^^^^^^^^^^^^^^^^^^^^^^^^^^ a `wait` input parks its sender, and this sender is a fresh task every turn
+   = note: backpressure propagates from a task into a reactor and never from a reactor to a reactor: a reactor is driven by its inbox, so parking its effect task never slows it down and the waiter list grows instead
+   = note: give the input a larger queue with an observable overflow policy, or add a credit or ack input on the producer, which between reactors is the only place flow control can honestly live
+
+error: this reaches `hand_off`, which sends to `Sink.absorbed`, a `wait` input
+  --> wait-from-after.norn:57:9
+   |
+57 |         after relay(sink, value)
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^ an effect cannot be given backpressure
+  --> wait-from-after.norn:40:11
+   |
+40 |     await send(sink.absorbed, value)
+   |           ^^^^^^^^^^^^^^^^^^^^^^^^^^ a `wait` input parks its sender, and this sender is a fresh task every turn
+   = note: backpressure propagates from a task into a reactor and never from a reactor to a reactor: a reactor is driven by its inbox, so parking its effect task never slows it down and the waiter list grows instead
+   = note: give the input a larger queue with an observable overflow policy, or add a credit or ack input on the producer, which between reactors is the only place flow control can honestly live

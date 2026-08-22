@@ -1,0 +1,216 @@
+=== nir ===
+enum Option #0 (None, Some(?))
+enum Result #1 (Ok(?), Err(?))
+enum IoError #2 (NotFound, Denied, InUse, Refused, Closed, Other(String))
+
+reactor Squares #0()
+    node 0 requested: I64 state slot 0 init Squares.requested.init#4 <- []
+    node 1 landed: I64 state slot 1 init Squares.landed.init#5 <- []
+    node 2 total: I64 state slot 2 init Squares.total.init#6 <- []
+    node 3 count: I64 signal Squares.count#7 export <- [landed]
+    node 4 sum: I64 signal Squares.sum#8 export <- [total]
+    node 5 pending: I64 signal Squares.pending#9 export <- [requested, landed]
+    order [requested, landed, total, count, sum, pending]
+    input 0 start: I64 capacity 8 overflow reject handler Squares.on.start#2
+        plan [requested, pending]
+    input 1 ready: I64 capacity 1 overflow wait handler Squares.on.ready#3
+        plan [landed, total, count, sum, pending]
+    exports [count, sum, pending]
+
+task fn generate #0(_0/n: I64) -> I64
+    local _1: Task<()>
+    local _2: ()
+    local _3: I64
+  b0:
+    _1 = task builtin sleep(10)
+    await _1 -> _2, resume b1
+  b1:
+    _3 = _0/n mul.i _0/n
+    return _3
+
+task fn main #1() -> ()
+    local _0/squares: Squares
+    local _1: Squares
+    local _2: Input<I64>
+    local _3: Task<()>
+    local _4: ()
+    local _5: Input<I64>
+    local _6: Task<()>
+    local _7: ()
+    local _8: Input<I64>
+    local _9: Task<()>
+    local _10: ()
+    local _11: Task<()>
+    local _12: ()
+    local _13: Signal<I64>
+    local _14: I64
+    local _15: ()
+    local _16: Signal<I64>
+    local _17: I64
+    local _18: ()
+    local _19: Signal<I64>
+    local _20: I64
+    local _21: ()
+  b0:
+    _1 = spawn reactor Squares#0()
+    _0/squares = _1
+    _2 = input 0 of _0/squares
+    _3 = task builtin send(_2, 2)
+    await _3 -> _4, resume b1
+  b1:
+    _5 = input 0 of _0/squares
+    _6 = task builtin send(_5, 3)
+    await _6 -> _7, resume b2
+  b2:
+    _8 = input 0 of _0/squares
+    _9 = task builtin send(_8, 4)
+    await _9 -> _10, resume b3
+  b3:
+    _11 = task builtin sleep(100)
+    await _11 -> _12, resume b4
+  b4:
+    _13 = export 0 of _0/squares
+    _14 = builtin latest(_13)
+    _15 = builtin print(_14)
+    _16 = export 1 of _0/squares
+    _17 = builtin latest(_16)
+    _18 = builtin print(_17)
+    _19 = export 2 of _0/squares
+    _20 = builtin latest(_19)
+    _21 = builtin print(_20)
+    return _21
+
+fn Squares.on.start #2(_0/n: I64, _1/requested: I64, _2/landed: I64, _3/total: I64) -> ()
+    local _4: I64
+    local _5: Task<I64>
+  b0:
+    _4 = _1/requested add.i 1
+    _1/requested = _4
+    set slot 0 = _1/requested
+    _5 = task generate#0(_0/n)
+    emit _5 -> input 1
+    return ()
+
+fn Squares.on.ready #3(_0/square: I64, _1/requested: I64, _2/landed: I64, _3/total: I64) -> ()
+    local _4: I64
+    local _5: I64
+  b0:
+    _4 = _2/landed add.i 1
+    _2/landed = _4
+    set slot 1 = _2/landed
+    _5 = _3/total add.i _0/square
+    _3/total = _5
+    set slot 2 = _3/total
+    return ()
+
+fn Squares.requested.init #4() -> I64
+  b0:
+    return 0
+
+fn Squares.landed.init #5() -> I64
+  b0:
+    return 0
+
+fn Squares.total.init #6() -> I64
+  b0:
+    return 0
+
+fn Squares.count #7(_0/landed: I64) -> I64
+  b0:
+    return _0/landed
+
+fn Squares.sum #8(_0/total: I64) -> I64
+  b0:
+    return _0/total
+
+fn Squares.pending #9(_0/requested: I64, _1/landed: I64) -> I64
+    local _2: I64
+  b0:
+    _2 = _0/requested sub.i _1/landed
+    return _2
+
+=== graph ===
+reactor Squares #0()
+    node 0 requested: I64 state slot 0 init Squares.requested.init#4 <- []
+    node 1 landed: I64 state slot 1 init Squares.landed.init#5 <- []
+    node 2 total: I64 state slot 2 init Squares.total.init#6 <- []
+    node 3 count: I64 signal Squares.count#7 export <- [landed]
+    node 4 sum: I64 signal Squares.sum#8 export <- [total]
+    node 5 pending: I64 signal Squares.pending#9 export <- [requested, landed]
+    order [requested, landed, total, count, sum, pending]
+    input 0 start: I64 capacity 8 overflow reject handler Squares.on.start#2
+        plan [requested, pending]
+    input 1 ready: I64 capacity 1 overflow wait handler Squares.on.ready#3
+        plan [landed, total, count, sum, pending]
+    exports [count, sum, pending]
+
+=== output ===
+3
+29
+0
+=== result ===
+()
+=== trace ===
+0ms t0 spawn main root
+0ms t0 resume
+0ms R0 create Squares in t0
+0ms R0 publish 0
+0ms t0 park timer 100ms
+0ms R0 turn 0 start
+0ms R0 commit requested
+0ms R0 recompute pending
+0ms R0 publish 1
+0ms t1 spawn generate in t0
+0ms R0 effect generate t1 -> ready
+0ms t1 resume
+0ms t1 park timer 10ms
+0ms R0 turn 1 start
+0ms R0 commit requested
+0ms R0 recompute pending
+0ms R0 publish 2
+0ms t2 spawn generate in t0
+0ms R0 effect generate t2 -> ready
+0ms t2 resume
+0ms t2 park timer 10ms
+0ms R0 turn 2 start
+0ms R0 commit requested
+0ms R0 recompute pending
+0ms R0 publish 3
+0ms t3 spawn generate in t0
+0ms R0 effect generate t3 -> ready
+0ms t3 resume
+0ms t3 park timer 10ms
+10ms -- clock
+10ms t1 resume
+10ms t1 done
+10ms t2 resume
+10ms t2 done
+10ms R0 overflow ready wait
+10ms t3 resume
+10ms t3 done
+10ms R0 overflow ready wait
+10ms R0 turn 3 ready
+10ms R0 commit landed
+10ms R0 commit total
+10ms R0 recompute count
+10ms R0 recompute sum
+10ms R0 recompute pending
+10ms R0 publish 4
+10ms R0 turn 4 ready
+10ms R0 commit landed
+10ms R0 commit total
+10ms R0 recompute count
+10ms R0 recompute sum
+10ms R0 recompute pending
+10ms R0 publish 5
+10ms R0 turn 5 ready
+10ms R0 commit landed
+10ms R0 commit total
+10ms R0 recompute count
+10ms R0 recompute sum
+10ms R0 recompute pending
+10ms R0 publish 6
+100ms -- clock
+100ms t0 resume
+100ms R0 stop
+100ms t0 done

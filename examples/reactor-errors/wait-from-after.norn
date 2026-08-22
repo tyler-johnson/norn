@@ -1,0 +1,72 @@
+// `wait` is a position, not a policy the receiver chooses.
+//
+// `Overflow::Wait` parks the sender and keeps the message, which is real backpressure exactly when
+// the sender's own progress is what produces messages. From a reactor's effect task it is none:
+// `Source` is driven by its inbox, its effects are fire-and-forget, and a reactor that could stall
+// on its outbox would take no turns at all — so every `ticked` turn spawns another `forward`, the
+// parked ones pile up on `Sink.absorbed`'s waiter list, and nothing anywhere slows down. The
+// mailbox stays bounded because the waiter list is not.
+//
+// Three roots, so the reachability walk is what is being tested rather than one syntactic shape.
+
+reactor Sink() {
+    input absorbed: I64 [capacity: 4, overflow: wait]
+    input counted: I64 [capacity: 4, overflow: reject]
+
+    state total: I64 = 0
+
+    on absorbed(value) {
+        total = total + value
+    }
+
+    on counted(value) {
+        total = total + value
+    }
+
+    export signal sum = total
+}
+
+// The direct case: the task the `after` names is the one that sends.
+task fn forward(sink: Sink, value: I64) -> () {
+    await send(sink.absorbed, value)
+}
+
+// The reached case: two hops from the `after` to the send.
+task fn relay(sink: Sink, value: I64) -> () {
+    await hand_off(sink, value)
+}
+
+task fn hand_off(sink: Sink, value: I64) -> () {
+    await send(sink.absorbed, value)
+}
+
+// Legal: `counted` is a `reject` port, so an overflow there is an event the trace records rather
+// than a sender nobody can slow down.
+task fn tally(sink: Sink, value: I64) -> () {
+    await send(sink.counted, value)
+}
+
+reactor Source(sink: Sink) {
+    input ticked: I64 [capacity: 8, overflow: reject]
+
+    state seen: I64 = 0
+
+    on ticked(value) {
+        seen = seen + 1
+        after forward(sink, value)
+        after relay(sink, value)
+        after tally(sink, value)
+    }
+
+    export signal count = seen
+}
+
+task fn main() -> () {
+    let sink = spawn reactor Sink()
+    let ticker = spawn reactor Source(sink: sink)
+    // Legal: `main` is an ordinary task, so parking it is exactly what backpressure means.
+    await send(sink.absorbed, 1)
+    await send(ticker.ticked, 2)
+    await sleep(50)
+    print(latest(sink.sum))
+}

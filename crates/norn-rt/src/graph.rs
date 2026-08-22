@@ -143,9 +143,13 @@ pub(crate) struct Message<V> {
     pub value: V,
 }
 
-/// A sender parked on a full `wait` mailbox.
+/// A message parked on a full `wait` mailbox.
+///
+/// `task` is the sender to resume when there is room. `None` is a *completion*: an `after … ->
+/// input` result whose effect task has already finished, so there is nobody left to suspend and
+/// re-ask. That entry carries the whole message, and `wake_senders` enqueues it directly.
 struct Waiting<V> {
-    task: TaskId,
+    task: Option<TaskId>,
     input: usize,
     value: V,
 }
@@ -233,12 +237,16 @@ impl<'e, V: Clone> Core<'e, V> {
     }
 
     /// Put a message in a reactor's mailbox, honouring the declared overflow policy.
+    ///
+    /// `sender` is `None` for a completion, which has no task behind it to park. `Pending` still
+    /// means "not queued yet"; for a completion it means the value is waiting in `waiting` rather
+    /// than that anyone is suspended on it.
     pub(crate) fn send(
         &mut self,
         id: ReactorId,
         input: usize,
         value: V,
-        sender: TaskId,
+        sender: Option<TaskId>,
     ) -> Poll<()> {
         if !self.reactors[id.index()].alive {
             // The scope that owned it has closed. Nothing will ever read this, and the sender
@@ -246,11 +254,13 @@ impl<'e, V: Clone> Core<'e, V> {
             return Poll::Ready(());
         }
         // A sender parked on a full `wait` mailbox re-asks when it wakes, and finds its message
-        // already queued.
-        if let Some(at) = self.reactors[id.index()]
-            .waiting
-            .iter()
-            .position(|w| w.task == sender)
+        // already queued. A completion never matches: it has no task, so nothing can re-ask on its
+        // behalf and `wake_senders` is what drains it.
+        if let Some(sender) = sender
+            && let Some(at) = self.reactors[id.index()]
+                .waiting
+                .iter()
+                .position(|w| w.task == Some(sender))
         {
             if self.full(id, input) {
                 return Poll::Pending;
@@ -311,7 +321,9 @@ impl<'e, V: Clone> Core<'e, V> {
                     input,
                     value,
                 });
-                self.state_mut(sender).wait = Some(Wait::Mailbox(id));
+                if let Some(sender) = sender {
+                    self.state_mut(sender).wait = Some(Wait::Mailbox(id));
+                }
                 Poll::Pending
             }
         }
@@ -512,18 +524,40 @@ impl<'e, V: Clone> Core<'e, V> {
     ///
     /// Only a task that *finished* delivers. A cancelled one does not, which is what makes a
     /// cancelled effect observable as a cancel with no matching turn.
-    pub(crate) fn deliver(&mut self, completion: Completion, value: V, sender: TaskId) {
-        self.send(completion.reactor, completion.input, value, sender);
+    ///
+    /// The sender is `None` and that is the whole subtlety. `finish` has already marked the task
+    /// `Done` and detached it, so passing the task here would park a `Waiting` entry that `wake`
+    /// refuses to touch — the value would sit on the list forever, with no trap and no trace. The
+    /// returned `Poll` says which of the two happened: `Ready` queued it now, `Pending` parked it
+    /// on a full `wait` mailbox for `wake_senders` to enqueue when a turn makes room. Either way
+    /// the value is still in the runtime, which is the property this signature exists to state.
+    pub(crate) fn deliver(&mut self, completion: Completion, value: V) -> Poll<()> {
+        self.send(completion.reactor, completion.input, value, None)
     }
 
+    /// Let the list move now that a turn has made room.
+    ///
+    /// Walked in order and stopped at the first entry that cannot proceed, so the list is FIFO
+    /// across policies rather than per policy: a completion parked behind another completion does
+    /// not overtake it, and neither overtakes a parked task's message once that task re-asks.
+    /// A completion is enqueued here, because there is no task to resume and ask again; a parked
+    /// sender is only woken, and does its own enqueueing when it re-executes the suspension point.
     fn wake_senders(&mut self, id: ReactorId) {
-        let waiting: Vec<TaskId> = self.reactors[id.index()]
-            .waiting
-            .iter()
-            .map(|w| w.task)
-            .collect();
-        for task in waiting {
-            self.wake(task);
+        let mut at = 0;
+        while at < self.reactors[id.index()].waiting.len() {
+            match self.reactors[id.index()].waiting[at].task {
+                None => {
+                    if self.full(id, self.reactors[id.index()].waiting[at].input) {
+                        return;
+                    }
+                    let waiting = self.reactors[id.index()].waiting.remove(at);
+                    self.enqueue(id, waiting.input, waiting.value);
+                }
+                Some(task) => {
+                    self.wake(task);
+                    at += 1;
+                }
+            }
         }
     }
 
@@ -546,7 +580,7 @@ impl<'e, V: Clone> Core<'e, V> {
         }
         state.alive = false;
         state.mailbox.clear();
-        let waiting: Vec<TaskId> = state.waiting.drain(..).map(|w| w.task).collect();
+        let waiting: Vec<TaskId> = state.waiting.drain(..).filter_map(|w| w.task).collect();
         self.emit(Event::ReactorClosed { reactor: id });
         // A sender parked on a mailbox that will never drain has to be let go, or the program is
         // stuck waiting for a turn that cannot happen.
@@ -570,7 +604,7 @@ impl<'e, V: Clone> Cx<'_, 'e, V> {
     /// twice.
     pub fn send(&mut self, reactor: ReactorId, input: usize, value: V) -> Poll<()> {
         let sender = self.task();
-        self.core.send(reactor, input, value, sender)
+        self.core.send(reactor, input, value, Some(sender))
     }
 
     /// `latest(gate.snapshot)` — the last published value, without entering the reactor.

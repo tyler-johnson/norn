@@ -500,3 +500,211 @@ pub(super) fn reachable_cycle(calls: &[Vec<FnId>], start: FnId) -> Option<Vec<Fn
     }
     None
 }
+
+impl Checker {
+    /// A `send` to a `wait` port from anywhere an `after` can reach.
+    ///
+    /// `Overflow::Wait` parks the sender on a list that retains the message, which is real
+    /// backpressure exactly when the sender's own progress is what produces messages: a task
+    /// looping on `await send(players.moved, pos)` stops, so the socket stops being drained. From
+    /// a reactor's effect task it is no backpressure at all. A reactor is driven by its inbox and
+    /// its effects are fire-and-forget — it *cannot* stall on its outbox, since one that could
+    /// would take no turns and any cycle would deadlock — so it keeps taking turns and spawns a
+    /// fresh task per turn while the earlier ones are parked. The mailbox stays bounded and the
+    /// waiter list absorbs the excess, which is the same memory with less clarity.
+    ///
+    /// So the rule is positional rather than about either end's identity: what makes `wait` sound
+    /// is where the sender stands, and an effect task stands nowhere that can be slowed down.
+    /// Refusing it costs nothing real — blocking there never saved the message, it queued the
+    /// sender instead.
+    ///
+    /// A `spawn` in a task loop has the same unbounded shape and stays legal, because `spawn` is
+    /// the developer saying they will not wait for this one. `after` is a reactor's only spelling
+    /// for leaving a turn, so there is no such declaration to read into it.
+    ///
+    /// Post-monomorphization, beside `infer_uses` and for its reason: every executable body is
+    /// concrete, templates are inert and skipped, and the `(span, message)` dedupe collapses the
+    /// per-instance duplicates. Pre-mono would work today only because nothing can reach an input
+    /// through a type parameter — which is exactly what item 13 would change.
+    pub(super) fn check_effect_backpressure(&mut self) {
+        let sends: Vec<Option<WaitSend>> = self
+            .program
+            .fns
+            .iter()
+            .map(|def| {
+                if def.inert {
+                    None
+                } else {
+                    first_wait_send(&self.program, &def.body)
+                }
+            })
+            .collect();
+        if sends.iter().all(Option::is_none) {
+            return;
+        }
+
+        let calls: Vec<Vec<FnId>> = self
+            .program
+            .fns
+            .iter()
+            .map(|def| {
+                let mut found = Vec::new();
+                if !def.inert {
+                    collect_calls(&def.body, &mut found);
+                }
+                found
+            })
+            .collect();
+
+        let mut errors: Vec<(usize, Diagnostic)> = Vec::new();
+        for index in 0..self.program.fns.len() {
+            if self.program.fns[index].inert {
+                continue;
+            }
+            let owner = self.fn_owner[index];
+            let mut roots = Vec::new();
+            after_roots(&self.program.fns[index].body, &mut roots);
+            for (span, root) in roots {
+                // The root itself counts, unlike the turn rules' `culprit != function` guard: the
+                // everyday shape is a one-line `task fn` whose whole body is the send, and no
+                // earlier pass has said anything about it.
+                let Some((culprit, send)) = reachable_wait_send(&calls, &sends, root) else {
+                    continue;
+                };
+                let name = self.program.fns[culprit.index()].name.clone();
+                let reactor = self.program.reactors[send.reactor.index()].name.clone();
+                let input = self.program.reactors[send.reactor.index()].inputs[send.input]
+                    .name
+                    .clone();
+                let mut diagnostic = Diagnostic::new(
+                    span,
+                    format!(
+                        "this reaches `{name}`, which sends to `{reactor}.{input}`, a `wait` input"
+                    ),
+                )
+                .label("an effect cannot be given backpressure");
+                // As everywhere else here: a secondary span renders against *this* file's text, so
+                // one pointing into another module travels as a note carrying the module name.
+                let culprit_owner = self.fn_owner[culprit.index()];
+                diagnostic = if culprit_owner == owner {
+                    diagnostic.secondary(
+                        send.span,
+                        "a `wait` input parks its sender, and this sender is a fresh task every turn",
+                    )
+                } else {
+                    diagnostic.note(format!(
+                        "a `wait` input parks its sender, and this sender is a fresh task every turn; `{name}` sends in {}",
+                        self.names[culprit_owner]
+                    ))
+                };
+                errors.push((
+                    owner,
+                    diagnostic
+                        .note("backpressure propagates from a task into a reactor and never from a reactor to a reactor: a reactor is driven by its inbox, so parking its effect task never slows it down and the waiter list grows instead")
+                        .note("give the input a larger queue with an observable overflow policy, or add a credit or ack input on the producer, which between reactors is the only place flow control can honestly live"),
+                ));
+            }
+        }
+        self.report(errors);
+    }
+}
+
+/// One `send` to a `wait` port: where it is written, and which port it names.
+#[derive(Clone, Copy)]
+pub(super) struct WaitSend {
+    span: Span,
+    reactor: ReactorId,
+    input: usize,
+}
+
+/// Every `after` in this body, as the statement to blame and the function it starts.
+///
+/// The head call is the root because `collect_calls` deliberately drops it: what a `task fn` does
+/// is not a property of the turn that requested it, which is the whole of why `after` is lazy. It
+/// is exactly the property *this* pass is about, so the closure has to be seeded with it by hand.
+/// An operand that is not a call names no function statically and starts no walk.
+pub(super) fn after_roots(expr: &Expr, out: &mut Vec<(Span, FnId)>) {
+    walk_stmts(expr, &mut |stmt| {
+        if let StmtKind::After { task, .. } = &stmt.kind
+            && let ExprKind::Call { callee, .. } = &task.kind
+        {
+            out.push((stmt.span, *callee));
+        }
+    });
+}
+
+/// Visit every statement an expression contains — `walk`'s traversal, statements instead of
+/// expressions.
+fn walk_stmts(expr: &Expr, visit: &mut impl FnMut(&Stmt)) {
+    walk(expr, &mut |expr| {
+        if let ExprKind::Block { stmts, .. } = &expr.kind {
+            for stmt in stmts {
+                visit(stmt);
+            }
+        }
+    });
+}
+
+/// The first `send` in this body whose target is a `wait` input.
+///
+/// Resolving the policy is always possible. `Ty::Input` carries only the message type, but it is
+/// unspellable — `resolve_ty` never produces one, and the only way to obtain one is
+/// `reactor.input` at the point of use — so a `send` target is written out as the port it is, and
+/// the reactor's own declaration says what that port promises.
+pub(super) fn first_wait_send(program: &Program, expr: &Expr) -> Option<WaitSend> {
+    let mut found = None;
+    walk(expr, &mut |expr| {
+        if found.is_some() {
+            return;
+        }
+        let ExprKind::Builtin {
+            builtin: Builtin::Send,
+            args,
+        } = &expr.kind
+        else {
+            return;
+        };
+        let Some(port) = args.first() else {
+            return;
+        };
+        let ExprKind::ReactorInput { reactor, index } = &port.kind else {
+            return;
+        };
+        let Ty::Reactor(id) = reactor.ty else {
+            return;
+        };
+        if program.reactors[id.index()].inputs[*index].overflow == Overflow::Wait {
+            found = Some(WaitSend {
+                span: expr.span,
+                reactor: id,
+                input: *index,
+            });
+        }
+    });
+    found
+}
+
+/// The nearest function reachable from `start` that sends to a `wait` port —
+/// `reachable_impurity`'s shape, and its reason: the function closest to the `after` is the call
+/// the reader has to look at, and the rest of the chain follows from it.
+pub(super) fn reachable_wait_send(
+    calls: &[Vec<FnId>],
+    sends: &[Option<WaitSend>],
+    start: FnId,
+) -> Option<(FnId, WaitSend)> {
+    let mut seen = vec![false; calls.len()];
+    let mut queue = std::collections::VecDeque::from([start]);
+    seen[start.index()] = true;
+    while let Some(function) = queue.pop_front() {
+        if let Some(send) = sends[function.index()] {
+            return Some((function, send));
+        }
+        for &callee in &calls[function.index()] {
+            if !seen[callee.index()] {
+                seen[callee.index()] = true;
+                queue.push_back(callee);
+            }
+        }
+    }
+    None
+}
