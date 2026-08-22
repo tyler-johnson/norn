@@ -1074,48 +1074,75 @@ Ordered roughly by when it becomes worth doing, not by importance:
     hand-managed `Buf<Input<T>>` regresses. The runtime already knows: `reactor_alive` exists and
     is simply not exposed. Spellable `Input<T>` must not land before it is.
 
-    **The `wait` defect this uncovered is independent of interfaces and should be fixed on its
-    own.** `Overflow::Wait` parks the sender on an unbounded `Vec<Waiting<V>>` that retains the
-    message, so the mailbox stays bounded while the waiter list absorbs the excess. That is real
-    backpressure when the sender's own progress is what produces messages — a task looping on
-    `await send(players.moved, pos)` stops, so the socket stops being drained. It is not
-    backpressure at all when the sender is a reactor's effect task: the `chunk-systems` trace shows
-    `R0` taking turns 0, 1, and 2 while `t3`, `t4`, and `t5` are all parked, each turn spawning a
-    *fresh* task, so a reactor pushing into a `wait` input accumulates parked tasks without ever
-    slowing down. Backpressure propagates from a task into a reactor and never from a reactor to a
-    reactor, because a reactor is driven by its inbox and its effects are fire-and-forget — forced
-    by turn semantics, since a reactor stalling on its outbox could not take turns at all and any
-    cycle would deadlock. Nothing refuses this today.
+    **The `wait` defect this uncovered is independent of interfaces and was fixed on its own
+    (2026-08-22).** It turned out to be two defects, one recorded here when the item was raised
+    and one found by reading the runtime afterwards. They share a cause — `Overflow::Wait` assumes
+    a sender that can be suspended and asked again — and they needed opposite answers: one is a
+    runtime bug, the other is a rule.
 
-    A second failure sits on the same policy and is sharper, because it loses the message rather
-    than accumulating it: an `after … -> input` completion landing on a full `wait` input is
-    discarded permanently. `scope.rs`'s `finish` sets `status = Status::Done`, clears `body`, and
-    detaches the task *before* calling `deliver`; `deliver` is `send(reactor, input, value,
-    sender)` with the returned `Poll` discarded; `send` on a full `wait` input pushes
-    `Waiting { task, input, value }` and returns `Poll::Pending`; and when room frees,
-    `wake_senders` reaches `wake`, which returns early unless the task is `Status::Parked`. The
-    entry sits in `waiting` forever and the value never enqueues — no trap, no diagnostic, no
-    trace event. Latent rather than live: `examples/reactors/posts.norn` is the corpus's only
-    `wait` input fed by an `after`, and its `busy` flag holds `applied` to at most one queued
-    message, so the queue never fills and blessing would not catch a regression — a test has to
-    fill it on purpose. The completion arrow is a *separate* delivery path from `send`
-    (`Effect.returns` → `Completion` → `deliver`), so a positional refusal written only against
-    `send` does not reach it, and item 1's pending queue does not either: this one needs `deliver`
-    to handle `Poll::Pending` — parking the completion rather than the dead task — or the refusal
-    to make the state unreachable. Which of those is chosen is a real fork, since the refusal is a
-    compile error and the runtime fix keeps `wait` working for completions.
+    *Unbounded parked senders.* `Overflow::Wait` parks the sender on an unbounded
+    `Vec<Waiting<V>>` that retains the message, so the mailbox stays bounded while the waiter list
+    absorbs the excess. That is real backpressure when the sender's own progress is what produces
+    messages — a task looping on `await send(players.moved, pos)` stops, so the socket stops being
+    drained. It is not backpressure at all when the sender is a reactor's effect task: the
+    `chunk-systems` trace shows `R0` taking turns 0, 1, and 2 while `t3`, `t4`, and `t5` are all
+    parked, each turn spawning a *fresh* task, so a reactor pushing into a `wait` input accumulates
+    parked tasks without ever slowing down. Backpressure propagates from a task into a reactor and
+    never from a reactor to a reactor, because a reactor is driven by its inbox and its effects are
+    fire-and-forget — forced by turn semantics, since a reactor stalling on its outbox could not
+    take turns at all and any cycle would deadlock. No runtime change fixes this, which is what
+    makes it a checker rule.
+
+    *Silent, permanent loss of a completion.* An `after … -> input` result landing on a full `wait`
+    input vanished, and this one was a plain bug. `finish` sets `status = Done` and detaches the
+    task *before* it delivers; `deliver` was a bare `self.send(…)` that discarded the returned
+    `Poll`; `send` on a full `wait` input pushed a `Waiting` entry naming that task and returned
+    `Pending`; and `wake` early-returns on anything that is not `Parked`. So the entry sat on the
+    list forever with no trap, no diagnostic, and no trace event. It was latent only because every
+    `wait` input an `after` fed happened to be safe by construction, on margins — `posts.norn`'s
+    `busy` flag capping `applied` at 1 against capacity 8 — that no snapshot would have defended.
+    The fix is to stop pretending a completion has a sender: `Waiting.task` is now
+    `Option<TaskId>`, `deliver` passes `None`, and `wake_senders` walks the list in order,
+    enqueueing a `None` entry itself and waking a `Some` one as before, stopping at the first entry
+    that cannot proceed so the list stays FIFO across policies. A parked task still enqueues lazily
+    when it re-asks; a completion enqueues eagerly, because there is nobody left to ask. That early
+    stop stalls nothing, because a capacity is positive by construction (`check/reactor.rs` refuses
+    zero): a `None` entry only ever exists while its input already holds a message, a non-empty
+    mailbox keeps the reactor queued, `turn` re-enqueues itself while messages remain, and every
+    turn ends in `wake_senders` — so a parked completion always has a turn coming to drain it, and
+    a `Some` entry behind it is woken on that later pass.
+    `examples/reactors/completion-wait.norn` is the regression test and reproduces the loss on the
+    old build — three completions expiring on one tick against a capacity-1 `wait` input, of which
+    one landed. Every other reactor snapshot stayed byte-identical, `overflow.norn`'s four policies
+    included, which is what says the ordering did not move.
 
     So the rule `wait` needs is positional, and it is the one interface sends share: refuse a
-    `send` to a `wait` port from anywhere reachable from an `after`, which is the same call-graph
-    reachability `check_turns`, `check/uses.rs`, and `infer_sinks` already walk. Refusing costs
-    nothing real — blocking there never saved the message, it queued the sender instead, the same
-    memory with less clarity — and the need behind it is served by a larger queue with an
-    observable overflow, or by a credit or ack input on the producer tracked in its own state,
-    which between reactors is the only place flow control can honestly live. Item 1's per-request
-    pending queue on `after` is the complementary fix and bounds the waiter list whatever the
-    policy. Whether `wait` should stay refused from effect positions *after* that bound exists is
-    a judgment call worth taking separately: it would be bounded but still lossy, so the port
-    would promise lossless delivery and the producer's effect queue would quietly drop instead.
+    `send` to a `wait` port from anywhere reachable from an `after`. That landed as
+    `check_effect_backpressure` in `check/turns.rs`, modelled on `reachable_impurity` and running
+    post-monomorphization beside `infer_uses` for that pass's reason — every executable body is
+    concrete, templates are inert, and the `(span, message)` dedupe collapses per-instance
+    duplicates. The roots are the `after` statements, and the head call has to be seeded by hand
+    because `collect_calls` deliberately drops it. Resolving the policy needs no new machinery:
+    `Ty::Input` is unspellable, so a `send` target is written out as `reactor.input` and the
+    reactor's own declaration says what the port promises. `spawn` in a task loop has the same
+    unbounded shape and stays legal — `spawn` is the developer declaring they will not wait, and
+    `after` is a reactor's only spelling for leaving a turn.
+
+    Refusing costs nothing real — blocking there never saved the message, it queued the sender
+    instead, the same memory with less clarity — and the need behind it is served by a larger queue
+    with an observable overflow, or by a credit or ack input on the producer tracked in its own
+    state, which between reactors is the only place flow control can honestly live. The rule found
+    one real instance on its first run, which is the argument for it: `posts.norn`'s
+    `ByAuthor.arrived` was a `wait` port fed by `deliver`, `PostPartition`'s effect task, spawned
+    fresh every turn. It is now `reject`, and the flow control the note points at was already in
+    the file — the `delivered` ack and the exported `backlog` are the credit a producer reads. The
+    example's output and trace did not move; only the policy word did.
+
+    Item 1's per-request pending queue on `after` is the complementary fix and bounds the waiter
+    list whatever the policy; it is the general resource bound and remains out of scope here.
+    Whether `wait` should stay refused from effect positions *after* that bound exists is a
+    judgment call worth taking separately: it would be bounded but still lossy, so the port would
+    promise lossless delivery and the producer's effect queue would quietly drop instead.
 
     What stays open: whether an interface may name exports as well as inputs, or only inputs
     (a `Signal<T>` escaping its reactor is the grammatical guarantee `Ty::Signal`'s unspellability
