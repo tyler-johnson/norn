@@ -174,6 +174,7 @@ impl Checker {
                         params: Vec::new(),
                         uses: Vec::new(),
                         inputs: Vec::new(),
+                        init: None,
                         nodes: Vec::new(),
                         slots: Vec::new(),
                         order: Vec::new(),

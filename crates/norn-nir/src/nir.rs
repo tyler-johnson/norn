@@ -91,6 +91,8 @@ pub struct Reactor {
     /// The node holding each slot, in slot (source) order.
     pub slots: Vec<usize>,
     pub inputs: Vec<Input>,
+    /// The lifted `init` body, run once at creation. Absent means the reactor does nothing there.
+    pub init: Option<FnId>,
     pub order: Vec<usize>,
     pub exports: Vec<usize>,
 }
@@ -746,6 +748,14 @@ pub fn print_graph(program: &Program, wanted: Option<&str>) -> String {
             ));
         }
         out.push_str(&format!("    order [{}]\n", names(reactor, &reactor.order)));
+        // No index, no capacity, no policy — none of them mean anything for a turn nobody sends
+        // to — and no `plan` line: init's propagation is `order`, printed directly above.
+        if let Some(init) = reactor.init {
+            out.push_str(&format!(
+                "    init handler {}#{init}\n",
+                program.fns[init].name
+            ));
+        }
         for (index, input) in reactor.inputs.iter().enumerate() {
             out.push_str(&format!(
                 "    input {index} {}: {} capacity {} overflow {} handler {}#{}\n",

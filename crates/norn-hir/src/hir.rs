@@ -390,6 +390,12 @@ pub struct ReactorDef {
     /// exactly this, and a spawner reaches all of it through the handle.
     pub uses: Vec<Capability>,
     pub inputs: Vec<InputDef>,
+    /// The lifted `init` member: `(every slot in slot order) -> ()`, run once at creation.
+    ///
+    /// A handler in every respect but the message — the same turn rules, the same commit
+    /// vocabulary, the same `after`. Absent means the reactor does nothing at creation, which is
+    /// what every reactor written before `init` existed says.
+    pub init: Option<FnId>,
     pub nodes: Vec<Node>,
     /// Node indices holding a value that survives between turns, in **source order**.
     ///

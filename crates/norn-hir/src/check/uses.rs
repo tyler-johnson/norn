@@ -367,6 +367,10 @@ fn members_of(reactor: &ReactorDef) -> Vec<FnId> {
     for input in &reactor.inputs {
         out.push(input.handler);
     }
+    // `init` can hold an `after` too, so what it reaches joins the reactor's union.
+    if let Some(init) = reactor.init {
+        out.push(init);
+    }
     out
 }
 

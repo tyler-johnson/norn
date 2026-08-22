@@ -106,7 +106,14 @@ pub fn generate(program: &Program, main: usize) -> String {
         handlers: program
             .reactors
             .iter()
-            .flat_map(|reactor| reactor.inputs.iter().map(|input| input.handler))
+            .flat_map(|reactor| {
+                // `init` is a handler in everything but the message, and takes the same `turn`.
+                reactor
+                    .inputs
+                    .iter()
+                    .map(|input| input.handler)
+                    .chain(reactor.init)
+            })
             .collect(),
         used_builtins,
         task_fns,
@@ -1687,6 +1694,29 @@ impl Emitter<'_> {
                 handle_arms.push("}".into());
             }
         }
+        let mut init_arms = Vec::new();
+        for (id, reactor) in self.program.reactors.iter().enumerate() {
+            let Some(init) = reactor.init else {
+                continue;
+            };
+            let body = &self.program.fns[init];
+            init_arms.push(format!("{id}usize => {{"));
+            init_arms.push(
+                "    let mut turn = Handled { writes: Vec::new(), effects: Vec::new() };".into(),
+            );
+            // Every slot in slot order and no message, so the arity is the slot count exactly.
+            let args: Vec<String> = (0..reactor.slots.len())
+                .map(|slot| {
+                    format!(
+                        ", unwrap_{}(slots[{slot}usize].clone())",
+                        self.key(&body.tys[slot])
+                    )
+                })
+                .collect();
+            init_arms.push(format!("    f{init}(&mut turn{})?;", args.join("")));
+            init_arms.push("    Ok(turn)".into());
+            init_arms.push("}".into());
+        }
         let mut recompute_arms = Vec::new();
         for (id, reactor) in self.program.reactors.iter().enumerate() {
             for (index, node) in reactor.nodes.iter().enumerate() {
@@ -1747,6 +1777,21 @@ impl Emitter<'_> {
         push(
             out,
             1,
+            "fn init(&self, reactor: usize, slots: &[Value]) -> Result<Handled<Value>, Trap> {",
+        );
+        push(out, 2, "match reactor {");
+        push_all(out, 3, &init_arms);
+        push(
+            out,
+            3,
+            "_ => Err(Trap::new(\"a reactor with no `init` was told to run one\", \"runtime\")),",
+        );
+        push(out, 2, "}");
+        push(out, 1, "}");
+        push(out, 0, "");
+        push(
+            out,
+            1,
             "fn recompute(&self, reactor: usize, node: usize, deps: &[Value]) -> Result<Update<Value>, Trap> {",
         );
         push(out, 2, "match (reactor, node) {");
@@ -1791,6 +1836,7 @@ impl Emitter<'_> {
                 ));
             }
             body.push("    ],".into());
+            body.push(format!("    has_init: {},", reactor.init.is_some()));
             body.push(format!("    order: vec![{}],", list(&reactor.order)));
             body.push(format!("    exports: vec![{}],", list(&reactor.exports)));
             body.push("},".into());

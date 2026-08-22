@@ -1,0 +1,75 @@
+// Creation is a turn, and `init` is the body it never had.
+//
+// A reactor can *derive* at creation — that is what a `state` initialiser is — but before `init`
+// it could not *act* there. Whoever spawned it had to perform its startup, which meant the spawner
+// knew its protocol. `init` gives the reactor the one turn where it can do that for itself.
+//
+// No new publication is added: `publish 0` already was the creation turn, and `init` supplies its
+// handler. The order to read off the trace is the whole claim:
+//
+//   create Cache in T0        the reactor exists, with its slots at their initialisers
+//   init                      the body runs: it commits `origin`, and describes `load`
+//   commit / recompute …      propagation settles the whole `order`, not a plan
+//   publish 0                 version 0 — the same version 0 every other reactor publishes
+//   effect load T1 -> loaded  strictly after publication, exactly as in a message turn
+//
+// The first `print` runs before `load` finishes, so it shows what `init` alone committed: `origin`
+// is 21 rather than its initialiser's 0, and `ready` is false. The completion arrives later as an
+// ordinary message on an ordinary input, and message turns still start at `turn 0` — creation is
+// the turn before the numbered ones.
+
+struct Status {
+    origin: I64
+    entries: I64
+    ready: Bool
+    reads: I64
+}
+
+// The effect `init` requests. It suspends, which is the point: it could not have run in the turn
+// that asked for it.
+task fn load(from: I64) -> I64 {
+    await sleep(10)
+    from * 2
+}
+
+reactor Cache(seed: I64) {
+    input loaded: I64 [capacity: 4, overflow: reject]
+    input read: () [capacity: 4, overflow: reject]
+
+    state origin: I64 = 0
+    state entries: I64 = 0
+    state ready: Bool = false
+    state reads: I64 = 0
+
+    // The write half and the effect half, in one body. `origin` is committed here rather than by
+    // `state origin: I64 = seed`, so that the trace shows a commit inside the creation turn.
+    init {
+        origin = seed
+        after load(seed) -> loaded
+    }
+
+    on loaded(count) {
+        entries = count
+        ready = true
+    }
+
+    on read() {
+        reads = reads + 1
+    }
+
+    export signal status = Status(
+        origin: origin, entries: entries, ready: ready, reads: reads
+    )
+}
+
+task fn main() -> () {
+    let cache = spawn reactor Cache(seed: 21)
+
+    // Version 0, read before `load` has had a chance to finish: what `init` committed is already
+    // in it, and nothing else is.
+    print(latest(cache.status))
+
+    await send(cache.read, ())
+    await sleep(50)
+    print(latest(cache.status))
+}

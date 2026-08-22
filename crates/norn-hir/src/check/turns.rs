@@ -63,6 +63,11 @@ impl Checker {
             for input in &reactor.inputs {
                 turn_fns.push((input.handler, input.span, owner));
             }
+            // Creation is a turn, so `init` is subject to every rule a handler is. Its lifted
+            // function carries the member's own span, which is where a diagnostic belongs.
+            if let Some(init) = reactor.init {
+                turn_fns.push((init, self.program.fns[init.index()].span, owner));
+            }
         }
         if turn_fns.is_empty() {
             return;

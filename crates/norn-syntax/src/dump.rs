@@ -325,6 +325,7 @@ fn dump_member(member: &Member) -> Node {
             children.push(dump_block(body));
             list("on", children)
         }
+        MemberKind::Init { body } => list("init", vec![dump_block(body)]),
     }
 }
 

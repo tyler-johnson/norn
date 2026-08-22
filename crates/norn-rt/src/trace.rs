@@ -71,6 +71,12 @@ pub enum Event {
         name: String,
         owner: TaskId,
     },
+    /// The `init` body running, between creation and the publication of version 0. No sequence
+    /// number: creation is the turn before the numbered ones, and message turns still start at 0.
+    /// Emitted only by a reactor that declares an `init`.
+    Init {
+        reactor: ReactorId,
+    },
     /// One message taken from the mailbox. The sequence number is reactor-local and the reason
     /// "serial turns" is a thing a reader can check rather than a thing the runtime asserts.
     Turn {
@@ -164,6 +170,7 @@ impl Event {
             | Event::Close { task, .. }
             | Event::Move { task, .. } => Subject::Task(*task),
             Event::ReactorCreated { reactor, .. }
+            | Event::Init { reactor }
             | Event::Turn { reactor, .. }
             | Event::Node { reactor, .. }
             | Event::Publish { reactor, .. }
@@ -190,6 +197,7 @@ impl Event {
             Event::Close { resource, .. } => format!("close {resource}"),
             Event::Move { resource, from, .. } => format!("move {resource} from {from}"),
             Event::ReactorCreated { name, owner, .. } => format!("create {name} in {owner}"),
+            Event::Init { .. } => "init".into(),
             Event::Turn { seq, input, .. } => format!("turn {seq} {input}"),
             Event::Node { node, commit, .. } => {
                 let what = if *commit { "commit" } else { "recompute" };

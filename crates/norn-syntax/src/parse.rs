@@ -846,13 +846,25 @@ impl Parser {
                     span,
                 })
             }
+            // `init` is contextual, not reserved, exactly like `sink`: every other member starts
+            // with a keyword, so a bare `init` in member position is unambiguous — and `fn init()`
+            // and `state init: Config` stay legal everywhere else.
+            TokenKind::Ident(word) if word == "init" => {
+                self.advance();
+                let body = self.block()?;
+                let span = start.to(body.span);
+                Ok(Member {
+                    kind: MemberKind::Init { body },
+                    span,
+                })
+            }
             TokenKind::Reserved(word) => Err(self.push(reserved_diagnostic(start, &word))),
             other => Err(self.push(
                 Diagnostic::new(
                     start,
                     format!("expected a reactor member, found {}", other.describe()),
                 )
-                .note("a reactor contains `input`, `state`, `signal`, `export signal`, and `on` declarations"),
+                .note("a reactor contains `input`, `state`, `signal`, `export signal`, `on`, and `init` declarations"),
             )),
         }
     }

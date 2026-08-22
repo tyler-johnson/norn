@@ -94,6 +94,7 @@ fn lower_reactor(def: &hir::ReactorDef) -> Reactor {
                 plan: input.plan.iter().map(|node| node.index()).collect(),
             })
             .collect(),
+        init: def.init.map(|init| init.index()),
         order: def.order.iter().map(|node| node.index()).collect(),
         exports: def.exports.iter().map(|node| node.index()).collect(),
     }
@@ -116,6 +117,10 @@ fn verify_turns(program: &Program) {
         }
         for input in &reactor.inputs {
             verify_pure(program, input.handler, true);
+        }
+        // Creation is a turn, and `init` is a handler in everything but the message.
+        if let Some(init) = reactor.init {
+            verify_pure(program, init, true);
         }
     }
 }

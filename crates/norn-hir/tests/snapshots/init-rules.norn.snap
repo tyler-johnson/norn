@@ -1,0 +1,37 @@
+error: a `loop` cannot appear in a turn, because a turn must end
+  --> init-rules.norn:37:13
+   |
+37 |         n = loop { break 1 }
+   |             ^^^^^^^^^^^^^^^^ a loop is not provably finite
+   = note: turn-reachable code has neither loops nor recursion, which is what makes every turn provably terminating
+   = note: compute the value with a bounded expression, or move the work into a `task fn` and request it with `after`
+
+error: `await` cannot appear in a reactor, because it suspends
+  --> init-rules.norn:38:9
+   |
+38 |         await send(sink.absorbed, 2)
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ a turn is pure
+   = note: a turn runs to a fixed point with nothing able to observe it part-way; effects leave it through `after`
+
+error: this reaches `hand_off`, which sends to `Sink.absorbed`, a `wait` input
+  --> init-rules.norn:39:9
+   |
+39 |         after prime(sink)
+   |         ^^^^^^^^^^^^^^^^^ an effect cannot be given backpressure
+  --> init-rules.norn:28:11
+   |
+28 |     await send(sink.absorbed, 1)
+   |           ^^^^^^^^^^^^^^^^^^^^^^ a `wait` input parks its sender, and this sender is a fresh task every turn
+   = note: backpressure propagates from a task into a reactor and never from a reactor to a reactor: a reactor is driven by its inbox, so parking its effect task never slows it down and the waiter list grows instead
+   = note: give the input a larger queue with an observable overflow policy, or add a credit or ack input on the producer, which between reactors is the only place flow control can honestly live
+
+error: `Boot` already has an `init`
+  --> init-rules.norn:44:5
+   |
+44 |     init {
+   |     ^^^^^^ second `init` for one reactor
+  --> init-rules.norn:36:5
+   |
+36 |     init {
+   |     ^^^^^^ the first
+   = note: one reactor is one startup turn: two would need an order between them, and creation has none

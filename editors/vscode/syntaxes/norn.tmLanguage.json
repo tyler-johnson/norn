@@ -656,6 +656,11 @@
           "match": "\\b(?:input|state|signal|on|after)\\b"
         },
         {
+          "comment": "The contextual startup turn: `init` reads as a member only when a block follows it, so `fn init()` and `state init: Config` stay ordinary names.",
+          "name": "keyword.control.reactive.norn",
+          "match": "\\binit\\b(?=\\s*\\{)"
+        },
+        {
           "name": "storage.type.norn",
           "match": "\\b(?:fn|struct|enum|reactor|trait|impl)\\b"
         },

@@ -1164,6 +1164,26 @@ impl Graph<Value> for Nodes<'_> {
         Ok(interpreter.turn.expect("just installed").into_inner())
     }
 
+    fn init(&self, reactor: usize, slots: &[Value]) -> Result<Handled<Value>, Trap> {
+        let Some(function) = self.program.reactors[reactor].init else {
+            return Err(Trap::new(
+                "a reactor with no `init` was told to run one",
+                "runtime",
+            ));
+        };
+        // A handler minus the message: the arguments are every slot in slot order, and the turn
+        // the body writes into is installed the same way.
+        let interpreter = Interpreter {
+            program: self.program,
+            turn: Some(RefCell::new(Handled {
+                writes: Vec::new(),
+                effects: Vec::new(),
+            })),
+        };
+        interpreter.call(function, slots.to_vec())?;
+        Ok(interpreter.turn.expect("just installed").into_inner())
+    }
+
     fn recompute(
         &self,
         reactor: usize,
@@ -1224,6 +1244,7 @@ fn specs(program: &Program) -> Vec<ReactorSpec> {
                     plan: input.plan.clone(),
                 })
                 .collect(),
+            has_init: reactor.init.is_some(),
             order: reactor.order.clone(),
             exports: reactor.exports.clone(),
         })

@@ -1,0 +1,161 @@
+=== nir ===
+struct Status #0 (origin: I64, entries: I64, ready: Bool, reads: I64)
+enum Option #0 (None, Some(?))
+enum Result #1 (Ok(?), Err(?))
+enum IoError #2 (NotFound, Denied, InUse, Refused, Closed, Other(String))
+
+reactor Cache #0(I64)
+    node 0 seed: I64 param slot 0 arg 0 <- []
+    node 1 origin: I64 state slot 1 init Cache.origin.init#4 <- []
+    node 2 entries: I64 state slot 2 init Cache.entries.init#5 <- []
+    node 3 ready: Bool state slot 3 init Cache.ready.init#6 <- []
+    node 4 reads: I64 state slot 4 init Cache.reads.init#7 <- []
+    node 5 status: Status signal Cache.status#9 export <- [origin, entries, ready, reads]
+    order [seed, origin, entries, ready, reads, status]
+    init handler Cache.init#8
+    input 0 loaded: I64 capacity 4 overflow reject handler Cache.on.loaded#2
+        plan [entries, ready, status]
+    input 1 read: () capacity 4 overflow reject handler Cache.on.read#3
+        plan [reads, status]
+    exports [status]
+
+task fn load #0(_0/from: I64) -> I64
+    local _1: Task<()>
+    local _2: ()
+    local _3: I64
+  b0:
+    _1 = task builtin sleep(10)
+    await _1 -> _2, resume b1
+  b1:
+    _3 = _0/from mul.i 2
+    return _3
+
+task fn main #1() -> ()
+    local _0/cache: Cache
+    local _1: Cache
+    local _2: Signal<Status>
+    local _3: Status
+    local _4: ()
+    local _5: Input<()>
+    local _6: Task<()>
+    local _7: ()
+    local _8: Task<()>
+    local _9: ()
+    local _10: Signal<Status>
+    local _11: Status
+    local _12: ()
+  b0:
+    _1 = spawn reactor Cache#0(21)
+    _0/cache = _1
+    _2 = export 0 of _0/cache
+    _3 = builtin latest(_2)
+    _4 = builtin print(_3)
+    _5 = input 1 of _0/cache
+    _6 = task builtin send(_5, ())
+    await _6 -> _7, resume b1
+  b1:
+    _8 = task builtin sleep(50)
+    await _8 -> _9, resume b2
+  b2:
+    _10 = export 0 of _0/cache
+    _11 = builtin latest(_10)
+    _12 = builtin print(_11)
+    return _12
+
+fn Cache.on.loaded #2(_0/count: I64, _1/seed: I64, _2/origin: I64, _3/entries: I64, _4/ready: Bool, _5/reads: I64) -> ()
+  b0:
+    _3/entries = _0/count
+    set slot 2 = _3/entries
+    _4/ready = true
+    set slot 3 = _4/ready
+    return ()
+
+fn Cache.on.read #3(_0/seed: I64, _1/origin: I64, _2/entries: I64, _3/ready: Bool, _4/reads: I64) -> ()
+    local _5: I64
+  b0:
+    _5 = _4/reads add.i 1
+    _4/reads = _5
+    set slot 4 = _4/reads
+    return ()
+
+fn Cache.origin.init #4() -> I64
+  b0:
+    return 0
+
+fn Cache.entries.init #5() -> I64
+  b0:
+    return 0
+
+fn Cache.ready.init #6() -> Bool
+  b0:
+    return false
+
+fn Cache.reads.init #7() -> I64
+  b0:
+    return 0
+
+fn Cache.init #8(_0/seed: I64, _1/origin: I64, _2/entries: I64, _3/ready: Bool, _4/reads: I64) -> ()
+    local _5: Task<I64>
+  b0:
+    _1/origin = _0/seed
+    set slot 1 = _1/origin
+    _5 = task load#0(_0/seed)
+    emit _5 -> input 0
+    return ()
+
+fn Cache.status #9(_0/origin: I64, _1/entries: I64, _2/ready: Bool, _3/reads: I64) -> Status
+    local _4: Status
+  b0:
+    _4 = Status(_0/origin, _1/entries, _2/ready, _3/reads)
+    return _4
+
+=== graph ===
+reactor Cache #0(I64)
+    node 0 seed: I64 param slot 0 arg 0 <- []
+    node 1 origin: I64 state slot 1 init Cache.origin.init#4 <- []
+    node 2 entries: I64 state slot 2 init Cache.entries.init#5 <- []
+    node 3 ready: Bool state slot 3 init Cache.ready.init#6 <- []
+    node 4 reads: I64 state slot 4 init Cache.reads.init#7 <- []
+    node 5 status: Status signal Cache.status#9 export <- [origin, entries, ready, reads]
+    order [seed, origin, entries, ready, reads, status]
+    init handler Cache.init#8
+    input 0 loaded: I64 capacity 4 overflow reject handler Cache.on.loaded#2
+        plan [entries, ready, status]
+    input 1 read: () capacity 4 overflow reject handler Cache.on.read#3
+        plan [reads, status]
+    exports [status]
+
+=== output ===
+Status(origin: 21, entries: 0, ready: false, reads: 0)
+Status(origin: 21, entries: 42, ready: true, reads: 1)
+=== result ===
+()
+=== trace ===
+0ms t0 spawn main root
+0ms t0 resume
+0ms R0 create Cache in t0
+0ms R0 init
+0ms R0 commit origin
+0ms R0 recompute status
+0ms R0 publish 0
+0ms t1 spawn load in t0
+0ms R0 effect load t1 -> loaded
+0ms t0 park timer 50ms
+0ms t1 resume
+0ms t1 park timer 10ms
+0ms R0 turn 0 read
+0ms R0 commit reads
+0ms R0 recompute status
+0ms R0 publish 1
+10ms -- clock
+10ms t1 resume
+10ms t1 done
+10ms R0 turn 1 loaded
+10ms R0 commit entries
+10ms R0 commit ready
+10ms R0 recompute status
+10ms R0 publish 2
+50ms -- clock
+50ms t0 resume
+50ms R0 stop
+50ms t0 done

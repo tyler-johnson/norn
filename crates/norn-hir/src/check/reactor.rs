@@ -17,6 +17,8 @@ impl Checker {
             let mut nodes: Vec<Node> = Vec::new();
             let mut slots: Vec<NodeId> = Vec::new();
             let mut inputs: Vec<InputDef> = Vec::new();
+            let mut init: Option<FnId> = None;
+            let mut init_span: Option<Span> = None;
             let mut taken: HashMap<String, Span> = HashMap::new();
 
             let claim = |checker: &mut Checker,
@@ -230,6 +232,25 @@ impl Checker {
                             span: input.span.to(queue.span),
                         });
                     }
+                    // `init` claims no name: it is not a node, it holds no slot, and nothing can
+                    // read it. What it needs is a lifted function, and the refusal of a second one
+                    // — two startup turns would need an order between them, and creation has none.
+                    ast::MemberKind::Init { .. } => {
+                        if let Some(first) = init_span {
+                            self.push(
+                                Diagnostic::new(
+                                    member.span,
+                                    format!("`{}` already has an `init`", decl.name.name),
+                                )
+                                .label("second `init` for one reactor")
+                                .secondary(first, "the first")
+                                .note("one reactor is one startup turn: two would need an order between them, and creation has none"),
+                            );
+                            continue;
+                        }
+                        init_span = Some(member.span);
+                        init = Some(self.declare_lifted(format!("{display}.init"), member.span));
+                    }
                 }
             }
 
@@ -295,6 +316,7 @@ impl Checker {
             let reactor = &mut self.program.reactors[id.index()];
             reactor.params = params;
             reactor.inputs = inputs;
+            reactor.init = init;
             reactor.slots = slots;
             reactor.exports = nodes
                 .iter()
@@ -451,7 +473,9 @@ impl Checker {
                         }
                     }
                 }
-                ast::MemberKind::Input { .. } => {}
+                // Neither contributes an edge: an input is not a node, and `init`'s propagation
+                // is the whole `order` rather than a plan carved out of it.
+                ast::MemberKind::Input { .. } | ast::MemberKind::Init { .. } => {}
             }
         }
 
@@ -578,6 +602,25 @@ impl Checker {
             // Every slot, in slot order, so that the runtime's call is one shape rather than one
             // per handler. State is `mut` here and nowhere else: this is the only place a commit
             // can happen.
+            let slots = self.program.reactors[id.index()].slots.clone();
+            for slot in slots {
+                self.bind_node(id, slot.index(), true);
+            }
+            let checked = self.check_block(body, Some(&Ty::Unit), body.span);
+            self.finish_member(function, Ty::Unit, checked);
+        }
+
+        // `init` last, and by the handler path minus the message: it commits slots, it may hold an
+        // `after`, and `in_handler` is what makes both legal. What it is not is a handler for
+        // anything — nobody sends to it, so there is nothing to bind.
+        if let Some(function) = self.program.reactors[id.index()].init
+            && let Some(member) = decl
+                .members
+                .iter()
+                .find(|member| matches!(member.kind, ast::MemberKind::Init { .. }))
+            && let ast::MemberKind::Init { body } = &member.kind
+        {
+            self.begin_member(&name, function, Ctx::Turn, id, &members, true);
             let slots = self.program.reactors[id.index()].slots.clone();
             for slot in slots {
                 self.bind_node(id, slot.index(), true);

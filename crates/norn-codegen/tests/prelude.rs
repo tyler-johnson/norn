@@ -96,6 +96,13 @@ mod generated {
             ))
         }
 
+        fn init(&self, reactor: usize, slots: &[Value]) -> Result<Handled<Value>, Trap> {
+            Err(Trap::new(
+                "a reactor with no `init` was told to run one",
+                "runtime",
+            ))
+        }
+
         fn recompute(
             &self,
             reactor: usize,

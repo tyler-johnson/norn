@@ -334,6 +334,7 @@ fn print_member(member: &Member) -> String {
                 print_block(body, 1)
             )
         }
+        MemberKind::Init { body } => format!("init {}", print_block(body, 1)),
     }
 }
 

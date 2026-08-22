@@ -657,6 +657,45 @@ fn sink_pathologies_resolve_by_lookahead() {
 }
 
 #[test]
+fn init_is_a_reactor_member() {
+    let dumped = ast(
+        "reactor Cache(seed: I64) {\n    input done: I64 [capacity: 1, overflow: reject]\n    state n: I64 = 0\n    init {\n        n = seed\n    }\n    on done(v) {\n        n = v\n    }\n}\n",
+    );
+    assert!(dumped.contains("(init (block"), "{dumped}");
+}
+
+/// Contextual like `sink`, and for the same reason: reserving a word costs every program that
+/// already used it as a name. Only member position reads `init` as a member.
+#[test]
+fn init_stays_an_ordinary_name() {
+    let dumped = ast("fn init(n: I64) -> I64 {\n    n\n}\n");
+    assert!(dumped.contains("(fn init"), "{dumped}");
+
+    let dumped = ast(
+        "reactor Held() {\n    input go: () [capacity: 1, overflow: reject]\n    state init: I64 = 0\n    on go() {\n        init = init + 1\n    }\n}\n",
+    );
+    assert!(dumped.contains("(state init I64"), "{dumped}");
+}
+
+/// The grammar accepts what the checker refuses: two `init` members parse, and `Boot` being told
+/// it has one already is a checker diagnostic — the same split `on` is on.
+#[test]
+fn a_second_init_is_a_checker_question() {
+    let dumped = ast(
+        "reactor Boot() {\n    input go: () [capacity: 1, overflow: reject]\n    state n: I64 = 0\n    init {\n        n = 1\n    }\n    init {\n        n = 2\n    }\n    on go() {\n        n = n + 1\n    }\n}\n",
+    );
+    assert_eq!(dumped.matches("(init (block").count(), 2, "{dumped}");
+}
+
+#[test]
+fn init_round_trips() {
+    let source = "reactor Boot(seed: I64) {\n    input go: () [capacity: 1, overflow: reject]\n    state n: I64 = 0\n    init {\n        n = seed\n    }\n    on go() {\n        n = n + 1\n    }\n}\n";
+    let parsed = parse(source);
+    assert!(parsed.ok(), "{}", errors(source));
+    assert_eq!(print::module(&parsed.module), source);
+}
+
+#[test]
 fn sink_round_trips() {
     let source = "fn close(conn: sink Connection) -> () {\n    ()\n}\n";
     let parsed = parse(source);

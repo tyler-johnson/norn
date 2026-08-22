@@ -265,6 +265,12 @@ pub enum MemberKind {
         queue: Option<Queue>,
         body: Block,
     },
+    /// `init { … }` — the reactor's own startup turn, run once at creation between the state
+    /// initialisers and the publication of version 0.
+    ///
+    /// A body and nothing else: there is no message, because nobody sent one. Like `On`, the
+    /// parser accepts as many as are written and the checker refuses the second.
+    Init { body: Block },
 }
 
 /// One parameter of an `on` handler: the name the message is bound to, and — in the merged form —
@@ -328,7 +334,7 @@ pub enum StmtKind {
     },
     Return(Option<Expr>),
     /// `after deliver(message) -> delivery_finished` — request an effect, and optionally name the
-    /// input its result comes back on. Legal only inside an `on` handler.
+    /// input its result comes back on. Legal only inside an `on` handler or an `init`.
     ///
     /// After *what* is not spelled, because within a turn there is only one boundary to be after:
     /// the commit that publishes the snapshot. `await` names what it waits for no more than this

@@ -948,7 +948,7 @@ impl Checker {
     ) -> StmtKind {
         if !self.in_handler {
             self.push(
-                Diagnostic::new(span, "`after` is only available inside an `on` handler")
+                Diagnostic::new(span, "`after` is only available inside an `on` handler or `init`")
                     .label("nothing here commits")
                     .note("a signal derives a value and requests nothing; effects are asked for where state changes"),
             );
@@ -1057,7 +1057,7 @@ impl Checker {
                                 .note("declare a `state` cell initialised from it if it needs to change")
                         }
                         LocalRole::State(_) => {
-                            Diagnostic::new(span, format!("`{name}` can only be assigned inside an `on` handler"))
+                            Diagnostic::new(span, format!("`{name}` can only be assigned inside an `on` handler or `init`"))
                                 .label("a node body is pure")
                                 .note("state changes are what a handler is for; a signal derives from state rather than setting it")
                         }

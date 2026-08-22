@@ -68,6 +68,9 @@ pub struct ReactorSpec {
     /// stays stable as derived signals are added around it.
     pub slots: Vec<usize>,
     pub inputs: Vec<InputSpec>,
+    /// Whether the reactor has an `init` body — the handler creation runs before it publishes
+    /// version 0. False is every reactor written before `init` existed, and costs nothing.
+    pub has_init: bool,
     /// A topological order over the whole graph. Every node appears after its dependencies, which
     /// is what makes one pass a fixed point.
     pub order: Vec<usize>,
@@ -133,6 +136,10 @@ pub trait Graph<V> {
         message: V,
         slots: &[V],
     ) -> Result<Handled<V>, Trap>;
+
+    /// Run the `init` body: every slot in slot order, and no message. Called only when the spec
+    /// says `has_init`, so an engine may trap on a reactor that has none.
+    fn init(&self, reactor: usize, slots: &[V]) -> Result<Handled<V>, Trap>;
 
     /// Recompute one derived node from the current values of its dependencies.
     fn recompute(&self, reactor: usize, node: usize, deps: &[V]) -> Result<Update<V>, Trap>;
@@ -229,10 +236,42 @@ impl<'e, V: Clone> Core<'e, V> {
             owner: owner.task,
         });
 
+        // Creation *is* a turn, so it has a turn's shape: the body runs first and in full, then
+        // propagation settles the graph, then version 0 publishes, then the effects start. What is
+        // absent is a message — nobody sent one — and a version bump, because there is no earlier
+        // version to move on from.
+        let handled = if self.engine.reactors[spec].has_init {
+            let slots: Vec<V> = self.engine.reactors[spec]
+                .slots
+                .iter()
+                .map(|node| self.reactors[id.index()].values[*node].clone())
+                .collect();
+            let handled = self.engine.graph.init(spec, &slots)?;
+            self.emit(Event::Init { reactor: id });
+            // Last write wins, exactly as in a turn.
+            let mut committed: Vec<Option<V>> = vec![None; slots.len()];
+            for (slot, value) in handled.writes {
+                committed[slot] = Some(value);
+            }
+            Some((committed, handled.effects))
+        } else {
+            None
+        };
+
+        // `order` and not a plan: `init` may write any slot, so its reach is the whole graph —
+        // which is the pass creation already ran before `init` existed.
         let order = self.engine.reactors[spec].order.clone();
-        self.propagate(id, &order, None)?;
+        let committed = handled.as_ref().map(|(committed, _)| committed.as_slice());
+        self.propagate(id, &order, committed)?;
         self.publish(id);
+        // Before the effects, so the scope owns the reactor by the time anything it launched can
+        // run: an effect outlives the turn that asked for it, and belongs where the reactor lives.
         self.attach_reactor(owner, id);
+        if let Some((_, effects)) = handled {
+            for effect in effects {
+                self.launch_effect(id, effect)?;
+            }
+        }
         Ok(id)
     }
 

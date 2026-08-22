@@ -1,0 +1,61 @@
+// Creation is a turn, so `init` inherits every rule a handler has — and one more of its own.
+//
+// Four refusals, in the order they are written. The startup turn must terminate, so a `loop` is
+// refused where it stands. It may not suspend, so a `send` is too. Its `after` is an effect like
+// any other, so it may not end in a send to a `wait` port — nothing there could be given
+// backpressure, and the reachability walk finds it two hops away. And one reactor is one startup
+// turn: a second `init` would need an order between them that creation does not have.
+
+reactor Sink() {
+    input absorbed: I64 [capacity: 4, overflow: wait]
+
+    state total: I64 = 0
+
+    on absorbed(value) {
+        total = total + value
+    }
+
+    export signal sum = total
+}
+
+// Two hops from the `after` to the send, so what is being tested is the walk rather than one
+// syntactic shape.
+task fn prime(sink: Sink) -> () {
+    await hand_off(sink)
+}
+
+task fn hand_off(sink: Sink) -> () {
+    await send(sink.absorbed, 1)
+}
+
+reactor Boot(sink: Sink) {
+    input ticked: () [capacity: 4, overflow: reject]
+
+    state n: I64 = 0
+
+    init {
+        n = loop { break 1 }
+        await send(sink.absorbed, 2)
+        after prime(sink)
+    }
+
+    // The second one. Nothing about its body is checked — there is no startup turn left for it to
+    // be, and reporting its contents would bury the reason.
+    init {
+        n = 2
+    }
+
+    on ticked() {
+        n = n + 1
+    }
+
+    export signal count = n
+}
+
+task fn main() -> () {
+    let sink = spawn reactor Sink()
+    let boot = spawn reactor Boot(sink: sink)
+    await send(boot.ticked, ())
+    await sleep(10)
+    print(latest(boot.count))
+}
